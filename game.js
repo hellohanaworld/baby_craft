@@ -40,12 +40,12 @@ const CONFIG = {
   MONSTER_COUNT: 28,
   MONSTER_RESPAWN_MS: 8000,
   AGGRO_RANGE: 4.5,       // 타일. 이 안에 들어오면 몬스터가 다가온다
+  BOSS_AGGRO_RANGE: 7,    // 용은 더 멀리서 알아챈다
   SAFE_RADIUS: 4,         // 타일. 집 주변은 몬스터가 못 들어오는 안전지대
   ATTACK_RANGE: 0.9,      // 타일. 근접 무기 사거리
   ARROW_SPEED: 10,        // 타일/초
   ARROW_RANGE: 6,         // 타일
   BOSS_AFTER_KILLS: 3,    // 몬스터를 이만큼 잡으면 보스 등장
-  BOSS_CARDS: 3,          // 보스를 잡으면 읽을 카드 수
 
   // 원격 여럿이 하기
   NET_SEND_MS: 100,       // 상태를 보내는 간격
@@ -1342,12 +1342,14 @@ const Monsters = {
   nextBossAt: CONFIG.BOSS_AFTER_KILLS,
 
   radius(m) { return (m.def.boss ? 0.55 : 0.3) * T; },
+  // 길 막힘 판정용 몸 크기 (용은 맞는 범위보다 작게 해서 한 칸 틈도 지나간다)
+  bodyRadius(m) { return (m.def.boss ? 0.42 : 0.3) * T; },
 
   safeZone(x, y) {
     return Math.hypot(x - (World.door.x * T + T / 2), y - (World.door.y * T + T / 2)) < CONFIG.SAFE_RADIUS * T;
   },
 
-  canStand(m, x, y) { return !this.safeZone(x, y) && World.canStand(x, y, this.radius(m)); },
+  canStand(m, x, y) { return !this.safeZone(x, y) && World.canStand(x, y, this.bodyRadius(m)); },
 
   // 집에서 멀고 플레이어와도 먼 곳
   spots(minFromHome) {
@@ -1426,20 +1428,21 @@ const Monsters = {
           const pd = Math.hypot(p.x - m.x, p.y - m.y);
           if (pd < d) { d = pd; dx = p.x - m.x; dy = p.y - m.y; }
         }
-        const speed = m.def.speed * T;
-        if (d < CONFIG.AGGRO_RANGE * T && d > 1) {
+        const speed = m.def.speed * T, boss = m.def.boss;
+        if (d < (boss ? CONFIG.BOSS_AGGRO_RANGE : CONFIG.AGGRO_RANGE) * T && d > 1) {
           vx = dx / d * speed;
           vy = dy / d * speed;
         } else {
           m.wanderT -= dt;
           if (m.wanderT <= 0) {
             m.wanderT = randFloat(1.2, 3);
-            const a = Math.random() * Math.PI * 2, go = Math.random() < 0.6;
+            const a = Math.random() * Math.PI * 2, go = boss || Math.random() < 0.6;
             m.dirX = go ? Math.cos(a) : 0;
             m.dirY = go ? Math.sin(a) : 0;
           }
-          vx = m.dirX * speed * 0.5;
-          vy = m.dirY * speed * 0.5;
+          const wander = boss ? 0.8 : 0.5;
+          vx = m.dirX * speed * wander;
+          vy = m.dirY * speed * wander;
         }
         if (Math.abs(vx) > 1) m.faceRight = vx > 0;
       }
@@ -1633,7 +1636,7 @@ const LOOKS = [
   { shirt: '#fdd835', hair: '#212121', pants: '#2e7d32', hat: null },
   { shirt: '#1e88e5', hair: '#bf360c', pants: '#212121', hat: { type: 'band', color: '#e53935' } },
 ];
-const STATUS_ICONS = { card: '📖', craft: '🔨', faint: '💫', end: '🏆' };
+const STATUS_ICONS = { card: '📖', craft: '🔨', faint: '💫' };
 
 // 다른 기기의 캐릭터: 받은 위치(tx, ty)로 부드럽게 따라간다
 function makeRemote() {
@@ -2491,7 +2494,7 @@ const Render = {
 // Game — 상태 관리 + 메인 루프
 // ============================================================
 const Game = {
-  state: 'loading', // loading → title → play ↔ card / craft / faint → end
+  state: 'loading', // loading → title → play ↔ card / craft / faint
   tapMode: false,
   tapReason: '',
   inventory: {},
@@ -2505,9 +2508,6 @@ const Game = {
   lookIndex: 0,
   playerName: '',
   kills: 0,
-  bossKills: 0,
-  cardsRead: 0,
-  startedAt: 0,
   wasOnDoor: false,
   lastTime: 0,
 
@@ -2541,11 +2541,9 @@ const Game = {
     Monsters.fill();
     this.renderInventory();
     this.renderHearts();
-    $('#btn-restart').addEventListener('click', () => location.reload());
     this.initMultiPanel();
     this.initLook();
     this.initName();
-    $('#btn-continue').addEventListener('click', () => this.continueGame());
 
     this.state = 'title';
     const btn = $('#btn-start');
@@ -2611,7 +2609,6 @@ const Game = {
     document.body.classList.add('playing');
     this.renderInventory();
     this.renderHearts();
-    this.startedAt = performance.now();
     this.state = 'play';
   },
 
@@ -2774,7 +2771,6 @@ const Game = {
   onAction() {
     if (this.state === 'title') { this.start(); return; }
     if (this.state === 'card') { Card.tapPass(); return; }
-    if (this.state === 'end') { this.continueGame(); return; }
     if (this.state === 'play' && Player.swingT <= 0.1) {
       Player.swingT = 0.25;
       if (this.heldBlock) { this.place(); return; }
@@ -2886,7 +2882,6 @@ const Game = {
     Input.reset();
     for (let i = 0; i < n; i++) {
       await Card.show(Words.pick(i === 0 && emoji ? { emoji } : {}));
-      this.cardsRead++;
     }
   },
 
@@ -2908,12 +2903,7 @@ const Game = {
     await delay(700); // 쓰러지는 모습을 잠깐 보여준다
     while (this.defeated.length) {
       const m = this.defeated.shift();
-      await this.showCards(m.def.boss ? CONFIG.BOSS_CARDS : 1, m.def.emoji);
-      if (m.def.boss) {
-        this.handlingDefeats = false;
-        this.victory();
-        return;
-      }
+      await this.showCards(1, m.def.emoji);
     }
     this.handlingDefeats = false;
 
@@ -2976,29 +2966,6 @@ const Game = {
     this.renderHearts();
     await this.showCards(1);
     Player.invulnT = CONFIG.SPAWN_INVULN_SEC;
-    this.state = 'play';
-  },
-
-  victory() {
-    this.state = 'end';
-    this.bossKills++;
-    const mins = Math.max(1, Math.round((performance.now() - this.startedAt) / 60000));
-    const total = this.kills + this.bossKills;
-    console.log(`[Game] 승리! 처치 ${total}, 카드 ${this.cardsRead}, ${mins}분`);
-    $('#end-title').textContent = PRAISE[Store.settings.lang === 'en' ? 'en' : 'ko'];
-    $('#end-stats').innerHTML = `<span>👾 ${total}</span><span>📖 ${this.cardsRead}</span><span>⏱️ ${mins}</span>`;
-    $('#end-overlay').classList.remove('hidden');
-    Sfx.success();
-    burst();
-    if (Store.settings.lang === 'en') Speech.speak('You beat the dragon!', 'en');
-    else Speech.speak(`${josa(BOSS.ko, '을', '를')} 물리쳤어요! 최고예요!`, 'ko');
-  },
-
-  // 같은 맵에서 계속: 몬스터는 계속 나오고, 몇 마리 더 잡으면 용이 다시 나온다 (Monsters.kill 참고)
-  continueGame() {
-    if (this.state !== 'end') return;
-    $('#end-overlay').classList.add('hidden');
-    Player.invulnT = CONFIG.INVULN_SEC;
     this.state = 'play';
   },
 
