@@ -322,52 +322,59 @@ body:not(.touch) #btn-weapon::after { content: 'Q'; }
   box-shadow: 0 10px 0 rgba(0, 0, 0, .3);
   animation: pop .3s cubic-bezier(.2, 1.4, .4, 1);
 }
-.craft-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-.craft-title { font-size: 48px; }
-.recipes { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+.craft-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.craft-title { font-size: 34px; }
+#btn-craft-close { min-width: 64px; min-height: 64px; width: 64px; height: 64px; font-size: 34px; }
+/* 한 줄에 레시피 하나, 넓으면 두 칸씩 */
+.recipes { display: grid; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); gap: 8px 10px; }
+.recipe-group { grid-column: 1 / -1; font: 900 20px/1 var(--font-ui); color: #5d4037; padding: 6px 4px 0; }
 .recipe {
   background: var(--card);
-  border: 4px solid #a1887f;
-  border-radius: 20px;
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
+  border: 3px solid #a1887f;
+  border-radius: 16px;
+  padding: 6px 8px;
+  display: grid;
+  grid-template-columns: 128px 1fr auto;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
-.recipe.ready { border-color: #43a047; box-shadow: 0 0 0 4px rgba(67, 160, 71, .3); }
+.recipe.ready { border-color: #43a047; box-shadow: 0 0 0 3px rgba(67, 160, 71, .3); }
 /* 키보드로 가리키는 것 */
-.recipe.sel, #btn-craft-close.sel { outline: 7px solid #ff3d00; outline-offset: 3px; box-shadow: 0 0 18px 6px rgba(255, 61, 0, .55); }
-.recipe.owned { opacity: .75; }
-.recipe-result { display: flex; align-items: center; gap: 10px; }
-.recipe-result .e { font-size: 64px; line-height: 1; }
-.recipe-result .names { display: flex; flex-direction: column; line-height: 1.05; }
-.recipe-result .n { font-size: 40px; font-weight: 900; color: var(--ink); }
-.recipe-result .s { font-size: 20px; color: #666; font-family: var(--font-en); }
-.recipe-result .power { font-size: 18px; }
-.recipe-needs { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 6px; }
+.recipe.sel, #btn-craft-close.sel { outline: 6px solid #ff3d00; outline-offset: 2px; box-shadow: 0 0 16px 5px rgba(255, 61, 0, .55); }
+.recipe.owned { opacity: .7; }
+.recipe-result { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.recipe-result .e { font-size: 40px; line-height: 1; }
+.recipe-result .names { display: flex; flex-direction: column; line-height: 1.1; min-width: 0; }
+.recipe-result .n { font-size: 24px; font-weight: 900; color: var(--ink); white-space: nowrap; }
+.recipe-result .power { font-size: 12px; color: #6d4c41; font-weight: 800; white-space: nowrap; }
+.recipe-needs { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
 .need {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  min-width: 70px;
-  padding: 6px 8px;
-  border-radius: 14px;
+  gap: 3px;
+  padding: 2px 6px 2px 4px;
+  border-radius: 12px;
   background: #eee;
-  border: 3px solid #ccc;
+  border: 2px solid #ccc;
 }
 .need.ok { background: #e8f5e9; border-color: #43a047; }
-.need .e { font-size: 34px; line-height: 1; }
-.need .n { font-size: 20px; font-weight: 800; color: var(--ink); }
-.need b { font-size: 18px; color: #888; }
+.need .e { font-size: 24px; line-height: 1; }
+.need .t { display: flex; flex-direction: column; line-height: 1.05; }
+.need .n { font-size: 12px; font-weight: 800; color: var(--ink); white-space: nowrap; }
+.need b { font-size: 14px; color: #888; }
 .need.ok b { color: #2e7d32; }
-.plus { font-size: 28px; font-weight: 900; color: #8d6e63; }
-.make { width: 100%; max-width: 220px; background: #ffca28; }
+.make { min-width: 60px; min-height: 60px; width: 60px; height: 60px; font-size: 30px; border-radius: 16px; background: #ffca28; }
 .recipe.ready .make { animation: glow 1s infinite; }
 .inv-slot.weapon { border-color: #f9a825; background: #fff8e1; }
 
 .recipe.locked .recipe-result { filter: grayscale(1); opacity: .6; }
-.lock { font-size: 30px; font-weight: 800; color: #6d4c41; padding: 10px; }
+.lock { font-size: 20px; font-weight: 800; color: #6d4c41; }
+/* 좁은 화면(폰 세로): 한 칸씩 */
+@media (max-width: 520px) {
+  .recipes { grid-template-columns: 1fr; }
+  .recipe { grid-template-columns: 104px 1fr auto; }
+  .recipe-result .n { font-size: 20px; }
+}
 
 /* ---------- 기절 / 승리 ---------- */
 .faint {
