@@ -39,8 +39,12 @@ const CONFIG = {
   TREE_HITS: 3,           // 맨손으로 나무를 캐는 데 필요한 횟수 (🪓 도끼는 한 번)
   ROCK_HITS: 5,           // 맨손으로 바위를 캐는 데 필요한 횟수 (🪓 도끼, 🗡️ 칼은 ROCK_HITS_TOOL 번)
   ROCK_HITS_TOOL: 2,
-  MONSTER_COUNT: 28,
-  MONSTER_RESPAWN_MS: 8000,
+  MONSTER_RESPAWN_MS: 8000, // 몇 마리씩 사는지는 MONSTERS 의 count
+  FLEE_RANGE: 3.5,          // 타일. 초식동물/물고기는 사람이나 육식동물이 이만큼 오면 도망간다
+  PET_FOLLOW: 1.3,        // 타일. 먹이를 받은 동물이 주인과 이만큼 떨어져 따라온다
+  PET_TELEPORT: 12,       // 타일. 주인과 이보다 멀어지면 (집에서 다시 시작 등) 주인 옆으로 온다
+  BITE_SEC: 1,            // 육식동물이 초식동물을 무는 간격
+  THROW_RANGE: 5,         // 타일. 먹이 던지는 거리
   AGGRO_RANGE: 4.5,       // 타일. 이 안에 들어오면 몬스터가 다가온다
   BOSS_AGGRO_RANGE: 7,    // 용은 더 멀리서 알아챈다
   SAFE_RADIUS: 4,         // 타일. 집 주변은 몬스터가 못 들어오는 안전지대
@@ -122,16 +126,56 @@ const RECIPES = [
   { result: 'torch',  needs: { wood: 1, stone: 1 },           unlock: 0, count: 2 },
 ];
 
-// 몬스터 (이름도 글자로 같이 보여준다. emoji 가 words.csv 와 같으면 처치 후 그 단어 카드가 나온다)
+// 지도 네 구역 (집은 가운데, 경계는 구불구불하게 이어진다). 구역마다 땅 색과 사는 동물이 다르다
+const REGION = { FOREST: 0, LAKE: 1, SWAMP: 2, MEADOW: 3 };
+const REGIONS = [
+  { emoji: '🌲', ko: '무서운 숲', en: 'Dark Forest' }, // 왼쪽 위: 나무가 빽빽, 육식동물
+  { emoji: '🏞️', ko: '호수',     en: 'Lakes' },       // 오른쪽 위: 큰 호수, 물고기
+  { emoji: '🍄', ko: '어두운 늪', en: 'Dark Swamp' },  // 왼쪽 아래: 어둡고 축축, 벌레
+  { emoji: '🌼', ko: '초원',     en: 'Meadow' },      // 오른쪽 아래: 꽃밭, 초식동물
+];
+// 땅 색 (풀 + 점, 물, 모래, 나뭇잎). DEFAULT 는 블록 그림 같은 구역 없는 그림
+const GROUND = {
+  DEFAULT: { grass: ['#5cb85c', '#4fa64f', '#6fcb6a'], water: ['#3b8de0', '#74b9f0'], sand: ['#e9d68f', '#d8c27a', '#f3e3a6'], leaf: ['#2e7d32', '#43a047', '#66bb6a'] },
+  [REGION.FOREST]: { grass: ['#4a9a48', '#3f8a3e', '#56a854'], water: ['#3b8de0', '#74b9f0'], sand: ['#e0cc85', '#cfb972', '#ead99c'], leaf: ['#1b5e20', '#2e7d32', '#43a047'] },
+  [REGION.LAKE]:   { grass: ['#5cb87a', '#4fa66c', '#6fcb8a'], water: ['#3b8de0', '#74b9f0'], sand: ['#e9d68f', '#d8c27a', '#f3e3a6'], leaf: ['#2e7d32', '#43a047', '#66bb6a'] },
+  [REGION.SWAMP]:  { grass: ['#4e6b48', '#435d3e', '#6b5a7a'], water: ['#4d7468', '#6b9488'], sand: ['#7d6b4c', '#6d5c40', '#8c7a58'], leaf: ['#33502f', '#3f6339', '#55744a'] },
+  [REGION.MEADOW]: { grass: ['#7ccc5c', '#6dbd4e', '#8fd96b'], water: ['#3b8de0', '#74b9f0'], sand: ['#f0df9a', '#e0cd85', '#f8ebb5'], leaf: ['#2e7d32', '#43a047', '#66bb6a'] },
+};
+
+// 동물 (이름도 글자로 같이 보여준다. emoji 가 words.csv 와 같으면 잡은 뒤 그 단어 카드가 나온다)
+//   region: 사는 구역 (거기서 생기고, 쫓아가지 않을 때는 그 구역 안을 돌아다닌다), count: 몇 마리
+//   hunts: 육식동물 (사람과 초식동물을 쫓는다), calm: 먼저 공격하지 않고 다가가면 도망간다
+//   (먹이를 맞으면 그 사람을 따라다닌다), swim: 물에서만 다닌다
 const MONSTERS = {
-  spider: { emoji: '🕷️', ko: '거미', en: 'spider', hp: 3, speed: 1.6, size: 24, drops: { string: 2 },          weight: 3 },
-  fox:    { emoji: '🦊', ko: '여우', en: 'fox',    hp: 4, speed: 1.9, size: 26, drops: { iron: 1, wood: 1 }, weight: 3 },
-  hippo:  { emoji: '🦛', ko: '하마', en: 'hippo',  hp: 5, speed: 1.3, size: 28, drops: { stone: 2 },          weight: 2 },
-  bear:   { emoji: '🐻', ko: '곰',   en: 'bear',   hp: 6, speed: 1.5, size: 28, drops: { iron: 2 },           weight: 2 },
+  // 🌲 무서운 숲
+  wolf:     { emoji: '🐺', ko: '늑대',   en: 'wolf',     hp: 4, speed: 2.0, size: 26, drops: { iron: 1 },            region: REGION.FOREST, count: 3, hunts: true },
+  fox:      { emoji: '🦊', ko: '여우',   en: 'fox',      hp: 4, speed: 1.9, size: 26, drops: { iron: 1, wood: 1 },   region: REGION.FOREST, count: 3, hunts: true },
+  bear:     { emoji: '🐻', ko: '곰',     en: 'bear',     hp: 6, speed: 1.5, size: 28, drops: { iron: 2 },            region: REGION.FOREST, count: 2, hunts: true },
+  tiger:    { emoji: '🐯', ko: '호랑이', en: 'tiger',    hp: 7, speed: 1.8, size: 28, drops: { iron: 2, wood: 1 },   region: REGION.FOREST, count: 2, hunts: true },
+  // 🏞️ 호수
+  fish:     { emoji: '🐟', ko: '물고기', en: 'fish',     hp: 2, speed: 1.6, size: 22, drops: { egg: 1 },             region: REGION.LAKE, count: 8, calm: true, swim: true },
+  blowfish: { emoji: '🐡', ko: '복어',   en: 'blowfish', hp: 3, speed: 1.2, size: 22, drops: { egg: 1, stone: 1 },   region: REGION.LAKE, count: 4, calm: true, swim: true },
+  hippo:    { emoji: '🦛', ko: '하마',   en: 'hippo',    hp: 5, speed: 1.3, size: 28, drops: { stone: 2 },           region: REGION.LAKE, count: 2 },
+  crab:     { emoji: '🦀', ko: '게',     en: 'crab',     hp: 3, speed: 1.5, size: 22, drops: { stone: 1 },           region: REGION.LAKE, count: 3 },
+  // 🍄 어두운 늪
+  spider:   { emoji: '🕷️', ko: '거미',   en: 'spider',   hp: 3, speed: 1.6, size: 24, drops: { string: 2 },          region: REGION.SWAMP, count: 4, hunts: true },
+  scorpion: { emoji: '🦂', ko: '전갈',   en: 'scorpion', hp: 4, speed: 1.6, size: 24, drops: { iron: 1, string: 1 }, region: REGION.SWAMP, count: 2, hunts: true },
+  ant:      { emoji: '🐜', ko: '개미',   en: 'ant',      hp: 2, speed: 2.2, size: 20, drops: { wood: 1 },            region: REGION.SWAMP, count: 3 },
+  bat:      { emoji: '🦇', ko: '박쥐',   en: 'bat',      hp: 2, speed: 2.4, size: 22, drops: { string: 1 },          region: REGION.SWAMP, count: 3 },
+  // 🌼 초원 (초식동물)
+  rabbit:   { emoji: '🐰', ko: '토끼',   en: 'rabbit',   hp: 2, speed: 2.6, size: 22, drops: { apple: 1 },           region: REGION.MEADOW, count: 3, calm: true },
+  sheep:    { emoji: '🐑', ko: '양',     en: 'sheep',    hp: 3, speed: 1.8, size: 26, drops: { string: 2 },          region: REGION.MEADOW, count: 3, calm: true },
+  cow:      { emoji: '🐄', ko: '소',     en: 'cow',      hp: 4, speed: 1.5, size: 28, drops: { milk: 2 },            region: REGION.MEADOW, count: 2, calm: true },
+  chicken:  { emoji: '🐔', ko: '닭',     en: 'hen',      hp: 2, speed: 2.0, size: 22, drops: { egg: 2 },             region: REGION.MEADOW, count: 3, calm: true },
+  pig:      { emoji: '🐖', ko: '돼지',   en: 'pig',      hp: 3, speed: 1.7, size: 26, drops: { apple: 1, grape: 1 }, region: REGION.MEADOW, count: 2, calm: true },
+  deer:     { emoji: '🦌', ko: '사슴',   en: 'deer',     hp: 3, speed: 2.6, size: 28, drops: { wood: 1 },            region: REGION.MEADOW, count: 2, calm: true },
 };
 const BOSS = { emoji: '🐉', ko: '용', en: 'dragon', hp: 12, speed: 1.4, size: 56, drops: {}, boss: true };
 
 const FACING = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
+// 맵 만드는 방법이 바뀌면 +1 (예전 저장의 바뀐 칸은 버린다)
+const WORLD_GEN = 2;
 
 // ============================================================
 // 유틸
@@ -1080,7 +1124,7 @@ const DIG = {
   [TILE.TORCH]: { gives: ['torch'], hand: 1 },
 };
 // 손에 들 수 있는 것: 무기 또는 놓을 수 있는 블록
-const holdable = id => !!WEAPONS[id] || !!(ITEMS[id] && ITEMS[id].tile);
+const holdable = id => !!WEAPONS[id] || !!(ITEMS[id] && (ITEMS[id].tile || ITEMS[id].kind === 'food'));
 const holdEmoji = id => (WEAPONS[id] || ITEMS[id] || WEAPONS.hand).emoji;
 
 // 맵 칸 그림 한 칸짜리 (블록 아이템 그림). 한 번 그려서 저장
@@ -1111,6 +1155,8 @@ const World = {
   base: null, // 만들었을 때의 맵 (바뀐 칸만 방에 기록하므로 원래 값이 필요하다)
   chunks: new Map(), // 그림 조각: 'cx,cy' → 캔버스 (맵이 커서 보이는 조각만 그린다)
   mini: null, // 작은 지도 그림 (한 칸 = 1px)
+  regions: null, // 칸마다 구역 번호 (REGION)
+  regionCenters: [], // 구역마다 가운데 칸 (동물이 구역 밖으로 나가면 이쪽으로 돌아온다)
   torches: [], // 🔥 횃불 위치 (px, 칸 가운데)
 
   generate(seed) {
@@ -1131,17 +1177,61 @@ const World = {
       }
     };
 
-    // 맵이 커져도 같은 빽빽함 (40x30 기준)
-    const k = W * H / 1200;
-    // 연못 (모래 테두리)
-    for (let i = 0; i < Math.round(2 * k); i++) {
-      const cx = randInt(5, W - 6), cy = randInt(5, H - 6), rx = randFloat(2, 5), ry = randFloat(1.5, 4);
-      blob(TILE.SAND, cx, cy, rx + 1.2, ry + 1.2);
-      blob(TILE.WATER, cx, cy, rx, ry);
+    // 네 구역: 가운데 십자 경계를 구불구불하게 (왼쪽 위 숲, 오른쪽 위 호수, 왼쪽 아래 늪, 오른쪽 아래 초원)
+    const ph = Array.from({ length: 4 }, () => randFloat(0, Math.PI * 2));
+    const midX = y => W / 2 + Math.sin(y * 0.09 + ph[0]) * 4 + Math.sin(y * 0.23 + ph[1]) * 2;
+    const midY = x => H / 2 + Math.sin(x * 0.08 + ph[2]) * 4 + Math.sin(x * 0.21 + ph[3]) * 2;
+    const reg = this.regions = new Uint8Array(W * H);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) reg[y * W + x] = (x >= midX(y) ? 1 : 0) + (y >= midY(x) ? 2 : 0);
+    this.regionCenters = [[W / 4, H / 4], [W * 3 / 4, H / 4], [W / 4, H * 3 / 4], [W * 3 / 4, H * 3 / 4]]
+      .map(([x, y]) => ({ x: Math.floor(x), y: Math.floor(y) }));
+    // 그 구역 안의 아무 칸 (가장자리 2칸은 빼고)
+    const pointIn = r => {
+      for (let i = 0; i < 200; i++) {
+        const x = randInt(2, W - 3), y = randInt(2, H - 3);
+        if (reg[y * W + x] === r) return { x, y };
+      }
+      return this.regionCenters[r];
+    };
+    const pond = (r, rx, ry) => {
+      const { x, y } = pointIn(r);
+      blob(TILE.SAND, x, y, rx + 1.2, ry + 1.2);
+      blob(TILE.WATER, x, y, rx, ry);
+    };
+
+    // 🏞️ 호수: 큰 호수 여러 개. 사이에 걸어갈 땅이 남게 서로 겹치지 않는다 (다리를 놓으면 건너갈 수 있다)
+    const lakes = [];
+    for (let i = 0; i < 300 && lakes.length < 16; i++) {
+      const { x, y } = pointIn(REGION.LAKE), rx = randFloat(3.5, 8), ry = randFloat(3, 6.5);
+      if (Math.hypot(x - W / 2, y - H / 2) < 12) continue; // 집 앞은 비운다
+      if (lakes.some(l => Math.abs(l.x - x) < l.rx + rx + 3.5 && Math.abs(l.y - y) < l.ry + ry + 3.5)) continue;
+      lakes.push({ x, y, rx, ry });
+      blob(TILE.SAND, x, y, rx + 1.2, ry + 1.2);
+      blob(TILE.WATER, x, y, rx, ry);
     }
-    for (let i = 0; i < Math.round(14 * k); i++) blob(TILE.TREE, randInt(2, W - 3), randInt(2, H - 3), randFloat(0.8, 3.2), randFloat(0.8, 3.2));
-    for (let i = 0; i < Math.round(6 * k); i++) blob(TILE.ROCK, randInt(2, W - 3), randInt(2, H - 3), randFloat(0.5, 1.6), randFloat(0.5, 1.6));
-    for (let i = 0; i < t.length; i++) if (t[i] === TILE.GRASS && rng() < 0.06) t[i] = TILE.FLOWER;
+    // 다른 구역의 연못 (🍄 늪은 작은 웅덩이가 많다)
+    for (let i = 0; i < 2; i++) pond(REGION.MEADOW, randFloat(2, 4), randFloat(1.5, 3));
+    pond(REGION.FOREST, randFloat(2, 3.5), randFloat(1.5, 3));
+    for (let i = 0; i < 12; i++) pond(REGION.SWAMP, randFloat(1, 2.5), randFloat(1, 2));
+
+    // 나무 / 바위 / 꽃: 🌲 숲은 나무가 빽빽, 🍄 늪은 바위가 많고, 🌼 초원은 꽃밭
+    const trees = [55, 12, 26, 8], rocks = [12, 8, 22, 5], flowers = [0.03, 0.05, 0.015, 0.16];
+    trees.forEach((n, r) => { for (let i = 0; i < n; i++) { const p = pointIn(r); blob(TILE.TREE, p.x, p.y, randFloat(0.8, 3.2), randFloat(0.8, 3.2)); } });
+    rocks.forEach((n, r) => { for (let i = 0; i < n; i++) { const p = pointIn(r); blob(TILE.ROCK, p.x, p.y, randFloat(0.5, 1.6), randFloat(0.5, 1.6)); } });
+    for (let i = 0; i < t.length; i++) if (t[i] === TILE.GRASS && rng() < flowers[reg[i]]) t[i] = TILE.FLOWER;
+
+    // 집에서 구역마다 가운데까지 구불구불한 숲길 (나무/바위만 치운다. 동물을 찾아가기 쉽게)
+    for (const c of this.regionCenters) {
+      const wob = randFloat(0, Math.PI * 2);
+      for (let s = 0; s <= 1; s += 0.01) {
+        const x = Math.round(W / 2 + (c.x - W / 2) * s + Math.sin(s * 9 + wob) * 3);
+        const y = Math.round(H / 2 + (c.y - H / 2) * s + Math.cos(s * 7 + wob) * 3);
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+          const i = (y + dy) * W + x + dx;
+          if (t[i] === TILE.TREE || t[i] === TILE.ROCK) t[i] = TILE.GRASS;
+        }
+      }
+    }
 
     // 테두리 나무
     for (let x = 0; x < W; x++) { set(x, 0, TILE.TREE); set(x, H - 1, TILE.TREE); }
@@ -1228,6 +1318,17 @@ const World = {
     return this.tiles[ty * this.w + tx];
   },
   tileAtPx(x, y) { return this.tile(Math.floor(x / T), Math.floor(y / T)); },
+  region(tx, ty) { return this.regions[clamp(ty, 0, this.h - 1) * this.w + clamp(tx, 0, this.w - 1)]; },
+  regionAtPx(x, y) { return this.region(Math.floor(x / T), Math.floor(y / T)); },
+
+  // 물고기가 있을 수 있는 곳: 몸이 모두 물(또는 다리 밑)
+  canSwim(x, y, r) {
+    for (const [dx, dy] of [[-r, -r], [r, -r], [-r, r], [r, r]]) {
+      const tt = this.tileAtPx(x + dx, y + dy);
+      if (tt !== TILE.WATER && tt !== TILE.BRIDGE) return false;
+    }
+    return true;
+  },
 
   canStand(x, y, r = CONFIG.PLAYER_RADIUS * T, blocking = BLOCKING) {
     for (const [dx, dy] of [[-r, -r], [r, -r], [-r, r], [r, r]]) {
@@ -1246,7 +1347,7 @@ const World = {
     const g = c.getContext('2d');
     g.translate(-cx * CHUNK * T, -cy * CHUNK * T);
     for (let y = cy * CHUNK; y < Math.min(this.h, (cy + 1) * CHUNK); y++) {
-      for (let x = cx * CHUNK; x < Math.min(this.w, (cx + 1) * CHUNK); x++) this.drawTile(g, x, y, this.tile(x, y));
+      for (let x = cx * CHUNK; x < Math.min(this.w, (cx + 1) * CHUNK); x++) this.drawTile(g, x, y, this.tile(x, y), this.region(x, y));
     }
     this.drawHouse(g); // 조각 밖은 잘린다
     this.chunks.set(key, c);
@@ -1263,12 +1364,16 @@ const World = {
 
   miniPixel(x, y) {
     if (!this.mini) return;
-    const g = this.mini.getContext('2d');
-    g.fillStyle = MINI_COLORS[this.tile(x, y)] || '#5cb85c';
+    const g = this.mini.getContext('2d'), tt = this.tile(x, y), gr = GROUND[this.region(x, y)];
+    // 풀/나무/물/모래는 구역 색으로 (작은 지도에서 네 구역이 보이게)
+    const own = { [TILE.GRASS]: gr.grass[0], [TILE.FLOWER]: gr.grass[2], [TILE.TREE]: gr.leaf[0], [TILE.WATER]: gr.water[0], [TILE.SAND]: gr.sand[0] }[tt];
+    g.fillStyle = own || MINI_COLORS[tt] || '#5cb85c';
     g.fillRect(x, y, 1, 1);
   },
 
-  drawTile(g, x, y, type) {
+  // region: 구역 땅 색 (없으면 기본 색. 블록 그림)
+  drawTile(g, x, y, type, region) {
+    const gr = GROUND[region] || GROUND.DEFAULT;
     const px = (gx, gy, color, w = 1, h = 1) => { g.fillStyle = color; g.fillRect(x * T + gx * P, y * T + gy * P, w * P, h * P); };
     const fill = color => { g.fillStyle = color; g.fillRect(x * T, y * T, T, T); };
     const specks = (n, colors, seed) => {
@@ -1277,7 +1382,7 @@ const World = {
           colors[Math.floor(hash(x, y, seed + i + 99) * colors.length)]);
       }
     };
-    const grass = () => { fill('#5cb85c'); specks(6, ['#4fa64f', '#6fcb6a'], 1); };
+    const grass = () => { fill(gr.grass[0]); specks(6, gr.grass.slice(1), 1); };
 
     switch (type) {
       case TILE.GRASS: grass(); break;
@@ -1292,16 +1397,16 @@ const World = {
       case TILE.TREE:
         grass();
         px(3, 5, '#795548', 2, 3);
-        px(1, 0, '#2e7d32', 6, 5);
-        px(0, 1, '#2e7d32', 8, 3);
-        for (let i = 0; i < 5; i++) px(1 + Math.floor(hash(x, y, 20 + i) * 6), Math.floor(hash(x, y, 30 + i) * 4) + 1, '#43a047');
-        px(2, 1, '#66bb6a');
+        px(1, 0, gr.leaf[0], 6, 5);
+        px(0, 1, gr.leaf[0], 8, 3);
+        for (let i = 0; i < 5; i++) px(1 + Math.floor(hash(x, y, 20 + i) * 6), Math.floor(hash(x, y, 30 + i) * 4) + 1, gr.leaf[1]);
+        px(2, 1, gr.leaf[2]);
         break;
       case TILE.WATER:
-        fill('#3b8de0');
-        for (let i = 0; i < 2; i++) px(Math.floor(hash(x, y, 40 + i) * 6), Math.floor(hash(x, y, 45 + i) * 8), '#74b9f0', 2, 1);
+        fill(gr.water[0]);
+        for (let i = 0; i < 2; i++) px(Math.floor(hash(x, y, 40 + i) * 6), Math.floor(hash(x, y, 45 + i) * 8), gr.water[1], 2, 1);
         break;
-      case TILE.SAND: fill('#e9d68f'); specks(5, ['#d8c27a', '#f3e3a6'], 60); break;
+      case TILE.SAND: fill(gr.sand[0]); specks(5, gr.sand.slice(1), 60); break;
       case TILE.ROCK:
         grass();
         px(0, 1, '#8d939b', 8, 7);
@@ -1327,7 +1432,7 @@ const World = {
         px(5.2, 4, '#f1c40f', 0.8, 0.8);
         break;
       case TILE.BRIDGE:
-        fill('#3b8de0');
+        fill(gr.water[0]);
         px(0, 0.5, '#5d4037', 8, 1);
         px(0, 6.5, '#5d4037', 8, 1);
         for (let k = 0; k < 4; k++) px(k * 2, 1.5, '#a0703f', 1.6, 5);
@@ -1499,47 +1604,62 @@ const Monsters = {
     return World.torches.some(t => Math.hypot(x - t.x, y - t.y) < CONFIG.TORCH_RADIUS * T);
   },
 
-  // 안전지대 안에 있던 몬스터(옆에 횃불을 놓은 경우)는 빠져나갈 때까지 안전지대를 무시한다
+  // 먹이를 주면 따라오는 동물 (물고기는 물 밖으로 못 나와서 안 된다)
+  tameable(m) { return !!m.def.calm && !m.def.swim; },
+
+  // 안전지대 안에 있던 몬스터(옆에 횃불을 놓은 경우)는 빠져나갈 때까지 안전지대를 무시한다.
+  // 초식동물은 사람처럼 문도 지나가고 안전지대(집)에도 들어간다. 물고기는 물에서만
   canStand(m, x, y) {
+    if (m.def.swim) return World.canSwim(x, y, this.bodyRadius(m));
+    if (m.def.calm) return World.canStand(x, y, this.bodyRadius(m));
     if (!this.safeZone(m.x, m.y) && this.safeZone(x, y)) return false;
     return World.canStand(x, y, this.bodyRadius(m), MONSTER_BLOCKING);
   },
 
-  // 집에서 멀고 플레이어와도 먼 곳
-  spots(minFromHome) {
-    return Items.spots.filter(s =>
+  // 집에서 멀고 플레이어와도 먼 곳. region: 그 구역 안만 (-1 이면 어디든), swim: 물 칸
+  spots(minFromHome, region = -1, swim = false) {
+    let list = Items.spots;
+    if (swim) {
+      list = [];
+      for (let i = 0; i < World.tiles.length; i++) if (World.tiles[i] === TILE.WATER) list.push({ x: i % World.w, y: Math.floor(i / World.w) });
+    }
+    return list.filter(s =>
+      (region < 0 || World.region(s.x, s.y) === region) &&
       Math.hypot(s.x - World.door.x, s.y - World.door.y) >= minFromHome &&
       !this.safeZone(s.x * T + T / 2, s.y * T + T / 2) &&
       !Multi.nearPlayer(s.x * T, s.y * T, 7 * T));
   },
 
-  randomType() {
-    const entries = Object.entries(MONSTERS);
-    let r = Math.random() * entries.reduce((sum, [, d]) => sum + d.weight, 0);
-    for (const [type, d] of entries) {
-      r -= d.weight;
-      if (r <= 0) return type;
-    }
-    return entries[0][0];
-  },
-
-  spawn(type, spot) {
+  spawn(type, spot, extra) {
     const def = type === 'boss' ? BOSS : MONSTERS[type];
-    this.list.push({
+    const m = {
       id: this.nextId++, type, def, x: spot.x * T + T / 2, y: spot.y * T + T / 2, hp: def.hp,
-      dirX: 0, dirY: 0, wanderT: 0, hitT: 0, knock: { x: 0, y: 0, t: 0 },
+      dirX: 0, dirY: 0, wanderT: 0, hitT: 0, biteT: 0, knock: { x: 0, y: 0, t: 0 },
       phase: Math.random() * Math.PI * 2, faceRight: false,
-    });
+      home: def.boss ? -1 : def.region, owner: null, ...extra,
+    };
+    this.list.push(m);
+    return m;
   },
 
-  spawnRandom() {
-    const spots = this.spots(CONFIG.SAFE_RADIUS + 5);
-    if (spots.length) this.spawn(this.randomType(), spots[Math.floor(Math.random() * spots.length)]);
+  // 그 동물이 사는 구역에 한 마리
+  spawnType(type) {
+    const def = MONSTERS[type];
+    const spots = this.spots(CONFIG.SAFE_RADIUS + 3, def.region, def.swim);
+    if (spots.length) this.spawn(type, spots[Math.floor(Math.random() * spots.length)]);
   },
 
   fill() {
-    for (let i = 0; i < CONFIG.MONSTER_COUNT; i++) this.spawnRandom();
+    for (const [type, def] of Object.entries(MONSTERS)) for (let i = 0; i < def.count; i++) this.spawnType(type);
   },
+
+  // 저장해 둔 내 동물: 집 앞에서 나를 따라온다
+  spawnPet(type) {
+    if (MONSTERS[type] && this.tameable({ def: MONSTERS[type] })) this.spawn(type, { x: World.door.x, y: World.door.y + 2 }, { owner: Multi.sid });
+  },
+
+  // 내가 데리고 있는 동물 (저장용)
+  myPets() { return this.list.filter(m => m.owner === Multi.sid).map(m => m.type); },
 
   spawnBoss() {
     this.bossSpawned = true;
@@ -1569,54 +1689,128 @@ const Monsters = {
 
   // 몬스터 움직임 (방장/혼자 기기만)
   update(dt) {
-    const targets = this.targets();
+    const people = this.targets();
+    // 육식동물이 노리는 초식동물 (안전지대 안은 못 들어가서 집에 있으면 안전하다)
+    const prey = this.list.filter(m => this.tameable(m) && !this.safeZone(m.x, m.y));
+    // 초식동물/물고기가 무서워하는 것: 놀고 있는 사람 + 육식동물
+    const scary = [...(Game.state === 'play' ? [Player] : []), ...Multi.activePeers(), ...this.list.filter(m => m.def.hunts)];
     for (const m of [...this.list]) {
       m.hitT = Math.max(0, m.hitT - dt);
-      let vx = 0, vy = 0;
+      m.biteT = Math.max(0, m.biteT - dt);
+      let v;
       if (m.knock.t > 0) {
         m.knock.t -= dt;
-        vx = m.knock.x;
-        vy = m.knock.y;
+        v = m.knock;
       } else {
-        let dx = 0, dy = 0, d = Infinity;
-        for (const p of targets) {
-          const pd = Math.hypot(p.x - m.x, p.y - m.y);
-          if (pd < d) { d = pd; dx = p.x - m.x; dy = p.y - m.y; }
-        }
-        const speed = m.def.speed * T, boss = m.def.boss;
-        if (d < (boss ? CONFIG.BOSS_AGGRO_RANGE : CONFIG.AGGRO_RANGE) * T && d > 1) {
-          vx = dx / d * speed;
-          vy = dy / d * speed;
-        } else {
-          m.wanderT -= dt;
-          if (m.wanderT <= 0) {
-            m.wanderT = randFloat(1.2, 3);
-            const a = Math.random() * Math.PI * 2, go = boss || Math.random() < 0.6;
-            m.dirX = go ? Math.cos(a) : 0;
-            m.dirY = go ? Math.sin(a) : 0;
-          }
-          const wander = boss ? 0.8 : 0.5;
-          vx = m.dirX * speed * wander;
-          vy = m.dirY * speed * wander;
-        }
-        if (Math.abs(vx) > 1) m.faceRight = vx > 0;
+        v = m.def.calm ? this.calmMove(m, dt, scary) : this.chase(m, dt, m.def.hunts ? [...people, ...prey] : people);
+        if (Math.abs(v.x) > 1) m.faceRight = v.x > 0;
       }
-      const nx = m.x + vx * dt;
+      const nx = m.x + v.x * dt;
       if (this.canStand(m, nx, m.y)) m.x = nx; else m.wanderT = 0;
-      const ny = m.y + vy * dt;
+      const ny = m.y + v.y * dt;
       if (this.canStand(m, m.x, ny)) m.y = ny; else m.wanderT = 0;
+      if (m.def.hunts) this.bite(m, prey);
     }
 
     const now = performance.now();
-    while (this.respawnQueue.length && this.respawnQueue[0] <= now) {
-      this.respawnQueue.shift();
-      this.spawnRandom();
+    for (const q of this.respawnQueue.filter(q => q.at <= now)) {
+      this.respawnQueue.splice(this.respawnQueue.indexOf(q), 1);
+      this.spawnType(q.type);
     }
   },
 
-  // 내 캐릭터가 몬스터에 닿으면 다친다 (각자 기기에서 자기 캐릭터만 확인)
+  // 가장 가까운 것 { t, dx, dy, d }
+  nearest(m, list) {
+    let best = null;
+    for (const t of list) {
+      if (t === m) continue;
+      const dx = t.x - m.x, dy = t.y - m.y, d = Math.hypot(dx, dy);
+      if (!best || d < best.d) best = { t, dx, dy, d };
+    }
+    return best;
+  },
+
+  // 몬스터/육식동물: 가까이 오면 쫓아가고, 아니면 돌아다닌다
+  chase(m, dt, targets) {
+    const n = this.nearest(m, targets), speed = m.def.speed * T;
+    if (n && n.d < (m.def.boss ? CONFIG.BOSS_AGGRO_RANGE : CONFIG.AGGRO_RANGE) * T && n.d > 1) {
+      return { x: n.dx / n.d * speed, y: n.dy / n.d * speed };
+    }
+    return this.wander(m, dt, m.def.boss ? 0.8 : 0.5);
+  },
+
+  // 초식동물/물고기: 먹이를 받았으면 주인을 따라가고, 아니면 무서운 게 가까이 오면 도망간다
+  calmMove(m, dt, scary) {
+    const speed = m.def.speed * T;
+    if (m.owner) {
+      const o = m.owner === Multi.sid ? Player : Multi.peers.get(m.owner);
+      if (!o || (o !== Player && !o.seen)) m.owner = null; // 주인이 나갔다
+      else {
+        const dx = o.x - m.x, dy = o.y - m.y, d = Math.hypot(dx, dy);
+        if (d > CONFIG.PET_TELEPORT * T) { m.x = o.x; m.y = o.y; return { x: 0, y: 0 }; }
+        if (d < CONFIG.PET_FOLLOW * T) return { x: 0, y: 0 };
+        // 멀수록 빨리 (사람보다 조금 빠르게까지)
+        const s = Math.min(CONFIG.PLAYER_SPEED * T * 1.1, Math.max(speed, d * 2));
+        return { x: dx / d * s, y: dy / d * s };
+      }
+    }
+    const n = this.nearest(m, scary);
+    if (n && n.d < CONFIG.FLEE_RANGE * T && n.d > 1) return { x: -n.dx / n.d * speed, y: -n.dy / n.d * speed };
+    return this.wander(m, dt, 0.4);
+  },
+
+  // 가끔 방향을 바꿔 돌아다닌다. 사는 구역 밖으로 나왔으면 구역 가운데 쪽으로 돌아간다
+  wander(m, dt, k) {
+    m.wanderT -= dt;
+    if (m.wanderT <= 0) {
+      m.wanderT = randFloat(1.2, 3);
+      let a = Math.random() * Math.PI * 2, go = m.def.boss || Math.random() < 0.6;
+      const c = m.home >= 0 && World.regionAtPx(m.x, m.y) !== m.home && World.regionCenters[m.home];
+      if (c) {
+        a = Math.atan2((c.y + 0.5) * T - m.y, (c.x + 0.5) * T - m.x) + randFloat(-0.6, 0.6);
+        go = true;
+      }
+      m.dirX = go ? Math.cos(a) : 0;
+      m.dirY = go ? Math.sin(a) : 0;
+    }
+    const speed = m.def.speed * T * k;
+    return { x: m.dirX * speed, y: m.dirY * speed };
+  },
+
+  // 육식동물이 초식동물에 닿으면 문다. 따라다니던 동물도 쓰러질 수 있다
+  bite(m, prey) {
+    if (m.biteT > 0) return;
+    const p = prey.find(a => this.list.includes(a) && Math.hypot(a.x - m.x, a.y - m.y) < this.radius(m) + this.radius(a) + 4);
+    if (!p) return;
+    m.biteT = CONFIG.BITE_SEC;
+    p.hp--;
+    p.hitT = 0.25;
+    const dx = p.x - m.x, dy = p.y - m.y, d = Math.hypot(dx, dy) || 1;
+    p.knock = { x: dx / d * 5 * T, y: dy / d * 5 * T, t: 0.15 };
+    Floaters.add(p.x, p.y - p.def.size * 0.6, '💥', 16);
+    if (Math.hypot(p.x - Player.x, p.y - Player.y) < 8 * T) Sfx.hit();
+    if (p.hp > 0) return;
+    this.list.splice(this.list.indexOf(p), 1);
+    for (let i = 0; i < 3; i++) Floaters.add(p.x + randFloat(-12, 12), p.y - randFloat(0, 16), '💨', 14);
+    this.respawnQueue.push({ at: performance.now() + CONFIG.MONSTER_RESPAWN_MS, type: p.type });
+    console.log(`[Monsters] ${m.def.ko}가 ${p.def.ko} 잡음`);
+    if (p.owner === Multi.sid) Game.onPetLost(p.def);
+    else if (p.owner) Multi.send('petGone', p.owner, p.type);
+  },
+
+  // 먹이를 맞은 초식동물이 그 사람을 따라온다 (방장/혼자 기기). 됐으면 true
+  tame(m, sid) {
+    if (!this.tameable(m) || m.owner) return false;
+    m.owner = sid;
+    m.hp = m.def.hp; // 배불러서 기운이 난다
+    for (let i = 0; i < 3; i++) Floaters.add(m.x + randFloat(-10, 10), m.y - m.def.size * 0.6 - randFloat(0, 10), '💕', 14);
+    return true;
+  },
+
+  // 내 캐릭터가 몬스터에 닿으면 다친다 (각자 기기에서 자기 캐릭터만 확인). 초식동물/물고기는 안 다치게 한다
   touch() {
     for (const m of this.list) {
+      if (m.def.calm) continue;
       if (Math.hypot(Player.x - m.x, Player.y - m.y) < this.radius(m) + CONFIG.PLAYER_RADIUS * T + 4) {
         Game.hurt(m);
         return;
@@ -1637,7 +1831,7 @@ const Monsters = {
     }
     const cx = Player.x + fx * 0.5 * T, cy = Player.y + fy * 0.5 * T;
     for (const m of [...this.list]) {
-      if (Math.hypot(m.x - cx, m.y - cy) < CONFIG.ATTACK_RANGE * T + this.radius(m)) this.damage(m, power);
+      if (!m.owner && Math.hypot(m.x - cx, m.y - cy) < CONFIG.ATTACK_RANGE * T + this.radius(m)) this.damage(m, power);
     }
     Multi.hitPeers(cx, cy, CONFIG.ATTACK_RANGE * T);
   },
@@ -1646,24 +1840,57 @@ const Monsters = {
   anyInFront() {
     const [fx, fy] = FACING[Player.dir];
     const cx = Player.x + fx * 0.5 * T, cy = Player.y + fy * 0.5 * T, r = CONFIG.ATTACK_RANGE * T;
-    return this.list.some(m => Math.hypot(m.x - cx, m.y - cy) < r + this.radius(m)) ||
+    return this.list.some(m => !m.owner && Math.hypot(m.x - cx, m.y - cy) < r + this.radius(m)) ||
       Multi.activePeers().some(p => Math.hypot(p.x - cx, p.y - cy) < r + CONFIG.PLAYER_RADIUS * T);
   },
 
-  // 내가 쏜 화살 (각자 기기에서 움직인다)
+  // 손에 든 먹이를 앞으로 던진다 (화살처럼 날아간다)
+  throwFood(type) {
+    const [fx, fy] = FACING[Player.dir];
+    this.arrows.push({ x: Player.x + fx * 10, y: Player.y - 8 + fy * 10, fx, fy, left: CONFIG.THROW_RANGE * T, food: type });
+  },
+
+  // 내가 쏜 화살 / 던진 먹이 (각자 기기에서 움직인다)
   updateArrows(dt) {
     for (const a of [...this.arrows]) {
-      const step = CONFIG.ARROW_SPEED * T * dt;
+      const step = CONFIG.ARROW_SPEED * T * dt * (a.food ? 0.6 : 1);
       a.x += a.fx * step;
       a.y += a.fy * step;
       a.left -= step;
       const tt = World.tileAtPx(a.x, a.y + 8);
       let done = a.left <= 0 || ARROW_BLOCKING.has(tt);
-      const target = !done && this.list.find(m => Math.hypot(m.x - a.x, m.y - (a.y + 8)) < this.radius(m) + 8);
+      if (a.food) {
+        // 먹이: 아직 주인 없는 초식동물에 맞으면 따라온다. 못 맞히면 떨어진 자리에 놓인다 (다시 주울 수 있다)
+        const target = !done && this.list.find(m => this.tameable(m) && !m.owner && Math.hypot(m.x - a.x, m.y - (a.y + 8)) < this.radius(m) + 10);
+        if (target) {
+          this.feed(target);
+          this.arrows.splice(this.arrows.indexOf(a), 1);
+        } else if (done) {
+          this.arrows.splice(this.arrows.indexOf(a), 1);
+          this.dropFood(a);
+        }
+        continue;
+      }
+      const target = !done && this.list.find(m => !m.owner && Math.hypot(m.x - a.x, m.y - (a.y + 8)) < this.radius(m) + 8);
       if (target) { this.damage(target, a.power); done = true; }
       else if (!done && Multi.hitPeers(a.x, a.y + 8, 8)) done = true;
       if (done) this.arrows.splice(this.arrows.indexOf(a), 1);
     }
+  },
+
+  // 먹이가 동물에 맞음. 손님 기기는 방장에게 알리고 답('tamed')을 기다린다
+  feed(m) {
+    if (Multi.isGuest) { Multi.send('feed', 'H', m.id); return; }
+    if (this.tame(m, Multi.sid)) Game.onPetTamed(m.def);
+  },
+
+  // 못 맞힌 먹이: 날아온 길을 되짚어 설 수 있는 곳에 떨어뜨린다 (물이나 나무 위에 놓이지 않게)
+  dropFood(a) {
+    let x = a.x, y = a.y + 8;
+    for (let i = 0; i < 40 && !World.canStand(x, y, 6); i++) { x -= a.fx * 6; y -= a.fy * 6; }
+    if (!World.canStand(x, y, 6)) { x = Player.x; y = Player.y; }
+    if (Multi.isGuest) Multi.send('drop', 'H', a.food, Math.round(x), Math.round(y));
+    else Items.add(a.food, x, y, { dropped: true });
   },
 
   // 내가 몬스터를 때림. 손님 기기는 방장에게 알리고, 맞는 모습만 먼저 보여준다
@@ -1700,7 +1927,7 @@ const Monsters = {
       this.nextBossAt = this.kills + CONFIG.BOSS_AFTER_KILLS;
     } else {
       this.kills++;
-      this.respawnQueue.push(performance.now() + CONFIG.MONSTER_RESPAWN_MS);
+      this.respawnQueue.push({ at: performance.now() + CONFIG.MONSTER_RESPAWN_MS, type: m.type });
     }
     console.log(`[Monsters] ${m.def.ko} 처치${byOther ? ` (${byOther.name})` : ''}`);
     if (!byOther) Game.onMonsterDefeated(m);
@@ -1976,7 +2203,7 @@ const Multi = {
         Player.swingT > 0 ? 1 : 0, Player.invulnT > 0 ? 1 : 0, Player.hitT > 0 ? 1 : 0],
       hp: Game.hearts,
       w: Game.held,
-      a: Monsters.arrows.map(a => [r(a.x), r(a.y), a.fx, a.fy]),
+      a: Monsters.arrows.map(a => [r(a.x), r(a.y), a.fx, a.fy, a.food || 0]),
       ev: this.events.map(([seq, , kind, ...args]) => [seq, kind, ...args]),
     };
   },
@@ -1991,7 +2218,7 @@ const Multi = {
     }
     return this.net.sendWorld({
       h: this.beat,
-      m: Monsters.list.map(m => [m.id, m.type, r(m.x), r(m.y), m.hp, m.faceRight ? 1 : 0, m.hitT > 0 ? 1 : 0]),
+      m: Monsters.list.map(m => [m.id, m.type, r(m.x), r(m.y), m.hp, m.faceRight ? 1 : 0, m.hitT > 0 ? 1 : 0, m.owner || 0]),
     });
   },
 
@@ -2026,7 +2253,7 @@ const Multi = {
     if (pos[6] && p.hitT <= 0) p.hitT = CONFIG.HIT_FLASH_SEC;
     p.hearts = Number.isInteger(d.hp) ? d.hp : CONFIG.MAX_HEARTS;
     p.held = holdable(d.w) ? d.w : 'hand';
-    p.arrows = (d.a || []).filter(Boolean).map(([x, y, fx, fy]) => ({ x, y, fx, fy }));
+    p.arrows = (d.a || []).filter(Boolean).map(([x, y, fx, fy, food]) => ({ x, y, fx, fy, food: ITEMS[food] ? food : null }));
     for (const ev of evs.sort((a, b) => a[0] - b[0])) {
       if (ev[0] <= p.lastSeq) continue;
       p.lastSeq = ev[0];
@@ -2051,6 +2278,16 @@ const Multi = {
       if (!def) return;
       Sfx.defeat();
       Game.onMonsterDefeated({ def });
+    } else if (kind === 'feed' && this.isHost) {
+      const m = Monsters.list.find(mm => mm.id === args[0]);
+      if (m && Monsters.tame(m, from.sid)) this.send('tamed', from.sid, m.type);
+    } else if (kind === 'tamed') {
+      if (MONSTERS[args[0]]) Game.onPetTamed(MONSTERS[args[0]]);
+    } else if (kind === 'petGone') {
+      if (MONSTERS[args[0]]) Game.onPetLost(MONSTERS[args[0]]);
+    } else if (kind === 'drop' && this.isHost) {
+      const [type, x, y] = args;
+      if (ITEMS[type] && ITEMS[type].kind === 'food') Items.add(type, x, y, { dropped: true });
     } else if (kind === 'hitP') {
       Game.hurt(from);
     } else if (kind === 'ko') {
@@ -2066,14 +2303,14 @@ const Multi = {
     if (!w) return;
     const seen = new Set();
     const hadBoss = !!Monsters.boss;
-    for (const [id, type, x, y, hp, face, hit] of (w.m || []).filter(Boolean)) {
+    for (const [id, type, x, y, hp, face, hit, owner] of (w.m || []).filter(Boolean)) {
       seen.add(id);
       let m = this.monsterMap.get(id);
       if (!m) {
         m = { id, type, def: type === 'boss' ? BOSS : MONSTERS[type], x, y, phase: id };
         this.monsterMap.set(id, m);
       }
-      Object.assign(m, { tx: x, ty: y, hp, faceRight: !!face });
+      Object.assign(m, { tx: x, ty: y, hp, faceRight: !!face, owner: owner || null });
       if (hit) m.hitT = 0.25;
     }
     for (const id of [...this.monsterMap.keys()]) if (!seen.has(id)) this.monsterMap.delete(id);
@@ -2250,11 +2487,26 @@ const Render = {
     this.drawCraftHint(time);
 
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    this.drawSwampDark();
     this.drawEdgeArrow(World.door.x * T + T / 2, World.door.y * T, '🏠', Craft.canMakeAny() ? '🔨' : '');
     const boss = Monsters.boss;
     if (boss) this.drawEdgeArrow(boss.x, boss.y, BOSS.emoji, '');
     for (const p of peers) this.drawEdgeArrow(p.x, p.y, '🧑', '', p.name);
     this.drawMinimap(peers, boss);
+  },
+
+  // 🍄 늪에 들어가면 화면이 어두워지고 내 둘레만 밝다 (천천히 바뀐다)
+  drawSwampDark() {
+    const want = Game.state !== 'title' && World.regionAtPx(Player.x, Player.y) === REGION.SWAMP &&
+      !Monsters.safeZone(Player.x, Player.y) ? 1 : 0; // 집 앞은 밝게
+    this.dark = (this.dark || 0) + (want - (this.dark || 0)) * 0.04;
+    if (this.dark < 0.01) return;
+    const ctx = this.ctx, px = (Player.x - this.camX) * this.scale, py = (Player.y - 10 - this.camY) * this.scale;
+    const g = ctx.createRadialGradient(px, py, T * this.scale * 1.2, px, py, T * this.scale * 3.8);
+    g.addColorStop(0, `rgba(20,10,40,${0.12 * this.dark})`);
+    g.addColorStop(1, `rgba(20,10,40,${0.62 * this.dark})`);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, this.cssW, this.cssH);
   },
 
   // 앞칸 표시: 캘 수 있으면 흰 테두리, 블록을 들고 있으면 놓을 자리 (놓을 수 있으면 초록, 없으면 빨강)
@@ -2298,6 +2550,18 @@ const Render = {
       g.strokeStyle = '#fff';
       g.stroke();
     };
+    // 구역 그림 (어디에 어떤 동물이 사는지)
+    g.globalAlpha = 0.9;
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.font = `${Math.round(14 * this.dpr)}px ${FONT_EMOJI}`;
+    REGIONS.forEach((r, i) => {
+      const c = World.regionCenters[i];
+      if (c) g.fillText(r.emoji, (c.x + 0.5) * k, (c.y + 0.5) * k);
+    });
+    g.globalAlpha = 1;
+    // 내 동물 (분홍 점)
+    for (const m of Monsters.list) if (m.owner === Multi.sid) dot(m.x, m.y, '#ec407a', 2);
     if (boss) dot(boss.x, boss.y, '#6a1b9a', 3.5);
     for (const p of peers) dot(p.x, p.y, '#e53935', 3);
     dot(Player.x, Player.y, '#1565c0', 3.5);
@@ -2306,7 +2570,7 @@ const Render = {
   drawMonster(m, time) {
     const ctx = this.ctx, s = m.def.size;
     const bob = Math.sin(time * 6 + m.phase) * 1.5;
-    ctx.fillStyle = 'rgba(0,0,0,.22)';
+    ctx.fillStyle = m.def.swim ? 'rgba(255,255,255,.35)' : 'rgba(0,0,0,.22)';
     ctx.beginPath();
     ctx.ellipse(m.x, m.y + s * 0.35, s * 0.4, s * 0.12, 0, 0, Math.PI * 2);
     ctx.fill();
@@ -2328,8 +2592,15 @@ const Render = {
     ctx.fillStyle = '#3e2723';
     ctx.fillRect(left - 2, top - 2, w + 2, ch + 4);
     for (let i = 0; i < max; i++) {
-      ctx.fillStyle = i < hp ? '#e53935' : '#e0e0e0';
+      ctx.fillStyle = i >= hp ? '#e0e0e0' : m.owner ? '#43a047' : '#e53935';
       ctx.fillRect(left + i * cw, top, cw - 2, ch);
+    }
+    // 먹이를 받아 따라오는 동물: 체력 막대 옆에 💕 (내 동물은 크게)
+    if (m.owner) {
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = `${m.owner === Multi.sid ? 12 : 9}px ${FONT_EMOJI}`;
+      ctx.fillText('💕', left + w + 9, top + ch / 2);
     }
 
     // 이름표
@@ -2354,6 +2625,18 @@ const Render = {
 
   drawArrow(a) {
     const ctx = this.ctx;
+    if (a.food) {
+      // 던진 먹이: 빙글빙글 돌며 날아간다
+      ctx.save();
+      ctx.translate(a.x, a.y);
+      ctx.rotate(performance.now() / 80);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = `14px ${FONT_EMOJI}`;
+      ctx.fillText(ITEMS[a.food].emoji, 0, 0);
+      ctx.restore();
+      return;
+    }
     ctx.save();
     ctx.translate(a.x, a.y);
     ctx.rotate(Math.atan2(a.fy, a.fx));
@@ -2697,6 +2980,7 @@ const Game = {
     Player.reset();
     Items.fill();
     Monsters.fill();
+    for (const type of (save && save.pets) || []) Monsters.spawnPet(type);
     this.renderInventory();
     this.renderHearts();
     this.initMultiPanel();
@@ -2801,7 +3085,9 @@ const Game = {
   // ---------- 저장: 이 기기의 세상(맵 + 바뀐 칸) + 가방 ----------
   // 여럿이 할 때 방장은 자기 세상을 그대로 방으로 열고, 손님은 가방만 저장한다 (손님의 세상은 그대로)
   loadSave(save) {
-    World.applyEdits(save.edits);
+    // 맵 만드는 방법이 바뀌기 전 저장이면 바뀐 칸은 버린다 (다른 맵에 붙으면 엉망이 된다). 가방은 그대로
+    if (save.gen === WORLD_GEN) World.applyEdits(save.edits);
+    else console.log('[Save] 맵이 새로 바뀌어서 예전에 바꾼 칸은 버림');
     const bag = save.bag || {};
     for (const [type, n] of Object.entries(bag.inventory || {})) if (ITEMS[type] && n > 0) this.inventory[type] = n;
     for (const id of bag.weapons || []) if (WEAPONS[id]) this.weapons.add(id);
@@ -2822,7 +3108,8 @@ const Game = {
     };
     if (Multi.isGuest) { Store.set(KEYS.world, { ...old, bag }); return; }
     Store.set(KEYS.world, {
-      seed: this.seed, edits: World.edits(), bag, monsterKills: Monsters.kills, nextBossAt: Monsters.nextBossAt,
+      gen: WORLD_GEN, seed: this.seed, edits: World.edits(), bag, pets: Monsters.myPets(),
+      monsterKills: Monsters.kills, nextBossAt: Monsters.nextBossAt,
     });
   },
 
@@ -2968,6 +3255,7 @@ const Game = {
     if (playing || Multi.online) Monsters.updateArrows(dt);
     if (this.state !== 'play') return; // 화살로 처치해서 상태가 바뀌었을 수 있다
     Items.pickup();
+    this.checkRegion(dt);
     Monsters.touch();
     if (this.state !== 'play') return; // 다쳐서 기절했을 수 있다
     if (!Multi.isGuest && !Monsters.bossSpawned && Monsters.kills >= Monsters.nextBossAt) Monsters.spawnBoss();
@@ -2982,6 +3270,7 @@ const Game = {
     if (this.state === 'play' && Player.swingT <= 0.1) {
       Player.swingT = 0.25;
       if (this.heldBlock) { this.place(); return; }
+      if (this.heldFood) { this.throwFood(); return; }
       Sfx.swing();
       const t = this.digTile();
       if (t && !Monsters.anyInFront()) this.digAt(t.x, t.y);
@@ -3066,6 +3355,41 @@ const Game = {
       }
     }
     this.renderInventory();
+  },
+
+  // 손에 든 먹이를 던진다. 다 던지면 원래 무기로
+  throwFood() {
+    const food = this.heldFood;
+    this.inventory[food]--;
+    if (!this.inventory[food]) this.picked = this.lastWeapon;
+    Sfx.swing();
+    Monsters.throwFood(food);
+    this.renderInventory();
+  },
+
+  onPetTamed(def) {
+    Sfx.pickup();
+    toast(`💕 ${def.emoji} ${itemNames(def).main}`);
+    if (Store.settings.lang === 'en') Speech.speak(`The ${def.en} likes you!`, 'en');
+    else Speech.speak(`${josa(def.ko, '이', '가')} 따라와요!`, 'ko');
+  },
+
+  onPetLost(def) {
+    Sfx.hurt();
+    toast(`💔 ${def.emoji} ${itemNames(def).main}`);
+  },
+
+  // 구역에 들어서면 이름을 잠깐 보여준다 (경계에서 왔다 갔다 해도 계속 뜨지 않게 0.8초 머물러야)
+  checkRegion(dt) {
+    // 집 앞(안전지대)은 네 구역이 만나는 곳이라 빼고, 나갈 때마다 다시 알려준다
+    if (Monsters.safeZone(Player.x, Player.y)) { this.regionNow = this.regionShown = -1; return; }
+    const r = World.regionAtPx(Player.x, Player.y);
+    if (r !== this.regionNow) { this.regionNow = r; this.regionT = 0; }
+    this.regionT += dt;
+    if (this.regionT > 0.8 && this.regionShown !== r) {
+      this.regionShown = r;
+      toast(`${REGIONS[r].emoji} ${itemNames(REGIONS[r]).main}`);
+    }
   },
 
   // 집에 들어가면: 체력 회복 → 제작대
@@ -3209,14 +3533,20 @@ const Game = {
     return def && def.tile && this.inventory[this.picked] > 0 ? this.picked : null;
   },
 
-  // 손에 든 것 (블록 또는 무기)
-  get held() { return this.heldBlock || this.weapon; },
+  // 손에 든 먹이 (없으면 null). ✋ 를 누르면 던진다
+  get heldFood() {
+    const def = ITEMS[this.picked];
+    return def && def.kind === 'food' && this.inventory[this.picked] > 0 ? this.picked : null;
+  },
+
+  // 손에 든 것 (블록, 먹이 또는 무기)
+  get held() { return this.heldBlock || this.heldFood || this.weapon; },
 
   // 고를 수 있는 것: 가진 무기 + 가방에 있는 블록
   ownedWeapons() {
     return [
       ...Object.keys(WEAPONS).filter(id => id === 'hand' || this.weapons.has(id)),
-      ...Object.keys(ITEMS).filter(id => ITEMS[id].tile && this.inventory[id] > 0),
+      ...Object.keys(ITEMS).filter(id => (ITEMS[id].tile || ITEMS[id].kind === 'food') && this.inventory[id] > 0),
     ];
   },
 
