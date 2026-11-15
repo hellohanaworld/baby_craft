@@ -511,3 +511,8 @@ body:not(.touch) #btn-weapon::after { content: 'Q'; }
   .card { gap: 1.5vmin; }
   #joy-base { width: 130px; height: 130px; }
 }
+
+/* 이모지 방향 바로잡기 (도끼날이 앞으로, 칼날이 위로) */
+.emo-flip, .emo-turn { display: inline-block; }
+.emo-flip { transform: scaleX(-1); }
+.emo-turn { transform: rotate(180deg); }

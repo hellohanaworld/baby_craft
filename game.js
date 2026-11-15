@@ -110,9 +110,10 @@ const ITEMS = {
 // 무기 (power 가 클수록 강하다. 제일 센 무기를 자동으로 든다)
 const WEAPONS = {
   hand:  { emoji: '✋', ko: '손',   en: 'hand',  power: 1 },
-  axe:   { emoji: '🪓', ko: '도끼', en: 'axe',   power: 2 },
+  // fix: 이모지가 놓인 방향 바로잡기 (flip: 좌우 뒤집기 → 도끼날이 앞으로, turn: 180도 → 칼날이 위로)
+  axe:   { emoji: '🪓', ko: '도끼', en: 'axe',   power: 2, fix: 'flip' },
   bow:   { emoji: '🏹', ko: '활',   en: 'bow',   power: 3 },
-  sword: { emoji: '🗡️', ko: '칼',   en: 'sword', power: 4 },
+  sword: { emoji: '🗡️', ko: '칼',   en: 'sword', power: 4, fix: 'turn' },
 };
 
 // 제작대 레시피 (집 안). unlock: 몬스터를 이만큼 잡아야 열린다. 무기는 한 번만, 블록은 몇 번이든 (count 개씩)
@@ -1145,7 +1146,8 @@ function tileIcon(name) {
 
 // 화면(HTML)에 쓰는 아이템 그림: 블록은 맵 칸 그림, 나머지는 이모지
 function iconHtml(def) {
-  return def.tile ? `<img class="tile-icon" src="${tileIcon(def.tile).url}" alt="">` : def.emoji;
+  if (def.tile) return `<img class="tile-icon" src="${tileIcon(def.tile).url}" alt="">`;
+  return def.fix ? `<span class="emo-${def.fix}">${def.emoji}</span>` : def.emoji;
 }
 
 const World = {
@@ -2815,9 +2817,12 @@ const Render = {
       ctx.textBaseline = 'middle';
       ctx.fillStyle = '#000';
       ctx.font = `15px ${FONT_EMOJI}`;
-      const block = ITEMS[held] && ITEMS[held].tile;
-      if (block) ctx.drawImage(tileIcon(block).canvas, -8, -12, 16, 16);
-      else ctx.fillText(holdEmoji(held), 0, -4);
+      const block = ITEMS[held] && ITEMS[held].tile, fix = WEAPONS[held] && WEAPONS[held].fix;
+      ctx.translate(0, -4);
+      if (fix === 'flip') ctx.scale(-1, 1);
+      if (fix === 'turn') ctx.rotate(Math.PI);
+      if (block) ctx.drawImage(tileIcon(block).canvas, -8, -8, 16, 16);
+      else ctx.fillText(holdEmoji(held), 0, 0);
       ctx.restore();
     }
 
@@ -3471,7 +3476,7 @@ const Game = {
       if (r.unlock > 0 && this.kills >= r.unlock && !this.unlockShown.has(r.result)) {
         this.unlockShown.add(r.result);
         const w = WEAPONS[r.result];
-        toast(`🔓 ${w.emoji} ${itemNames(w).main}`);
+        toast(`🔓 ${iconHtml(w)} ${itemNames(w).main}`);
       }
     }
     this.state = 'play';
@@ -3604,7 +3609,7 @@ const Game = {
       const btn = document.createElement('button');
       const def = WEAPONS[id] || ITEMS[id];
       btn.className = `big-btn weapon-choice${id === this.held ? ' on' : ''}`;
-      btn.innerHTML = ITEMS[id] ? `${iconHtml(def)}<b>${this.inventory[id]}</b>` : def.emoji;
+      btn.innerHTML = ITEMS[id] ? `${iconHtml(def)}<b>${this.inventory[id]}</b>` : iconHtml(def);
       btn.setAttribute('aria-label', def.en);
       btn.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); this.setWeapon(id); });
       picker.appendChild(btn);
