@@ -210,8 +210,64 @@ body.touch #controls { display: block; }
 #btn-pass { background: #e8f5e9; border-color: #43a047; }
 .card.follow-mode #btn-pass { animation: glow 1s infinite; }
 
-.stars { position: fixed; inset: 0; pointer-events: none; z-index: 45; }
+.stars { position: fixed; inset: 0; pointer-events: none; z-index: 60; }
 .star { position: absolute; left: 50%; top: 45%; font-size: 52px; animation: burst 1.3s ease-out forwards; }
+
+/* ---------- 제작대 ---------- */
+#craft-overlay { background: rgba(62, 39, 35, .6); }
+.craft {
+  width: min(96vw, 1000px);
+  max-height: 94vh;
+  overflow-y: auto;
+  touch-action: pan-y;
+  background: #d7b48a;
+  border: 6px solid var(--wood);
+  border-radius: 28px;
+  padding: 14px;
+  box-shadow: 0 10px 0 rgba(0, 0, 0, .3);
+  animation: pop .3s cubic-bezier(.2, 1.4, .4, 1);
+}
+.craft-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.craft-title { font-size: 48px; }
+.recipes { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+.recipe {
+  background: var(--card);
+  border: 4px solid #a1887f;
+  border-radius: 20px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+.recipe.ready { border-color: #43a047; box-shadow: 0 0 0 4px rgba(67, 160, 71, .3); }
+.recipe.owned { opacity: .75; }
+.recipe-result { display: flex; align-items: center; gap: 10px; }
+.recipe-result .e { font-size: 64px; line-height: 1; }
+.recipe-result .names { display: flex; flex-direction: column; line-height: 1.05; }
+.recipe-result .n { font-size: 40px; font-weight: 900; color: var(--ink); }
+.recipe-result .s { font-size: 20px; color: #666; font-family: var(--font-en); }
+.recipe-result .power { font-size: 18px; }
+.recipe-needs { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 6px; }
+.need {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 70px;
+  padding: 6px 8px;
+  border-radius: 14px;
+  background: #eee;
+  border: 3px solid #ccc;
+}
+.need.ok { background: #e8f5e9; border-color: #43a047; }
+.need .e { font-size: 34px; line-height: 1; }
+.need .n { font-size: 20px; font-weight: 800; color: var(--ink); }
+.need b { font-size: 18px; color: #888; }
+.need.ok b { color: #2e7d32; }
+.plus { font-size: 28px; font-weight: 900; color: #8d6e63; }
+.make { width: 100%; max-width: 220px; background: #ffca28; }
+.recipe.ready .make { animation: glow 1s infinite; }
+.inv-slot.weapon { border-color: #f9a825; background: #fff8e1; }
 
 /* ---------- 시작 화면 ---------- */
 #title {

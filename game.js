@@ -59,6 +59,21 @@ const ITEMS = {
   egg:    { emoji: '🥚', ko: '알',   en: 'egg',    kind: 'food',     weight: 1 },
 };
 
+// 무기 (power 가 클수록 강하다. 제일 센 무기를 자동으로 든다)
+const WEAPONS = {
+  hand:  { emoji: '✋', ko: '손',   en: 'hand',  power: 1 },
+  axe:   { emoji: '🪓', ko: '도끼', en: 'axe',   power: 2 },
+  bow:   { emoji: '🏹', ko: '활',   en: 'bow',   power: 3 },
+  sword: { emoji: '🗡️', ko: '칼',   en: 'sword', power: 4 },
+};
+
+// 제작대 레시피 (집 안)
+const RECIPES = [
+  { result: 'axe',   needs: { wood: 2, stone: 1 } },
+  { result: 'bow',   needs: { wood: 1, string: 2 } },
+  { result: 'sword', needs: { iron: 2, stone: 1, wood: 1 } },
+];
+
 // ============================================================
 // 유틸
 // ============================================================
@@ -73,6 +88,31 @@ function hash(x, y, s) {
   let h = Math.imul(x, 374761393) ^ Math.imul(y, 668265263) ^ Math.imul(s, 1442695041);
   h = Math.imul(h ^ (h >>> 13), 1274126177);
   return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+
+// 받침에 맞는 조사: josa('도끼', '을', '를') → '도끼를', josa('칼', '을', '를') → '칼을'
+function josa(word, withBatchim, without) {
+  const c = word.charCodeAt(word.length - 1);
+  if (c < 0xAC00 || c > 0xD7A3) return word + without;
+  return word + ((c - 0xAC00) % 28 ? withBatchim : without);
+}
+
+// 별/반짝이 터지는 칭찬 연출
+function burst() {
+  const layer = $('#stars');
+  const icons = ['⭐', '🌟', '✨', '💖', '🎉'];
+  for (let i = 0; i < 16; i++) {
+    const s = document.createElement('span');
+    s.className = 'star';
+    s.textContent = icons[i % icons.length];
+    const ang = (i / 16) * Math.PI * 2 + Math.random() * 0.4;
+    const dist = Math.min(innerWidth, innerHeight) * randFloat(0.3, 0.5);
+    s.style.setProperty('--tx', `${Math.cos(ang) * dist}px`);
+    s.style.setProperty('--ty', `${Math.sin(ang) * dist}px`);
+    s.style.setProperty('--rot', `${randInt(-180, 180)}deg`);
+    layer.appendChild(s);
+    setTimeout(() => s.remove(), 1400);
+  }
 }
 
 function toast(html) {
@@ -542,7 +582,7 @@ const Card = {
     this.el = {
       overlay: $('#card-overlay'), card: $('#card'), word: $('#card-word'), reveal: $('#card-reveal'),
       praise: $('#card-praise'), follow: $('#card-follow'), speaker: $('#btn-speaker'), mic: $('#mic'),
-      pass: $('#btn-pass'), stars: $('#stars'), heard: $('#card-heard'), status: $('#card-status'),
+      pass: $('#btn-pass'), heard: $('#card-heard'), status: $('#card-status'),
     };
     this.el.speaker.addEventListener('click', () => this.sayWord());
     this.el.pass.addEventListener('click', () => this.tapPass());
@@ -751,7 +791,7 @@ const Card = {
     e.praise.textContent = PRAISE[this.word.lang];
     this.fitWord(0.55);
     Sfx.success();
-    this.burst();
+    burst();
     const praise = Speech.speak(`${this.word.word}! ${PRAISE[this.word.lang]}`, this.word.lang);
     await Promise.all([praise, delay(CONFIG.SUCCESS_SHOW_MS)]);
     this.close({ method, tries: this.tries });
@@ -766,21 +806,6 @@ const Card = {
     if (resolve) resolve(result);
   },
 
-  burst() {
-    const icons = ['⭐', '🌟', '✨', '💖', '🎉'];
-    for (let i = 0; i < 16; i++) {
-      const s = document.createElement('span');
-      s.className = 'star';
-      s.textContent = icons[i % icons.length];
-      const ang = (i / 16) * Math.PI * 2 + Math.random() * 0.4;
-      const dist = Math.min(innerWidth, innerHeight) * randFloat(0.3, 0.5);
-      s.style.setProperty('--tx', `${Math.cos(ang) * dist}px`);
-      s.style.setProperty('--ty', `${Math.sin(ang) * dist}px`);
-      s.style.setProperty('--rot', `${randInt(-180, 180)}deg`);
-      this.el.stars.appendChild(s);
-      setTimeout(() => s.remove(), 1400);
-    }
-  },
 
   log(heard, r, kind) {
     Store.logAttempt({
@@ -788,6 +813,79 @@ const Card = {
       score: r ? Number(r.score.toFixed(2)) : null,
       pass: r ? r.pass : kind !== 'no-match',
     });
+  },
+};
+
+// ============================================================
+// Craft — 집 안 제작대: 그림 + 글자 레시피를 보고 🔨 을 눌러 무기를 만든다
+// ============================================================
+const Craft = {
+  el: null,
+  open: false,
+  resolve: null,
+
+  init() {
+    this.el = { overlay: $('#craft-overlay'), list: $('#recipes') };
+    $('#btn-craft-close').addEventListener('click', () => this.close());
+    this.el.list.addEventListener('click', e => {
+      const btn = e.target.closest('button[data-recipe]');
+      if (btn) this.make(RECIPES[Number(btn.dataset.recipe)]);
+    });
+    addEventListener('keydown', e => { if (this.open && e.code === 'Escape') this.close(); });
+  },
+
+  has(type, n) { return (Game.inventory[type] || 0) >= n; },
+  canMake(r) { return !Game.weapons.has(r.result) && Object.entries(r.needs).every(([type, n]) => this.has(type, n)); },
+  canMakeAny() { return RECIPES.some(r => this.canMake(r)); },
+
+  show() {
+    this.open = true;
+    this.render();
+    this.el.overlay.classList.remove('hidden');
+    return new Promise(res => { this.resolve = res; });
+  },
+
+  render() {
+    this.el.list.innerHTML = RECIPES.map((r, i) => {
+      const w = WEAPONS[r.result], names = itemNames(w);
+      const owned = Game.weapons.has(r.result), ready = this.canMake(r);
+      const needs = Object.entries(r.needs).map(([type, n]) => {
+        const def = ITEMS[type], have = Math.min(Game.inventory[type] || 0, n);
+        return `<div class="need${have >= n ? ' ok' : ''}"><span class="e">${def.emoji}</span>` +
+          `<span class="n">${itemNames(def).main}</span><b>${have}/${n}</b></div>`;
+      }).join('<span class="plus">+</span>');
+      return `<div class="recipe${owned ? ' owned' : ''}${ready ? ' ready' : ''}">
+        <div class="recipe-result"><span class="e">${w.emoji}</span>
+          <span class="names"><span class="n">${names.main}</span>${names.sub ? `<span class="s">${names.sub}</span>` : ''}</span>
+          <span class="power">${'⭐'.repeat(w.power)}</span></div>
+        <div class="recipe-needs">${needs}</div>
+        <button class="big-btn make" data-recipe="${i}" ${ready ? '' : 'disabled'}>${owned ? '✅' : '🔨'}</button>
+      </div>`;
+    }).join('');
+  },
+
+  make(r) {
+    if (!r || !this.canMake(r)) return;
+    for (const [type, n] of Object.entries(r.needs)) Game.inventory[type] -= n;
+    Game.weapons.add(r.result);
+    const w = WEAPONS[r.result], { main } = itemNames(w);
+    console.log(`[Craft] ${w.ko} 제작 (power ${w.power})`);
+    Sfx.success();
+    burst();
+    toast(`${w.emoji} ${main}!`);
+    if (Store.settings.lang === 'en') Speech.speak(`${w.en}!`, 'en');
+    else Speech.speak(`${josa(w.ko, '을', '를')} 만들었어요!`, 'ko');
+    Game.renderInventory();
+    this.render();
+  },
+
+  close() {
+    if (!this.open) return;
+    this.open = false;
+    this.el.overlay.classList.add('hidden');
+    const resolve = this.resolve;
+    this.resolve = null;
+    if (resolve) resolve();
   },
 };
 
@@ -1199,6 +1297,7 @@ const Render = {
     const drawables = Items.list.map(it => ({ y: it.y, draw: () => this.drawItem(it, time) }));
     drawables.push({ y: Player.y, draw: () => this.drawPlayer() });
     drawables.sort((a, b) => a.y - b.y).forEach(d => d.draw());
+    this.drawCraftHint(time);
 
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     this.drawHomeArrow();
@@ -1307,6 +1406,38 @@ const Render = {
       ctx.arc(x, y - 10, 20, ang - 0.9, ang + 0.9);
       ctx.stroke();
     }
+
+    // 손에 든 무기 (휘두르면 앞으로 돌아간다)
+    if (Game.weapon !== 'hand') {
+      const side = dir === 'left' ? -1 : 1;
+      const swing = Player.swingT > 0 ? 1 - Player.swingT / 0.25 : 0;
+      ctx.save();
+      ctx.translate(x + side * 11, y - 9);
+      ctx.rotate(side * (-0.5 + swing * 1.8));
+      ctx.scale(side, 1);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#000';
+      ctx.font = `15px ${FONT_EMOJI}`;
+      ctx.fillText(WEAPONS[Game.weapon].emoji, 0, -4);
+      ctx.restore();
+    }
+  },
+
+  // 만들 수 있는 무기가 있으면 집 위에 🔨 가 통통 튄다
+  drawCraftHint(time) {
+    if (!Craft.canMakeAny()) return;
+    const ctx = this.ctx;
+    const x = World.door.x * T + T / 2, y = World.house.y * T - 10 + Math.sin(time * 5) * 4;
+    ctx.fillStyle = 'rgba(255,255,255,.9)';
+    ctx.beginPath();
+    ctx.arc(x, y, 13, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#000';
+    ctx.font = `16px ${FONT_EMOJI}`;
+    ctx.fillText('🔨', x, y + 1);
   },
 
   // 집이 화면 밖에 있으면 가장자리에 🏠 화살표
@@ -1343,6 +1474,7 @@ const Render = {
     ctx.textBaseline = 'middle';
     ctx.font = `32px ${FONT_EMOJI}`;
     ctx.fillText('🏠', ax, ay + 2);
+    if (Craft.canMakeAny()) ctx.fillText('🔨', ax + 26, ay - 24);
   },
 };
 
@@ -1350,10 +1482,11 @@ const Render = {
 // Game — 상태 관리 + 메인 루프
 // ============================================================
 const Game = {
-  state: 'loading', // loading → title → play ↔ card
+  state: 'loading', // loading → title → play ↔ card → craft
   tapMode: false,
   tapReason: '',
   inventory: {},
+  weapons: new Set(),
   wasOnDoor: false,
   lastTime: 0,
 
@@ -1362,6 +1495,7 @@ const Game = {
     console.log('[Game] 설정', Store.settings);
     Speech.init();
     Card.init();
+    Craft.init();
     Input.init();
     Render.init();
 
@@ -1454,16 +1588,25 @@ const Game = {
     }
   },
 
-  // 1단계: 집에 들어가면 연습용 단어 카드 (2단계부터는 처치/기절 때)
+  // 집에 들어가면: 단어 카드(전투가 생기기 전까지 임시) → 제작대
   async enterHome() {
     this.state = 'card';
     Input.reset();
     Sfx.door();
     await delay(250);
     await Card.show(Words.pick());
+    this.state = 'craft';
+    await Craft.show();
     Player.reset();
     this.wasOnDoor = false;
     this.state = 'play';
+  },
+
+  // 가진 무기 중 제일 센 것
+  get weapon() {
+    let best = 'hand';
+    for (const id of this.weapons) if (WEAPONS[id].power > WEAPONS[best].power) best = id;
+    return best;
   },
 
   addItem(type) {
@@ -1478,9 +1621,20 @@ const Game = {
   renderInventory(bumpType) {
     const inv = $('#inventory');
     inv.innerHTML = '';
+    // 들고 있는 무기 (✋ 버튼 그림도 같이 바꾼다)
+    const w = WEAPONS[this.weapon];
+    $('#btn-action').textContent = w.emoji;
+    if (this.weapon !== 'hand') {
+      const { main, sub } = itemNames(w);
+      const slot = document.createElement('div');
+      slot.className = 'inv-slot weapon';
+      slot.innerHTML = `<span class="e">${w.emoji}</span><span class="names"><span class="n">${main}</span>` +
+        `${sub ? `<span class="s">${sub}</span>` : ''}</span>`;
+      inv.appendChild(slot);
+    }
     const owned = Object.keys(ITEMS).filter(type => this.inventory[type] > 0);
     if (!owned.length) {
-      inv.innerHTML = '<div class="inv-empty">🎒</div>';
+      if (this.weapon === 'hand') inv.innerHTML = '<div class="inv-empty">🎒</div>';
       return;
     }
     for (const type of owned) {
@@ -1495,6 +1649,6 @@ const Game = {
 };
 
 // 콘솔 디버깅용: BC.Judge.judge('나무', ['나모']), BC.Game.enterHome() 등
-window.BC = { CONFIG, Store, Words, Judge, Speech, Card, World, Items, Player, Game };
+window.BC = { CONFIG, Store, Words, Judge, Speech, Card, Craft, World, Items, Player, Game };
 
 Game.init();
