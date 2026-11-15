@@ -94,8 +94,17 @@ button { font-family: inherit; color: inherit; }
 .inv-empty { font-size: 34px; opacity: .7; }
 
 /* ---------- 터치 조작 ---------- */
+/* 버튼은 모든 기기에 보인다 (마우스로도 누를 수 있게). 조이스틱은 터치 기기에서만 */
 #controls { position: fixed; inset: 0; z-index: 20; pointer-events: none; display: none; }
-body.touch #controls { display: block; }
+body.playing #controls { display: block; }
+body:not(.touch) #joystick-zone { display: none; }
+/* PC: 버튼 아래에 키 이름 */
+body:not(.touch) #btn-action::after, body:not(.touch) #btn-weapon::after {
+  position: absolute; left: 50%; bottom: -24px; transform: translateX(-50%);
+  font: 900 14px/1 var(--font-ui); color: #fff; text-shadow: 0 1px 3px rgba(0, 0, 0, .7); white-space: nowrap;
+}
+body:not(.touch) #btn-action::after { content: 'Space'; }
+body:not(.touch) #btn-weapon::after { content: 'Q'; }
 #joystick-zone { position: absolute; left: 0; bottom: 0; width: 50%; height: 70%; pointer-events: auto; }
 #joy-base {
   position: absolute;
