@@ -36,7 +36,7 @@ const CONFIG = {
   SUCCESS_SHOW_MS: 1600,  // 칭찬 화면 최소 표시 시간 (칭찬 음성이 끝나면 바로 다음으로)
 
   LOG_LIMIT: 300,
-  DEFAULT_SETTINGS: { lang: 'both', maxLevel: 2, stt: true, strictness: 'normal' },
+  DEFAULT_SETTINGS: { lang: 'ko', maxLevel: 2, stt: true, strictness: 'normal' },
 };
 
 const LANG_CODE = { ko: 'ko-KR', en: 'en-US' };
@@ -434,11 +434,12 @@ const Speech = {
     });
   },
 
-  // 한 번 듣기. stop() 하면 이후 이벤트는 모두 무시된다
+  // 계속 듣기 (말할 때마다 결과가 온다). stop() 하면 이후 이벤트는 모두 무시된다
+  // 한 번 듣고 끝나는 방식은 다시 켜지는 사이에 한 말을 놓치기 쉬워서 continuous 로 둔다
   listen(lang, h) {
     const rec = new this.SR();
     rec.lang = LANG_CODE[lang];
-    rec.continuous = false;
+    rec.continuous = true;
     rec.interimResults = true; // 말하는 도중 글자를 보여주고, 맞으면 바로 통과
     rec.maxAlternatives = CONFIG.MAX_ALTERNATIVES;
     let live = true;
@@ -447,9 +448,14 @@ const Speech = {
     rec.onsoundstart = guard(() => h.onSound());
     rec.onspeechstart = guard(() => h.onSound());
     rec.onresult = guard(e => {
+      // 이번에 말한 부분(resultIndex 이후)만 본다. 여러 조각이면 이어 붙인 것도 후보로 넣는다
+      const parts = Array.from(e.results).slice(e.resultIndex);
       const alts = [];
-      for (const res of e.results) for (let i = 0; i < res.length; i++) alts.push(res[i].transcript);
-      h.onResult(alts, e.results[e.results.length - 1].isFinal);
+      if (parts.length > 1) alts.push(parts.map(res => res[0].transcript).join(''));
+      for (const res of parts) for (let i = 0; i < res.length; i++) alts.push(res[i].transcript);
+      const final = parts.every(res => res.isFinal);
+      if (final) console.log('[Speech] 들은 말:', alts);
+      h.onResult(alts, final);
     });
     rec.onerror = guard(e => h.onError(e.error));
     rec.onend = guard(() => { live = false; h.onEnd(); });
@@ -459,6 +465,54 @@ const Speech = {
       setTimeout(guard(() => { h.onError('start-failed'); live = false; h.onEnd(); }), 0);
     }
     return { stop() { live = false; try { rec.abort(); } catch { /* 이미 끝남 */ } } };
+  },
+};
+
+// ============================================================
+// Meter — 🎤 주변에 소리 크기를 보여준다 (마이크가 내 목소리를 듣고 있는지 확인용)
+// 안드로이드는 마이크를 두 곳에서 동시에 쓰면 음성 인식이 실패할 수 있어 끈다
+// ============================================================
+const Meter = {
+  enabled: !/Android/i.test(navigator.userAgent),
+  stream: null,
+  analyser: null,
+  source: null,
+  data: null,
+  level: 0,
+
+  async start() {
+    if (!this.enabled || this.stream || !Sfx.ctx || !navigator.mediaDevices) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!Card.active || Card.passed) { stream.getTracks().forEach(tr => tr.stop()); return; }
+      this.stream = stream;
+      this.source = Sfx.ctx.createMediaStreamSource(stream);
+      this.analyser = Sfx.ctx.createAnalyser();
+      this.analyser.fftSize = 512;
+      this.data = new Uint8Array(this.analyser.fftSize);
+      this.source.connect(this.analyser);
+    } catch (err) {
+      console.warn('[Meter] 사용 안 함:', err.name);
+      this.enabled = false;
+    }
+  },
+
+  stop() {
+    if (this.stream) this.stream.getTracks().forEach(tr => tr.stop());
+    if (this.source) this.source.disconnect();
+    this.stream = this.source = this.analyser = null;
+    this.level = 0;
+  },
+
+  // 0~1 (조용한 말소리도 보이도록 크게 키운다)
+  read() {
+    if (!this.analyser) return 0;
+    this.analyser.getByteTimeDomainData(this.data);
+    let sum = 0;
+    for (const v of this.data) sum += ((v - 128) / 128) ** 2;
+    const rms = Math.sqrt(sum / this.data.length);
+    this.level = Math.max(Math.min(1, rms * 6), this.level * 0.85);
+    return this.level;
   },
 };
 
@@ -518,6 +572,7 @@ const Card = {
     this.setHint(false);
     this.hintTimer = setTimeout(() => { if (!this.gotAttempt) this.setHint(true); }, CONFIG.HINT_DELAY_MS);
     this.scheduleListen(CONFIG.LISTEN_START_DELAY_MS);
+    if (!Game.tapMode) Meter.start();
     console.log(`[Card] 표시 "${word.word}" (${word.lang}, level ${word.level}) 모드=${this.mode}`);
     return new Promise(res => { this.resolve = res; });
   },
@@ -561,7 +616,10 @@ const Card = {
     this.startedAt = performance.now();
     this.heard = false;
     this.listener = Speech.listen(this.word.lang, {
-      onSound: () => { this.heard = true; },
+      onSound: () => {
+        this.heard = true;
+        if (!this.el.heard.textContent) this.el.heard.textContent = '🗣️ …';
+      },
       onResult: (alts, final) => this.onResult(alts, final),
       onError: err => this.onError(err),
       onEnd: () => this.onEnd(),
@@ -674,6 +732,7 @@ const Card = {
     if (!this.active || this.passed) return;
     if (this.mode === 'speech') this.mode = 'tap';
     this.stopListening();
+    Meter.stop();
     this.updateUI();
   },
 
@@ -701,6 +760,7 @@ const Card = {
   close(result) {
     this.el.overlay.classList.add('hidden');
     this.active = false;
+    Meter.stop();
     const resolve = this.resolve;
     this.resolve = null;
     if (resolve) resolve(result);
@@ -1369,6 +1429,7 @@ const Game = {
     this.lastTime = ts;
     this.update(dt);
     Render.draw(ts / 1000);
+    if (Card.active) Card.el.mic.style.setProperty('--level', Meter.read().toFixed(2));
     requestAnimationFrame(t => this.loop(t));
   },
 

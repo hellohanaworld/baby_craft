@@ -175,7 +175,8 @@ body.touch #controls { display: block; }
 .card.success .card-buttons,
 .card.success .follow { display: none !important; }
 
-.heard { min-height: 1.3em; font-size: 5vmin; font-weight: 700; color: #6d6d6d; }
+/* 아이가 말한 것 (음성 인식 결과) */
+.heard { min-height: 1.3em; font-size: 7vmin; font-weight: 800; color: #1565c0; }
 .status { font-size: 13px; color: #aaa; }
 .status:empty { display: none; }
 .card.success .heard { display: none; }
@@ -195,7 +196,13 @@ body.touch #controls { display: block; }
   border: 4px solid #ccc;
   transition: background .2s, border-color .2s, opacity .2s;
 }
-.mic[data-state="listening"] { background: #ffebee; border-color: #e53935; animation: pulse 1.2s infinite; }
+/* --level(0~1): 마이크에 들어온 소리 크기만큼 빨간 테두리가 커진다 */
+.mic[data-state="listening"] {
+  background: #ffebee;
+  border-color: #e53935;
+  box-shadow: 0 0 0 calc(4px + var(--level, 0) * 40px) rgba(229, 57, 53, .35);
+  transition: box-shadow .08s;
+}
 .mic[data-state="off"] { filter: grayscale(1); opacity: .3; }
 
 #btn-speaker.hint { animation: glow 1s infinite; border-color: #ffb300; background: #fff8e1; }

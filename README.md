@@ -34,7 +34,7 @@ Chrome 에서 <http://localhost:8000> 을 엽니다. ▶ 를 누르면 마이크
 | `strict` | `loose`, `normal`, `strict` | `?strict=loose` |
 | `stt` | `0` 이면 음성 인식 끔 (탭 모드) | `?stt=0` |
 
-옵션은 그 주소로 연 이번 실행에만 적용되고 저장되지 않습니다. 기본값은 `lang=both`, `level=2`, `strict=normal` 입니다.
+옵션은 그 주소로 연 이번 실행에만 적용되고 저장되지 않습니다. 기본값은 `lang=ko`, `level=2`, `strict=normal` 입니다.
 
 ### 태블릿에서 테스트하기
 
