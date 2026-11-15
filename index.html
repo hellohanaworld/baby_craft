@@ -8,7 +8,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <link rel="manifest" href="manifest.json">
   <title>Baby Craft</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=7">
 </head>
 <body>
   <canvas id="game"></canvas>
@@ -18,11 +18,11 @@
     <div class="hud-row">
       <div id="hearts" class="hearts"></div>
       <button id="btn-bag" class="bag-btn" aria-label="items">🎒</button>
+      <button id="room-badge" class="room-badge hidden" aria-label="room number"></button>
     </div>
     <div id="inventory" class="inventory"></div>
   </div>
 
-  <div id="room-badge" class="room-badge hidden"></div>
   <div id="room-code" class="room-code hidden"></div>
 
   <div id="faint" class="faint hidden"></div>
@@ -106,6 +106,6 @@
     <p id="title-msg" class="msg"></p>
   </div>
 
-  <script src="game.js"></script>
+  <script src="game.js?v=7"></script>
 </body>
 </html>
