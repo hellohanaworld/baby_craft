@@ -469,7 +469,7 @@ const Sfx = {
   hit() { this.tone(180, 0.1, { type: 'square', to: 90, vol: 0.08 }); },
   hurt() { this.tone(440, 0.2, { type: 'triangle', to: 220, vol: 0.1 }); },
   defeat() { [392, 523, 659].forEach((f, i) => this.tone(f, 0.12, { type: 'square', vol: 0.06, delay: i * 0.06 })); },
-  // 터벅터벅: 낮은 '쿵' + 짧은 흙 밟는 소리. 왼발/오른발 높이를 조금 다르게
+  // 찹찹찹: 풀/흙을 밟는 부드러운 '찹' (중간 높이 잡음 두 번). 왼발/오른발 높이를 조금 다르게
   step(left) {
     const ctx = this.ctx;
     if (!ctx) return;
@@ -479,15 +479,21 @@ const Sfx = {
       const d = this.noise.getChannelData(0);
       for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length);
     }
-    const src = ctx.createBufferSource(), filter = ctx.createBiquadFilter(), gain = ctx.createGain();
-    src.buffer = this.noise;
-    filter.type = 'lowpass';
-    filter.frequency.value = left ? 700 : 900;
-    gain.gain.setValueAtTime(0.5, t0);
-    gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.1);
-    src.connect(filter).connect(gain).connect(ctx.destination);
-    src.start(t0);
-    this.tone(left ? 95 : 115, 0.09, { to: 55, vol: 0.35 });
+    const grain = (at, vol, freq) => {
+      const src = ctx.createBufferSource(), filter = ctx.createBiquadFilter(), gain = ctx.createGain();
+      src.buffer = this.noise;
+      filter.type = 'bandpass';
+      filter.frequency.value = freq;
+      filter.Q.value = 0.9;
+      gain.gain.setValueAtTime(0.0001, at);
+      gain.gain.exponentialRampToValueAtTime(vol, at + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.11);
+      src.connect(filter).connect(gain).connect(ctx.destination);
+      src.start(at);
+    };
+    const f = left ? 1500 : 1800;
+    grain(t0, 0.7, f);
+    grain(t0 + 0.035, 0.35, f * 1.3);
   },
   boss() { this.tone(110, 0.6, { type: 'sawtooth', to: 70, vol: 0.08 }); this.tone(147, 0.6, { type: 'sawtooth', to: 90, vol: 0.06, delay: 0.3 }); },
 };
@@ -2385,6 +2391,7 @@ const Game = {
     requestAnimationFrame(t => this.loop(t));
     this.keepAliveInBackground();
     this.initFullscreen();
+    this.initBag();
   },
 
   async start() {
@@ -2732,6 +2739,21 @@ const Game = {
     $('#end-overlay').classList.add('hidden');
     Player.invulnT = CONFIG.INVULN_SEC;
     this.state = 'play';
+  },
+
+  // 위쪽 가방(아이템) 칸: 🎒 버튼을 눌렀을 때만 보인다 (폰에서 화면을 덜 가리게). PC 는 처음부터 펼침
+  initBag() {
+    this.setBag(!document.body.classList.contains('touch'));
+    $('#btn-bag').addEventListener('pointerdown', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.setBag($('#inventory').classList.contains('hidden'));
+    });
+  },
+
+  setBag(open) {
+    $('#inventory').classList.toggle('hidden', !open);
+    $('#btn-bag').classList.toggle('on', open);
   },
 
   renderHearts() {
