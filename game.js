@@ -925,6 +925,7 @@ const Craft = {
   el: null,
   open: false,
   resolve: null,
+  sel: 0, // 키보드로 가리키는 것: 레시피 번호, RECIPES.length 는 🚪 닫기
 
   init() {
     this.el = { overlay: $('#craft-overlay'), list: $('#recipes') };
@@ -933,7 +934,32 @@ const Craft = {
       const btn = e.target.closest('button[data-recipe]');
       if (btn) this.make(RECIPES[Number(btn.dataset.recipe)]);
     });
-    addEventListener('keydown', e => { if (this.open && e.code === 'Escape') this.close(); });
+    addEventListener('keydown', e => { if (this.open) this.onKey(e); });
+  },
+
+  // 키보드: 화살표(WASD)로 고르고 스페이스/엔터로 만들기 또는 닫기, Esc 닫기
+  onKey(e) {
+    const n = RECIPES.length + 1;
+    const step = { ArrowLeft: -1, ArrowUp: -1, KeyA: -1, KeyW: -1, ArrowRight: 1, ArrowDown: 1, KeyD: 1, KeyS: 1 }[e.code];
+    if (step) {
+      e.preventDefault();
+      this.sel = (this.sel + step + n) % n;
+      this.markSel();
+      Sfx.click();
+    } else if ((e.code === 'Space' || e.code === 'Enter') && !e.repeat) {
+      e.preventDefault();
+      Sfx.click();
+      if (this.sel === RECIPES.length) this.close();
+      else if (this.canMake(RECIPES[this.sel])) this.make(RECIPES[this.sel]);
+      else Sfx.soft();
+    } else if (e.code === 'Escape') {
+      this.close();
+    }
+  },
+
+  markSel() {
+    [...this.el.list.children].forEach((el, i) => el.classList.toggle('sel', i === this.sel));
+    $('#btn-craft-close').classList.toggle('sel', this.sel === RECIPES.length);
   },
 
   has(type, n) { return (Game.inventory[type] || 0) >= n; },
@@ -946,6 +972,9 @@ const Craft = {
 
   show() {
     this.open = true;
+    // 처음엔 만들 수 있는 첫 무기, 없으면 🚪 닫기를 가리킨다
+    const ready = RECIPES.findIndex(r => this.canMake(r));
+    this.sel = ready >= 0 ? ready : RECIPES.length;
     this.render();
     this.el.overlay.classList.remove('hidden');
     return new Promise(res => { this.resolve = res; });
@@ -971,6 +1000,7 @@ const Craft = {
         <button class="big-btn make" data-recipe="${i}" ${ready ? '' : 'disabled'}>${owned ? '✅' : locked ? '🔒' : '🔨'}</button>
       </div>`;
     }).join('');
+    this.markSel();
   },
 
   make(r) {
@@ -986,6 +1016,9 @@ const Craft = {
     if (Store.settings.lang === 'en') Speech.speak(`${w.en}!`, 'en');
     else Speech.speak(`${josa(w.ko, '을', '를')} 만들었어요!`, 'ko');
     Game.renderInventory();
+    // 다음으로 만들 수 있는 무기, 없으면 🚪 닫기를 가리킨다 (스페이스 한 번 더 누르면 나간다)
+    const next = RECIPES.findIndex(rr => this.canMake(rr));
+    this.sel = next >= 0 ? next : RECIPES.length;
     this.render();
   },
 
