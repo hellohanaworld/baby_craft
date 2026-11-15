@@ -2015,12 +2015,15 @@ const Render = {
     ctx.fillText(m.def.emoji, 0, 0);
     ctx.restore();
 
-    // 체력 막대
-    const w = m.def.boss ? 44 : 24, top = m.y - s * 0.15 - s * 0.62 - 6;
-    ctx.fillStyle = 'rgba(0,0,0,.45)';
-    ctx.fillRect(m.x - w / 2 - 1, top - 1, w + 2, 6);
-    ctx.fillStyle = m.def.boss ? '#e53935' : '#66bb6a';
-    ctx.fillRect(m.x - w / 2, top, w * Math.max(0, m.hp) / m.def.hp, 4);
+    // 체력 막대: 처음엔 빨간 칸이 가득, 맞을 때마다 오른쪽 칸부터 비어 회색이 된다
+    const max = m.def.hp, cw = m.def.boss ? 6 : 8, ch = 6, w = max * cw, top = m.y - s * 0.15 - s * 0.62 - 10;
+    const left = m.x - w / 2, hp = Math.max(0, Math.ceil(m.hp));
+    ctx.fillStyle = '#3e2723';
+    ctx.fillRect(left - 2, top - 2, w + 2, ch + 4);
+    for (let i = 0; i < max; i++) {
+      ctx.fillStyle = i < hp ? '#e53935' : '#e0e0e0';
+      ctx.fillRect(left + i * cw, top, cw - 2, ch);
+    }
 
     // 이름표
     const { main, sub } = itemNames(m.def);
