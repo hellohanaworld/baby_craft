@@ -162,7 +162,7 @@ body:not(.touch) #btn-weapon::after { content: 'Q'; }
 .weapon-choice { width: 96px; height: 96px; border-radius: 50%; font-size: 52px; }
 .weapon-choice.on { border-color: #f9a825; background: #fff59d; }
 .weapon-choice { position: relative; }
-.weapon-choice.sel { outline: 5px solid #1e88e5; outline-offset: 3px; }
+.weapon-choice.sel { outline: 6px solid #ff3d00; outline-offset: 3px; box-shadow: 0 0 14px 5px rgba(255, 61, 0, .55); }
 .weapon-choice b {
   position: absolute; right: -4px; bottom: -4px;
   min-width: 30px; padding: 2px 6px; border-radius: 14px;
@@ -319,7 +319,7 @@ body:not(.touch) #btn-weapon::after { content: 'Q'; }
 }
 .recipe.ready { border-color: #43a047; box-shadow: 0 0 0 4px rgba(67, 160, 71, .3); }
 /* 키보드로 가리키는 것 */
-.recipe.sel, #btn-craft-close.sel { outline: 6px solid #1e88e5; outline-offset: 4px; }
+.recipe.sel, #btn-craft-close.sel { outline: 7px solid #ff3d00; outline-offset: 3px; box-shadow: 0 0 18px 6px rgba(255, 61, 0, .55); }
 .recipe.owned { opacity: .75; }
 .recipe-result { display: flex; align-items: center; gap: 10px; }
 .recipe-result .e { font-size: 64px; line-height: 1; }

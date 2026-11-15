@@ -950,8 +950,10 @@ const Craft = {
     addEventListener('keydown', e => { if (this.open) this.onKey(e); });
   },
 
-  // 키보드: 화살표(WASD)로 고르고 스페이스/엔터로 만들기 또는 닫기, Esc 닫기
+  // 키보드: 화살표(WASD)로 고르고 스페이스/엔터로 만들기 또는 닫기, Q/Esc 닫기
   onKey(e) {
+    // 제작대가 받은 키는 게임 쪽(공격, Q 고르는 칸)으로 넘기지 않는다 (닫히자마자 공격/고르는 칸이 열리지 않게)
+    e.stopImmediatePropagation();
     const n = RECIPES.length + 1;
     const step = { ArrowLeft: -1, ArrowUp: -1, KeyA: -1, KeyW: -1, ArrowRight: 1, ArrowDown: 1, KeyD: 1, KeyS: 1 }[e.code];
     if (step) {
@@ -965,7 +967,9 @@ const Craft = {
       if (this.sel === RECIPES.length) this.close();
       else if (this.canMake(RECIPES[this.sel])) this.make(RECIPES[this.sel]);
       else Sfx.soft();
-    } else if (e.code === 'Escape') {
+    } else if (e.code === 'Escape' || e.code === 'KeyQ') {
+      e.preventDefault();
+      Sfx.click();
       this.close();
     }
   },
@@ -1036,9 +1040,7 @@ const Craft = {
     if (Store.settings.lang === 'en') Speech.speak(`${w.en}!`, 'en');
     else Speech.speak(`${josa(w.ko, '을', '를')} 만들었어요!`, 'ko');
     Game.renderInventory();
-    // 다음으로 만들 수 있는 무기, 없으면 🚪 닫기를 가리킨다 (스페이스 한 번 더 누르면 나간다)
-    const next = RECIPES.findIndex(rr => this.canMake(rr));
-    this.sel = next >= 0 ? next : RECIPES.length;
+    this.sel = RECIPES.indexOf(r); // 방금 만든 것을 계속 가리킨다 (마우스로 눌러 만들어도)
     this.render();
   },
 
