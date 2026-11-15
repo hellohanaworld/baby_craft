@@ -949,6 +949,7 @@ const Craft = {
     if (!r || !this.canMake(r)) return;
     for (const [type, n] of Object.entries(r.needs)) Game.inventory[type] -= n;
     Game.weapons.add(r.result);
+    Game.pickedWeapon = r.result;  // 새로 만든 무기를 바로 든다
     const w = WEAPONS[r.result], { main } = itemNames(w);
     console.log(`[Craft] ${w.ko} 제작 (power ${w.power})`);
     Sfx.success();
@@ -1842,6 +1843,7 @@ const Input = {
     // e.code 를 써서 한글 입력 상태에서도 WASD 가 동작하게 한다
     addEventListener('keydown', e => {
       if (KEYMAP[e.code]) { this.keys.add(e.code); e.preventDefault(); }
+      if (e.code === 'KeyQ' && !e.repeat) Game.nextWeapon();
       if (e.code === 'Space' || e.code === 'Enter') {
         e.preventDefault();
         if (!e.repeat) Game.onAction();
@@ -1881,6 +1883,9 @@ const Input = {
     zone.addEventListener('lostpointercapture', end);
 
     $('#btn-action').addEventListener('pointerdown', e => { e.preventDefault(); Game.onAction(); });
+    $('#btn-weapon').addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); Game.toggleWeaponPicker(); });
+    // 고르는 칸 바깥을 누르면 닫는다
+    addEventListener('pointerdown', e => { if (!e.target.closest('#weapon-picker')) Game.closeWeaponPicker(); });
     addEventListener('contextmenu', e => e.preventDefault());
   },
 
@@ -2326,6 +2331,7 @@ const Game = {
   tapReason: '',
   inventory: {},
   weapons: new Set(),
+  pickedWeapon: null,
   hearts: CONFIG.MAX_HEARTS,
   lookIndex: 0,
   playerName: '',
@@ -2734,11 +2740,50 @@ const Game = {
     $('#hearts').textContent = html;
   },
 
-  // 가진 무기 중 제일 센 것
+  // 고른 무기. 아직 안 골랐으면 가진 무기 중 제일 센 것
   get weapon() {
+    if (this.pickedWeapon === 'hand' || this.weapons.has(this.pickedWeapon)) return this.pickedWeapon;
     let best = 'hand';
     for (const id of this.weapons) if (WEAPONS[id].power > WEAPONS[best].power) best = id;
     return best;
+  },
+
+  ownedWeapons() {
+    return Object.keys(WEAPONS).filter(id => id === 'hand' || this.weapons.has(id));
+  },
+
+  setWeapon(id) {
+    this.pickedWeapon = id;
+    this.closeWeaponPicker();
+    this.renderInventory();
+    Sfx.door();
+    toast(`${WEAPONS[id].emoji} ${itemNames(WEAPONS[id]).main}`);
+  },
+
+  // 무기 고르는 칸: 오른쪽 아래 작은 동그라미(또는 위 무기 칸, Q 키)를 누르면 열린다
+  toggleWeaponPicker() {
+    const picker = $('#weapon-picker');
+    if (!picker.classList.contains('hidden')) return this.closeWeaponPicker();
+    if (this.state !== 'play') return;
+    picker.innerHTML = '';
+    for (const id of this.ownedWeapons()) {
+      const btn = document.createElement('button');
+      btn.className = `big-btn weapon-choice${id === this.weapon ? ' on' : ''}`;
+      btn.textContent = WEAPONS[id].emoji;
+      btn.setAttribute('aria-label', WEAPONS[id].en);
+      btn.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); this.setWeapon(id); });
+      picker.appendChild(btn);
+    }
+    picker.classList.remove('hidden');
+  },
+
+  closeWeaponPicker() { $('#weapon-picker').classList.add('hidden'); },
+
+  // 다음 무기로 바로 바꾸기 (Q 키)
+  nextWeapon() {
+    const list = this.ownedWeapons();
+    if (list.length < 2) return;
+    this.setWeapon(list[(list.indexOf(this.weapon) + 1) % list.length]);
   },
 
   addItem(type) {
@@ -2771,17 +2816,20 @@ const Game = {
     // 들고 있는 무기 (✋ 버튼 그림도 같이 바꾼다)
     const w = WEAPONS[this.weapon];
     $('#btn-action').textContent = w.emoji;
-    if (this.weapon !== 'hand') {
+    $('#btn-weapon').textContent = w.emoji;
+    $('#btn-weapon').classList.toggle('hidden', this.weapons.size === 0);
+    if (this.weapons.size) {
       const { main, sub } = itemNames(w);
       const slot = document.createElement('div');
       slot.className = 'inv-slot weapon';
+      slot.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); this.toggleWeaponPicker(); });
       slot.innerHTML = `<span class="e">${w.emoji}</span><span class="names"><span class="n">${main}</span>` +
         `${sub ? `<span class="s">${sub}</span>` : ''}</span>`;
       inv.appendChild(slot);
     }
     const owned = Object.keys(ITEMS).filter(type => this.inventory[type] > 0);
     if (!owned.length) {
-      if (this.weapon === 'hand') inv.innerHTML = '<div class="inv-empty">🎒</div>';
+      if (!this.weapons.size) inv.innerHTML = '<div class="inv-empty">🎒</div>';
       return;
     }
     for (const type of owned) {
