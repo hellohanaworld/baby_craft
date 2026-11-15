@@ -3005,7 +3005,8 @@ const Game = {
   weapons: new Set(),
   picked: null, // 고른 것 (무기 또는 블록). 블록을 다 놓으면 lastWeapon 으로 돌아간다
   lastWeapon: null, // 마지막으로 고른 무기 (없으면 가진 무기 중 제일 센 것)
-  pickIndex: 0, // 고르는 칸에서 키보드로 가리키는 칸
+  pickRows: [], // 고르는 칸의 줄 (종류별)
+  pickPos: { r: 0, c: 0 }, // 고르는 칸에서 키보드로 가리키는 칸
   dig: { i: -1, n: 0 }, // 캐는 중인 칸과 친 횟수
   busy: false, // 칸 바꾸기 답을 기다리는 중
   hearts: CONFIG.MAX_HEARTS,
@@ -3615,13 +3616,18 @@ const Game = {
   // 손에 든 것 (블록, 먹이 또는 무기)
   get held() { return this.heldBlock || this.heldFood || this.weapon; },
 
-  // 고를 수 있는 것: 가진 무기 + 가방에 있는 블록
-  ownedWeapons() {
+  // 고를 수 있는 것을 종류별로 (무기 / 블록 / 먹이). 빈 종류는 뺀다
+  pickGroups() {
+    const has = id => this.inventory[id] > 0;
     return [
-      ...Object.keys(WEAPONS).filter(id => id === 'hand' || this.weapons.has(id)),
-      ...Object.keys(ITEMS).filter(id => (ITEMS[id].tile || ITEMS[id].kind === 'food') && this.inventory[id] > 0),
-    ];
+      { icon: '⚔️', ko: '무기', en: 'Weapons', ids: Object.keys(WEAPONS).filter(id => id === 'hand' || this.weapons.has(id)) },
+      { icon: '🧱', ko: '블록', en: 'Blocks', ids: Object.keys(ITEMS).filter(id => ITEMS[id].tile && has(id)) },
+      { icon: '🍎', ko: '먹이', en: 'Food', ids: Object.keys(ITEMS).filter(id => ITEMS[id].kind === 'food' && has(id)) },
+    ].filter(g => g.ids.length);
   },
+
+  // 고를 수 있는 것 전부: 가진 무기 + 가방에 있는 블록, 먹이
+  ownedWeapons() { return this.pickGroups().flatMap(g => g.ids); },
 
   setWeapon(id) {
     this.picked = id;
@@ -3634,47 +3640,66 @@ const Game = {
 
   get pickerOpen() { return !$('#weapon-picker').classList.contains('hidden'); },
 
-  // 무기 고르는 칸: 오른쪽 아래 작은 동그라미(또는 위 무기 칸, Q 키)를 누르면 열린다
+  // 고르는 칸: 오른쪽 아래 작은 동그라미(또는 위 무기 칸, Q 키)를 누르면 열린다. 종류마다 한 줄
   toggleWeaponPicker() {
     const picker = $('#weapon-picker');
     if (this.pickerOpen) return this.closeWeaponPicker(false);
     if (this.state !== 'play') return;
     Input.reset();
     picker.innerHTML = '';
-    const list = this.ownedWeapons();
-    this.pickIndex = Math.max(0, list.indexOf(this.held));
-    for (const id of list) {
-      const btn = document.createElement('button');
-      const def = WEAPONS[id] || ITEMS[id];
-      btn.className = `big-btn weapon-choice${id === this.held ? ' on' : ''}`;
-      btn.innerHTML = ITEMS[id] ? `${iconHtml(def)}<b>${this.inventory[id]}</b>` : iconHtml(def);
-      btn.setAttribute('aria-label', def.en);
-      btn.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); this.setWeapon(id); });
-      picker.appendChild(btn);
-    }
+    this.pickRows = this.pickGroups();
+    this.pickPos = { r: 0, c: 0 };
+    this.pickRows.forEach((g, r) => {
+      const row = document.createElement('div');
+      row.className = 'pick-row';
+      row.innerHTML = `<div class="pick-label"><span>${g.icon}</span>${itemNames(g).main}</div>`;
+      const items = document.createElement('div');
+      items.className = 'pick-items';
+      g.ids.forEach((id, c) => {
+        if (id === this.held) this.pickPos = { r, c };
+        const btn = document.createElement('button');
+        const def = WEAPONS[id] || ITEMS[id];
+        btn.className = `big-btn weapon-choice${id === this.held ? ' on' : ''}`;
+        btn.dataset.pick = `${r},${c}`;
+        btn.innerHTML = ITEMS[id] ? `${iconHtml(def)}<b>${this.inventory[id]}</b>` : iconHtml(def);
+        btn.setAttribute('aria-label', def.en);
+        btn.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); this.setWeapon(id); });
+        items.appendChild(btn);
+      });
+      row.appendChild(items);
+      picker.appendChild(row);
+    });
     picker.classList.remove('hidden');
     this.markPick();
   },
 
-  // 키보드로 가리키는 칸 표시 (굵은 파란 테두리)
+  // 키보드로 가리키는 칸 표시 (굵은 주황 테두리)
   markPick() {
-    [...$('#weapon-picker').children].forEach((b, i) => b.classList.toggle('sel', i === this.pickIndex));
+    const at = `${this.pickPos.r},${this.pickPos.c}`;
+    $('#weapon-picker').querySelectorAll('.weapon-choice').forEach(b => b.classList.toggle('sel', b.dataset.pick === at));
   },
 
-  // 고르는 칸이 열려 있을 때 키: ←→(A/D) 옮기기, Enter/Space 들기, Q/Esc 닫기
+  // 고르는 칸이 열려 있을 때 키: ←→(A/D) 줄 안에서, ↑↓(W/S) 다른 종류 줄로, Enter/Space 들기, Q/Esc 닫기
   pickerKey(code) {
-    const list = this.ownedWeapons();
-    if (code === 'ArrowLeft' || code === 'KeyA' || code === 'ArrowRight' || code === 'KeyD') {
-      const d = code === 'ArrowLeft' || code === 'KeyA' ? -1 : 1;
-      this.pickIndex = (this.pickIndex + d + list.length) % list.length;
-      this.markPick();
-      Sfx.click();
+    const rows = this.pickRows, p = this.pickPos;
+    const dx = { ArrowLeft: -1, KeyA: -1, ArrowRight: 1, KeyD: 1 }[code];
+    const dy = { ArrowUp: -1, KeyW: -1, ArrowDown: 1, KeyS: 1 }[code];
+    if (dx) {
+      const n = rows[p.r].ids.length;
+      p.c = (p.c + dx + n) % n;
+    } else if (dy) {
+      p.r = (p.r + dy + rows.length) % rows.length;
+      p.c = Math.min(p.c, rows[p.r].ids.length - 1);
     } else if (code === 'Enter' || code === 'Space') {
       Sfx.click();
-      this.setWeapon(list[this.pickIndex]);
+      this.setWeapon(rows[p.r].ids[p.c]);
+      return;
     } else if (code === 'KeyQ' || code === 'Escape') {
       this.closeWeaponPicker();
-    }
+      return;
+    } else return;
+    this.markPick();
+    Sfx.click();
   },
 
   // 버튼으로 닫을 때는 버튼 소리가 이미 나니까 sound=false
