@@ -997,9 +997,12 @@ const Craft = {
   init() {
     this.el = { overlay: $('#craft-overlay'), list: $('#recipes') };
     $('#btn-craft-close').addEventListener('click', () => this.close());
+    // 카드 아무 데나 누르면 만든다 (못 만들면 '삐')
     this.el.list.addEventListener('click', e => {
-      const btn = e.target.closest('button[data-recipe]');
-      if (btn) this.make(RECIPES[Number(btn.dataset.recipe)]);
+      const card = e.target.closest('[data-recipe]');
+      if (!card) return;
+      const r = RECIPES[Number(card.dataset.recipe)];
+      if (this.canMake(r)) this.make(r); else Sfx.soft();
     });
     addEventListener('keydown', e => { if (this.open) this.onKey(e); });
   },
@@ -1071,32 +1074,31 @@ const Craft = {
     return new Promise(res => { this.resolve = res; });
   },
 
-  // 한 줄에 하나: [그림 이름 ⭐] [재료] [🔨]. 무기 / 블록으로 나눠서 두 칸씩
+  // 레시피마다 작은 카드 (그림 이름 / 재료 그림+개수 / 오른쪽 위 표시: 🔨 만들 수 있음, ✅ 있음, 🔒 잠김).
+  // 무기 / 블록으로 한 줄씩, 많으면 다음 줄로
   render() {
-    const row = (r, i) => {
-      const w = WEAPONS[r.result] || ITEMS[r.result], names = itemNames(w), weapon = !!WEAPONS[r.result];
+    const card = (r, i) => {
+      const w = WEAPONS[r.result] || ITEMS[r.result], weapon = !!WEAPONS[r.result];
       const owned = Game.weapons.has(r.result), ready = this.canMake(r), locked = !this.unlocked(r);
-      // 잠긴 레시피: 몬스터를 몇 마리 더 잡아야 하는지 👾 로 보여준다
       const needs = locked
-        ? `<div class="lock">🔒 👾 ${Game.kills}/${r.unlock}</div>`
+        ? `<span class="lock">👾 ${Game.kills}/${r.unlock}</span>`
         : Object.entries(r.needs).map(([type, n]) => {
           const def = ITEMS[type], have = Math.min(Game.inventory[type] || 0, n);
-          return `<div class="need${have >= n ? ' ok' : ''}"><span class="e">${def.emoji}</span>` +
-            `<span class="t"><span class="n">${itemNames(def).main}</span><b>${have}/${n}</b></span></div>`;
+          return `<span class="need${have >= n ? ' ok' : ''}" title="${itemNames(def).main}">${def.emoji}<b>${have}/${n}</b></span>`;
         }).join('');
-      return `<div class="recipe${owned ? ' owned' : ''}${ready ? ' ready' : ''}${locked ? ' locked' : ''}">
-        <div class="recipe-result"><span class="e">${iconHtml(w)}</span>
-          <span class="names"><span class="n">${names.main}</span>
-          <span class="power">${weapon ? '⭐'.repeat(w.power) : `x${r.count}`}</span></span></div>
+      const mark = owned ? '✅' : locked ? '🔒' : ready ? '🔨' : '';
+      return `<div class="recipe${owned ? ' owned' : ''}${ready ? ' ready' : ''}${locked ? ' locked' : ''}" data-recipe="${i}">
+        <div class="recipe-result"><span class="e">${iconHtml(w)}</span><span class="n">${itemNames(w).main}</span>
+          <span class="power">${weapon ? '⭐'.repeat(w.power) : `x${r.count}`}</span></div>
         <div class="recipe-needs">${needs}</div>
-        <button class="big-btn make" data-recipe="${i}" ${ready ? '' : 'disabled'}>${owned ? '✅' : locked ? '🔒' : '🔨'}</button>
+        ${mark ? `<span class="mark">${mark}</span>` : ''}
       </div>`;
     };
     const lang = Store.settings.lang === 'en';
-    const section = (title, weapon) => `<div class="recipe-group">${title}</div>` +
-      RECIPES.map((r, i) => (!!WEAPONS[r.result] === weapon ? row(r, i) : '')).join('');
     // sel 번호가 RECIPES 순서와 같도록 무기가 RECIPES 앞쪽에 있다
-    this.el.list.innerHTML = section(lang ? '⚔️ Weapons' : '⚔️ 무기', true) + section(lang ? '🧱 Blocks' : '🧱 블록', false);
+    const row = (icon, title, weapon) => `<div class="recipe-row"><div class="recipe-group"><span>${icon}</span>${title}</div>` +
+      `<div class="recipe-cards">${RECIPES.map((r, i) => (!!WEAPONS[r.result] === weapon ? card(r, i) : '')).join('')}</div></div>`;
+    this.el.list.innerHTML = row('⚔️', lang ? 'Weapons' : '무기', true) + row('🧱', lang ? 'Blocks' : '블록', false);
     this.markSel();
   },
 
