@@ -421,13 +421,16 @@ const Judge = (() => {
     return (s || '').normalize('NFC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
   }
 
+  // 소리가 같은 모음은 하나로 (ㅐ/ㅔ 를 구분해 말하지 않아서 "게"를 "개"로 알아듣는다)
+  const SAME_SOUND = { 'ㅐ': 'ㅔ', 'ㅒ': 'ㅖ', 'ㅗㅐ': 'ㅜㅔ', 'ㅗㅣ': 'ㅜㅔ' };
+
   // "나무" → "ㄴㅏㅁㅜ", 겹받침/이중모음도 쪼갠다
   function toJamo(s) {
     let out = '';
     for (const ch of s) {
       if (!isHangul(ch)) { out += ch; continue; }
-      const idx = ch.charCodeAt(0) - 0xAC00;
-      out += CHO[Math.floor(idx / 588)] + JUNG[Math.floor((idx % 588) / 28)] + JONG[idx % 28];
+      const idx = ch.charCodeAt(0) - 0xAC00, jung = JUNG[Math.floor((idx % 588) / 28)];
+      out += CHO[Math.floor(idx / 588)] + (SAME_SOUND[jung] || jung) + JONG[idx % 28];
     }
     return out;
   }
@@ -468,7 +471,8 @@ const Judge = (() => {
   function scoreOne(t, c) {
     if (c === t) return { score: 1, how: 'exact' };
     const single = Array.from(t).length === 1 && isHangul(t);
-    if (single && c.includes(t)) return { score: 1, how: 'single-char' };
+    // 한 글자 단어: 인식 결과 안에 소리가 같은 글자가 있으면 통과 ("게" → "개야")
+    if (single && Array.from(c).some(ch => toJamo(ch) === toJamo(t))) return { score: 1, how: 'single-char' };
     if (c.includes(t)) return { score: CONFIG.CONTAINS_SCORE, how: 'contains' };
     return { score: windowSimilarity(t, c), how: 'similar' };
   }
