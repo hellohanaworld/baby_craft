@@ -150,6 +150,27 @@ body.touch #controls { display: block; }
 }
 .weapon-choice { width: 96px; height: 96px; border-radius: 50%; font-size: 52px; }
 .weapon-choice.on { border-color: #f9a825; background: #fff59d; }
+.weapon-choice { position: relative; }
+.weapon-choice b {
+  position: absolute; right: -4px; bottom: -4px;
+  min-width: 30px; padding: 2px 6px; border-radius: 14px;
+  background: #5d4037; color: #fff; font: 900 18px/1.2 var(--font-ui);
+}
+/* 오른쪽 위 작은 지도 (맵 120x90 칸 → 1칸 1px 이상) */
+.minimap {
+  position: fixed;
+  right: max(10px, env(safe-area-inset-right));
+  top: max(10px, env(safe-area-inset-top));
+  z-index: 15;
+  width: 144px;
+  height: 108px;
+  border: 3px solid #5d4037;
+  border-radius: 8px;
+  background: #2e7d32;
+  pointer-events: none;
+  image-rendering: pixelated;
+}
+@media (max-width: 700px), (max-height: 420px) { .minimap { width: 120px; height: 90px; } }
 #hud .inv-slot.weapon { pointer-events: auto; cursor: pointer; }
 
 /* ---------- 토스트 ---------- */

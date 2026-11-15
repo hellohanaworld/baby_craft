@@ -8,7 +8,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <link rel="manifest" href="manifest.json">
   <title>Baby Craft</title>
-  <link rel="stylesheet" href="style.css?v=8">
+  <link rel="stylesheet" href="style.css?v=11">
 </head>
 <body>
   <canvas id="game"></canvas>
@@ -23,6 +23,7 @@
   </div>
 
   <div id="room-badge" class="room-badge hidden"></div>
+  <canvas id="minimap" class="minimap hidden"></canvas>
 
   <div id="faint" class="faint hidden"></div>
 
@@ -94,7 +95,7 @@
       <button id="btn-start" class="big-btn start" disabled aria-label="start">▶</button>
       <button id="btn-multi" class="big-btn multi" disabled aria-label="two players">👥</button>
     </div>
-    <!-- 원격 2인용: 한 기기는 🏠 방 만들기, 다른 기기는 번호 입력 후 ▶ -->
+    <!-- 원격 여럿이 하기: 한 기기는 🏠 방 만들기, 다른 기기들은 번호 입력 후 ▶ -->
     <div id="mp-panel" class="mp-panel hidden">
       <button id="btn-host" class="big-btn" aria-label="make room">🏠</button>
       <span class="mp-or">|</span>
@@ -105,6 +106,6 @@
     <p id="title-msg" class="msg"></p>
   </div>
 
-  <script src="game.js?v=10"></script>
+  <script src="game.js?v=11"></script>
 </body>
 </html>
