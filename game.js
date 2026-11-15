@@ -2520,18 +2520,56 @@ const Render = {
     this.drawMinimap(peers, boss);
   },
 
-  // 🍄 늪에 들어가면 화면이 어두워지고 내 둘레만 밝다 (천천히 바뀐다)
+  // 🍄 늪에 들어가면 화면이 어두워지고 내 둘레와 🔥 횃불 둘레만 밝다 (천천히 바뀐다)
   drawSwampDark() {
-    const want = Game.state !== 'title' && World.regionAtPx(Player.x, Player.y) === REGION.SWAMP &&
-      !Monsters.safeZone(Player.x, Player.y) ? 1 : 0; // 집 앞은 밝게
+    const home = Math.hypot(Player.x - (World.door.x * T + T / 2), Player.y - (World.door.y * T + T / 2)) < CONFIG.SAFE_RADIUS * T;
+    const want = Game.state !== 'title' && World.regionAtPx(Player.x, Player.y) === REGION.SWAMP && !home ? 1 : 0; // 집 앞은 밝게
     this.dark = (this.dark || 0) + (want - (this.dark || 0)) * 0.04;
     if (this.dark < 0.01) return;
-    const ctx = this.ctx, px = (Player.x - this.camX) * this.scale, py = (Player.y - 10 - this.camY) * this.scale;
-    const g = ctx.createRadialGradient(px, py, T * this.scale * 1.2, px, py, T * this.scale * 3.8);
-    g.addColorStop(0, `rgba(20,10,40,${0.12 * this.dark})`);
-    g.addColorStop(1, `rgba(20,10,40,${0.62 * this.dark})`);
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, this.cssW, this.cssH);
+    // 어둠은 따로 그린 다음 횃불 자리를 지워서 (destination-out) 화면에 얹는다
+    const c = this.darkCanvas || (this.darkCanvas = document.createElement('canvas'));
+    if (c.width !== this.canvas.width || c.height !== this.canvas.height) { c.width = this.canvas.width; c.height = this.canvas.height; }
+    const g = c.getContext('2d'), k = this.scale, now = performance.now() / 1000;
+    const sx = wx => (wx - this.camX) * k, sy = wy => (wy - this.camY) * k;
+    g.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    g.globalCompositeOperation = 'source-over';
+    g.clearRect(0, 0, this.cssW, this.cssH);
+    const px = sx(Player.x), py = sy(Player.y - 10);
+    const dark = g.createRadialGradient(px, py, T * k * 1.2, px, py, T * k * 3.8);
+    dark.addColorStop(0, `rgba(20,10,40,${0.12 * this.dark})`);
+    dark.addColorStop(1, `rgba(20,10,40,${0.62 * this.dark})`);
+    g.fillStyle = dark;
+    g.fillRect(0, 0, this.cssW, this.cssH);
+    // 화면 안(조금 밖까지)의 횃불: 둘레 TORCH_RADIUS 칸이 밝다 (살짝 일렁인다)
+    const reach = (CONFIG.TORCH_RADIUS + 1) * T;
+    const lit = World.torches.filter(t => t.x > this.camX - reach && t.x < this.camX + this.cssW / k + reach &&
+      t.y > this.camY - reach && t.y < this.camY + this.cssH / k + reach);
+    g.globalCompositeOperation = 'destination-out';
+    for (const t of lit) {
+      const x = sx(t.x), y = sy(t.y), r = CONFIG.TORCH_RADIUS * T * k * (1 + Math.sin(now * 7 + t.x) * 0.03);
+      const hole = g.createRadialGradient(x, y, r * 0.3, x, y, r);
+      hole.addColorStop(0, 'rgba(0,0,0,1)');
+      hole.addColorStop(1, 'rgba(0,0,0,0)');
+      g.fillStyle = hole;
+      g.fillRect(x - r, y - r, r * 2, r * 2);
+    }
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(c, 0, 0);
+    ctx.restore();
+    // 횃불 빛: 따뜻한 주황빛을 살짝 더한다
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (const t of lit) {
+      const x = sx(t.x), y = sy(t.y), r = CONFIG.TORCH_RADIUS * T * k;
+      const glow = ctx.createRadialGradient(x, y, 0, x, y, r);
+      glow.addColorStop(0, `rgba(255,150,40,${0.28 * this.dark})`);
+      glow.addColorStop(1, 'rgba(255,150,40,0)');
+      ctx.fillStyle = glow;
+      ctx.fillRect(x - r, y - r, r * 2, r * 2);
+    }
+    ctx.restore();
   },
 
   // 앞칸 표시: 캘 수 있으면 흰 테두리, 블록을 들고 있으면 놓을 자리 (놓을 수 있으면 초록, 없으면 빨강)
