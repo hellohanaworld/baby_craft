@@ -71,6 +71,7 @@ function room(code, seed, sid) {
     onWorld: cb => onValue(path(code, 'w'), s => cb(s.val())),
     sendItems: list => set(path(code, 'items'), list),
     onItems: cb => onValue(path(code, 'items'), s => cb(s.val())),
+    putTiles: edits => set(path(code, 't'), edits),
     onRoomGone: cb => onValue(path(code, 'host'), s => { if (!s.exists()) cb(); }),
     // 맵 칸: 처음 붙을 때 지금까지 바뀐 칸이 모두 오고, 그 뒤로는 바뀔 때마다 온다
     onTiles: cb => {

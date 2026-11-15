@@ -34,6 +34,8 @@ const CONFIG = {
   STEP_VOL: 0.02,         // 발자국 소리 크기 (다른 효과음은 0.06~0.15)
   KNOCKBACK: 6,           // 맞았을 때 뒤로 밀리는 속도 (타일/초, 0.15초 동안)
   SPAWN_INVULN_SEC: 3,    // 기절 후 집에서 다시 시작할 때 무적 시간
+  TORCH_RADIUS: 3,        // 타일. 🔥 횃불 둘레는 몬스터가 못 들어온다
+  SAVE_MS: 5000,          // 세상/가방 저장 간격
   TREE_HITS: 3,           // 맨손으로 나무를 캐는 데 필요한 횟수 (🪓 도끼는 한 번)
   ROCK_HITS: 5,           // 맨손으로 바위를 캐는 데 필요한 횟수 (🪓 도끼, 🗡️ 칼은 ROCK_HITS_TOOL 번)
   ROCK_HITS_TOOL: 2,
@@ -94,6 +96,11 @@ const ITEMS = {
   tree:   { emoji: '🌳', ko: '나무', en: 'tree',    kind: 'block', tile: 'TREE',   weight: 0 },
   flower: { emoji: '🌷', ko: '꽃',   en: 'flower',  kind: 'block', tile: 'FLOWER', weight: 0 },
   rock:   { emoji: '🪨', ko: '바위', en: 'boulder', kind: 'block', tile: 'ROCK',   weight: 0 },
+  // 제작대에서 만드는 블록
+  brick:  { emoji: '🧱', ko: '벽돌', en: 'brick',   kind: 'block', tile: 'BRICK',  weight: 0 },
+  gate:   { emoji: '🚪', ko: '문',   en: 'door',    kind: 'block', tile: 'GATE',   weight: 0 }, // 사람은 지나가고 몬스터는 못 지나간다
+  bridge: { emoji: '🌉', ko: '다리', en: 'bridge',  kind: 'block', tile: 'BRIDGE', weight: 0 }, // 물 위에만 놓는다
+  torch:  { emoji: '🔥', ko: '횃불', en: 'torch',   kind: 'block', tile: 'TORCH',  weight: 0 }, // 둘레에 몬스터가 못 온다
 };
 
 // 무기 (power 가 클수록 강하다. 제일 센 무기를 자동으로 든다)
@@ -104,11 +111,15 @@ const WEAPONS = {
   sword: { emoji: '🗡️', ko: '칼',   en: 'sword', power: 4 },
 };
 
-// 제작대 레시피 (집 안). unlock: 몬스터를 이만큼 잡아야 열린다
+// 제작대 레시피 (집 안). unlock: 몬스터를 이만큼 잡아야 열린다. 무기는 한 번만, 블록은 몇 번이든 (count 개씩)
 const RECIPES = [
-  { result: 'axe',   needs: { wood: 2, stone: 1 },           unlock: 0 },
-  { result: 'bow',   needs: { wood: 1, string: 2 },          unlock: 1 },
-  { result: 'sword', needs: { iron: 2, stone: 1, wood: 1 }, unlock: 2 },
+  { result: 'axe',    needs: { wood: 2, stone: 1 },           unlock: 0 },
+  { result: 'bow',    needs: { wood: 1, string: 2 },          unlock: 1 },
+  { result: 'sword',  needs: { iron: 2, stone: 1, wood: 1 }, unlock: 2 },
+  { result: 'brick',  needs: { stone: 2 },                    unlock: 0, count: 2 },
+  { result: 'gate',   needs: { wood: 2 },                     unlock: 0, count: 1 },
+  { result: 'bridge', needs: { wood: 1 },                     unlock: 0, count: 2 },
+  { result: 'torch',  needs: { wood: 1, stone: 1 },           unlock: 0, count: 2 },
 ];
 
 // 몬스터 (이름도 글자로 같이 보여준다. emoji 가 words.csv 와 같으면 처치 후 그 단어 카드가 나온다)
@@ -195,7 +206,7 @@ function itemNames(def) {
 // ============================================================
 // Store — localStorage 래퍼 (기기 안에만 저장)
 // ============================================================
-const KEYS = { settings: 'bc.settings', stats: 'bc.stats', log: 'bc.log', csv: 'bc.wordsCsv', look: 'bc.look', name: 'bc.name' };
+const KEYS = { settings: 'bc.settings', stats: 'bc.stats', log: 'bc.log', csv: 'bc.wordsCsv', look: 'bc.look', name: 'bc.name', world: 'bc.world' };
 
 const Store = {
   settings: null,
@@ -962,6 +973,8 @@ const Craft = {
   markSel() {
     [...this.el.list.children].forEach((el, i) => el.classList.toggle('sel', i === this.sel));
     $('#btn-craft-close').classList.toggle('sel', this.sel === RECIPES.length);
+    const el = this.sel < RECIPES.length ? this.el.list.children[this.sel] : $('#btn-craft-close');
+    if (el && this.open) el.scrollIntoView({ block: 'nearest' });
   },
 
   has(type, n) { return (Game.inventory[type] || 0) >= n; },
@@ -970,7 +983,8 @@ const Craft = {
     return this.unlocked(r) && !Game.weapons.has(r.result) &&
       Object.entries(r.needs).every(([type, n]) => this.has(type, n));
   },
-  canMakeAny() { return RECIPES.some(r => this.canMake(r)); },
+  // 집 위 🔨 알림은 새 무기를 만들 수 있을 때만 (블록은 자주 만들 수 있어서 알림을 띄우지 않는다)
+  canMakeAny() { return RECIPES.some(r => WEAPONS[r.result] && this.canMake(r)); },
 
   show() {
     this.open = true;
@@ -984,7 +998,7 @@ const Craft = {
 
   render() {
     this.el.list.innerHTML = RECIPES.map((r, i) => {
-      const w = WEAPONS[r.result], names = itemNames(w);
+      const w = WEAPONS[r.result] || ITEMS[r.result], names = itemNames(w), weapon = !!WEAPONS[r.result];
       const owned = Game.weapons.has(r.result), ready = this.canMake(r), locked = !this.unlocked(r);
       // 잠긴 레시피: 몬스터를 몇 마리 더 잡아야 하는지 👾 로 보여준다
       const needs = locked
@@ -995,9 +1009,9 @@ const Craft = {
             `<span class="n">${itemNames(def).main}</span><b>${have}/${n}</b></div>`;
         }).join('<span class="plus">+</span>');
       return `<div class="recipe${owned ? ' owned' : ''}${ready ? ' ready' : ''}${locked ? ' locked' : ''}">
-        <div class="recipe-result"><span class="e">${w.emoji}</span>
+        <div class="recipe-result"><span class="e">${iconHtml(w)}</span>
           <span class="names"><span class="n">${names.main}</span>${names.sub ? `<span class="s">${names.sub}</span>` : ''}</span>
-          <span class="power">${'⭐'.repeat(w.power)}</span></div>
+          <span class="power">${weapon ? '⭐'.repeat(w.power) : `x${r.count}`}</span></div>
         <div class="recipe-needs">${needs}</div>
         <button class="big-btn make" data-recipe="${i}" ${ready ? '' : 'disabled'}>${owned ? '✅' : locked ? '🔒' : '🔨'}</button>
       </div>`;
@@ -1008,13 +1022,17 @@ const Craft = {
   make(r) {
     if (!r || !this.canMake(r)) return;
     for (const [type, n] of Object.entries(r.needs)) Game.inventory[type] -= n;
-    Game.weapons.add(r.result);
-    Game.picked = Game.lastWeapon = r.result;  // 새로 만든 무기를 바로 든다
-    const w = WEAPONS[r.result], { main } = itemNames(w);
-    console.log(`[Craft] ${w.ko} 제작 (power ${w.power})`);
+    const w = WEAPONS[r.result] || ITEMS[r.result], { main } = itemNames(w);
+    if (WEAPONS[r.result]) {
+      Game.weapons.add(r.result);
+      Game.picked = Game.lastWeapon = r.result;  // 새로 만든 무기를 바로 든다
+    } else {
+      Game.inventory[r.result] = (Game.inventory[r.result] || 0) + r.count;  // 블록은 가방에 (손에 든 것은 그대로)
+    }
+    console.log(`[Craft] ${w.ko} 제작`);
     Sfx.success();
     burst();
-    toast(`${w.emoji} ${main}!`);
+    toast(`${iconHtml(w)} ${main}!`);
     if (Store.settings.lang === 'en') Speech.speak(`${w.en}!`, 'en');
     else Speech.speak(`${josa(w.ko, '을', '를')} 만들었어요!`, 'ko');
     Game.renderInventory();
@@ -1039,10 +1057,26 @@ const Craft = {
 // ============================================================
 const T = CONFIG.TILE;
 const P = T / 8; // 픽셀 한 칸
-const TILE = { GRASS: 0, TREE: 1, WATER: 2, SAND: 3, ROCK: 4, FLOWER: 5, HOUSE: 6, DOOR: 7, PATH: 8 };
-const BLOCKING = new Set([TILE.TREE, TILE.WATER, TILE.ROCK, TILE.HOUSE]);
+const TILE = {
+  GRASS: 0, TREE: 1, WATER: 2, SAND: 3, ROCK: 4, FLOWER: 5, HOUSE: 6, DOOR: 7, PATH: 8,
+  BRICK: 9, GATE: 10, BRIDGE: 11, TORCH: 12, // 놓아서 생기는 칸 (GATE 는 집 문(DOOR)과 다른 내가 놓는 문)
+};
+const BLOCKING = new Set([TILE.TREE, TILE.WATER, TILE.ROCK, TILE.HOUSE, TILE.BRICK, TILE.TORCH]);
+const MONSTER_BLOCKING = new Set([...BLOCKING, TILE.GATE]); // 문은 몬스터만 막는다
+const ARROW_BLOCKING = new Set([TILE.TREE, TILE.ROCK, TILE.HOUSE, TILE.BRICK, TILE.GATE, TILE.TORCH]);
 const CHUNK = 16; // 그림 조각 크기 (칸)
-const MINI_COLORS = ['#7ccf6f', '#2e7d32', '#3b8de0', '#e9d68f', '#8d939b', '#f48fb1', '#c0392b', '#c0392b', '#c8a06a'];
+const MINI_COLORS = ['#7ccf6f', '#2e7d32', '#3b8de0', '#e9d68f', '#8d939b', '#f48fb1', '#c0392b', '#c0392b', '#c8a06a',
+  '#b5523b', '#8d5a2b', '#a0703f', '#ffb300'];
+// 캐기: 칸 → 나오는 것, 맨손 횟수, 도구 횟수(tools 를 들었을 때), 캔 뒤 칸
+const DIG = {
+  [TILE.FLOWER]: { gives: ['flower'], hand: 1 },
+  [TILE.TREE]: { gives: ['tree', 'wood'], hand: 'TREE_HITS', tool: 1, tools: ['axe'] },
+  [TILE.ROCK]: { gives: ['rock', 'stone'], hand: 'ROCK_HITS', tool: 'ROCK_HITS_TOOL', tools: ['axe', 'sword'] },
+  [TILE.BRICK]: { gives: ['brick'], hand: 'ROCK_HITS', tool: 'ROCK_HITS_TOOL', tools: ['axe', 'sword'] },
+  [TILE.GATE]: { gives: ['gate'], hand: 'TREE_HITS', tool: 1, tools: ['axe'] },
+  [TILE.BRIDGE]: { gives: ['bridge'], hand: 1, after: TILE.WATER },
+  [TILE.TORCH]: { gives: ['torch'], hand: 1 },
+};
 // 손에 들 수 있는 것: 무기 또는 놓을 수 있는 블록
 const holdable = id => !!WEAPONS[id] || !!(ITEMS[id] && ITEMS[id].tile);
 const holdEmoji = id => (WEAPONS[id] || ITEMS[id] || WEAPONS.hand).emoji;
@@ -1075,6 +1109,7 @@ const World = {
   base: null, // 만들었을 때의 맵 (바뀐 칸만 방에 기록하므로 원래 값이 필요하다)
   chunks: new Map(), // 그림 조각: 'cx,cy' → 캔버스 (맵이 커서 보이는 조각만 그린다)
   mini: null, // 작은 지도 그림 (한 칸 = 1px)
+  torches: [], // 🔥 횃불 위치 (px, 칸 가운데)
 
   generate(seed) {
     rng = seededRandom(seed);
@@ -1121,9 +1156,38 @@ const World = {
     this.spawn = { x: (hx + 1) * T + T / 2, y: (hy + 4) * T + T / 2 };
 
     this.base = t.slice();
-    this.floodFill(hx + 1, hy + 4);
+    this.edited();
+  },
+
+  // 바뀐 칸만 (base 와 다른 칸): 저장/방에 올리기용 { 칸 번호: 값 }
+  edits() {
+    const out = {};
+    for (let i = 0; i < this.tiles.length; i++) if (this.tiles[i] !== this.base[i]) out[i] = this.tiles[i];
+    return out;
+  },
+
+  // 저장해 둔 바뀐 칸을 한 번에 (칸마다 setTile 하면 느리다)
+  applyEdits(edits) {
+    for (const [k, v] of Object.entries(edits || {})) {
+      const i = Number(k);
+      if (i >= 0 && i < this.tiles.length && Number.isInteger(v) && MINI_COLORS[v]) this.tiles[i] = v;
+    }
+    this.edited();
+  },
+
+  // 맵이 크게 바뀐 뒤: 갈 수 있는 곳, 횃불 목록, 그림을 새로
+  edited() {
+    this.floodFill(this.door.x, this.door.y + 2);
+    this.findTorches();
     this.chunks.clear();
     this.renderMini();
+  },
+
+  findTorches() {
+    this.torches = [];
+    for (let i = 0; i < this.tiles.length; i++) {
+      if (this.tiles[i] === TILE.TORCH) this.torches.push({ x: (i % this.w) * T + T / 2, y: Math.floor(i / this.w) * T + T / 2 });
+    }
   },
 
   // 맵 한 칸이 바뀜 (캐기/놓기, 다른 사람이 바꾼 것 포함): 그 칸의 그림, 작은 지도, 갈 수 있는 곳을 새로
@@ -1134,14 +1198,14 @@ const World = {
     this.chunks.delete(`${Math.floor(x / CHUNK)},${Math.floor(y / CHUNK)}`);
     this.miniPixel(x, y);
     this.floodFill(this.door.x, this.door.y + 2);
+    this.findTorches();
     Items.computeSpots();
   },
 
   // 캘 수 있는 칸 (맵 테두리 나무는 안 된다)
   diggable(tx, ty) {
     if (tx <= 0 || ty <= 0 || tx >= this.w - 1 || ty >= this.h - 1) return false;
-    const tt = this.tile(tx, ty);
-    return tt === TILE.TREE || tt === TILE.FLOWER || tt === TILE.ROCK;
+    return !!DIG[this.tile(tx, ty)];
   },
 
   floodFill(sx, sy) {
@@ -1163,9 +1227,9 @@ const World = {
   },
   tileAtPx(x, y) { return this.tile(Math.floor(x / T), Math.floor(y / T)); },
 
-  canStand(x, y, r = CONFIG.PLAYER_RADIUS * T) {
+  canStand(x, y, r = CONFIG.PLAYER_RADIUS * T, blocking = BLOCKING) {
     for (const [dx, dy] of [[-r, -r], [r, -r], [-r, r], [r, r]]) {
-      if (BLOCKING.has(this.tileAtPx(x + dx, y + dy))) return false;
+      if (blocking.has(this.tileAtPx(x + dx, y + dy))) return false;
     }
     return true;
   },
@@ -1243,6 +1307,36 @@ const World = {
         specks(6, ['#6f757d', '#7d838b'], 70);
         break;
       case TILE.PATH: fill('#c8a06a'); specks(5, ['#b48a55', '#d6b07c'], 80); break;
+      case TILE.BRICK:
+        fill('#b5523b');
+        for (let r = 0; r < 4; r++) {
+          px(0, r * 2 + 1, '#e8d5b0', 8, 0.5);
+          const off = r % 2 ? 0 : 2;
+          px(off, r * 2, '#e8d5b0', 0.5, 1); px(off + 4, r * 2, '#e8d5b0', 0.5, 1);
+        }
+        specks(4, ['#a1452f', '#c4644a'], 90);
+        break;
+      case TILE.GATE:
+        grass();
+        px(1, 0, '#5d3a1a', 6, 8);
+        px(1.5, 0.5, '#8d5a2b', 5, 7.5);
+        px(3.9, 0.5, '#6d4321', 0.3, 7.5);
+        px(1.5, 3, '#6d4321', 5, 0.4);
+        px(5.2, 4, '#f1c40f', 0.8, 0.8);
+        break;
+      case TILE.BRIDGE:
+        fill('#3b8de0');
+        px(0, 0.5, '#5d4037', 8, 1);
+        px(0, 6.5, '#5d4037', 8, 1);
+        for (let k = 0; k < 4; k++) px(k * 2, 1.5, '#a0703f', 1.6, 5);
+        break;
+      case TILE.TORCH:
+        grass();
+        px(3.5, 3.5, '#6d4c41', 1, 4);
+        px(3, 1.5, '#ff9800', 2, 2);
+        px(3.5, 0.5, '#ffeb3b', 1, 2);
+        px(3.25, 2.5, '#fff59d', 0.5, 0.5);
+        break;
       default: break; // HOUSE, DOOR 는 drawHouse 에서 한 번에 그린다
     }
   },
@@ -1397,16 +1491,23 @@ const Monsters = {
   // 길 막힘 판정용 몸 크기 (용은 맞는 범위보다 작게 해서 한 칸 틈도 지나간다)
   bodyRadius(m) { return (m.def.boss ? 0.42 : 0.3) * T; },
 
+  // 집 주변과 🔥 횃불 둘레
   safeZone(x, y) {
-    return Math.hypot(x - (World.door.x * T + T / 2), y - (World.door.y * T + T / 2)) < CONFIG.SAFE_RADIUS * T;
+    if (Math.hypot(x - (World.door.x * T + T / 2), y - (World.door.y * T + T / 2)) < CONFIG.SAFE_RADIUS * T) return true;
+    return World.torches.some(t => Math.hypot(x - t.x, y - t.y) < CONFIG.TORCH_RADIUS * T);
   },
 
-  canStand(m, x, y) { return !this.safeZone(x, y) && World.canStand(x, y, this.bodyRadius(m)); },
+  // 안전지대 안에 있던 몬스터(옆에 횃불을 놓은 경우)는 빠져나갈 때까지 안전지대를 무시한다
+  canStand(m, x, y) {
+    if (!this.safeZone(m.x, m.y) && this.safeZone(x, y)) return false;
+    return World.canStand(x, y, this.bodyRadius(m), MONSTER_BLOCKING);
+  },
 
   // 집에서 멀고 플레이어와도 먼 곳
   spots(minFromHome) {
     return Items.spots.filter(s =>
       Math.hypot(s.x - World.door.x, s.y - World.door.y) >= minFromHome &&
+      !this.safeZone(s.x * T + T / 2, s.y * T + T / 2) &&
       !Multi.nearPlayer(s.x * T, s.y * T, 7 * T));
   },
 
@@ -1555,7 +1656,7 @@ const Monsters = {
       a.y += a.fy * step;
       a.left -= step;
       const tt = World.tileAtPx(a.x, a.y + 8);
-      let done = a.left <= 0 || tt === TILE.TREE || tt === TILE.ROCK || tt === TILE.HOUSE;
+      let done = a.left <= 0 || ARROW_BLOCKING.has(tt);
       const target = !done && this.list.find(m => Math.hypot(m.x - a.x, m.y - (a.y + 8)) < this.radius(m) + 8);
       if (target) { this.damage(target, a.power); done = true; }
       else if (!done && Multi.hitPeers(a.x, a.y + 8, 8)) done = true;
@@ -1754,8 +1855,10 @@ const Multi = {
   },
 
   async startHost() {
-    const Net = await import('./net.js?v=11');
+    const Net = await import('./net.js?v=17');
     this.net = await Net.host(Game.seed, this.sid);
+    const edits = World.edits();
+    if (Object.keys(edits).length) await this.net.putTiles(edits);
     this.mode = 'host';
     this.listen();
     this.showBadge(this.net.code);
@@ -1763,7 +1866,7 @@ const Multi = {
   },
 
   async startGuest(code) {
-    const Net = await import('./net.js?v=11');
+    const Net = await import('./net.js?v=17');
     this.net = await Net.join(code, this.sid);
     this.mode = 'guest';
     // 같은 시드로 같은 맵. 바뀐 칸, 아이템, 몬스터는 방에서 받는다
@@ -2584,8 +2687,11 @@ const Game = {
       return;
     }
 
-    this.seed = Math.floor(Math.random() * 1e9);
+    // 저장해 둔 세상이 있으면 이어서 (맵 + 바뀐 칸 + 가방), 없으면 새 세상
+    const save = Store.get(KEYS.world, null);
+    this.seed = save && Number.isInteger(save.seed) ? save.seed : Math.floor(Math.random() * 1e9);
     World.generate(this.seed);
+    if (save) this.loadSave(save);
     Player.reset();
     Items.fill();
     Monsters.fill();
@@ -2594,6 +2700,7 @@ const Game = {
     this.initMultiPanel();
     this.initLook();
     this.initName();
+    this.initSave(!!save);
 
     this.state = 'title';
     const btn = $('#btn-start');
@@ -2687,6 +2794,55 @@ const Game = {
     this.playerName = name;
     Store.set(KEYS.name, name);
     return true;
+  },
+
+  // ---------- 저장: 이 기기의 세상(맵 + 바뀐 칸) + 가방 ----------
+  // 여럿이 할 때 방장은 자기 세상을 그대로 방으로 열고, 손님은 가방만 저장한다 (손님의 세상은 그대로)
+  loadSave(save) {
+    World.applyEdits(save.edits);
+    const bag = save.bag || {};
+    for (const [type, n] of Object.entries(bag.inventory || {})) if (ITEMS[type] && n > 0) this.inventory[type] = n;
+    for (const id of bag.weapons || []) if (WEAPONS[id]) this.weapons.add(id);
+    if (holdable(bag.picked)) this.picked = bag.picked;
+    if (WEAPONS[bag.lastWeapon]) this.lastWeapon = bag.lastWeapon;
+    this.kills = bag.kills || 0;
+    for (const r of RECIPES) if (r.unlock > 0 && this.kills >= r.unlock) this.unlockShown.add(r.result);
+    Monsters.kills = save.monsterKills || 0;
+    Monsters.nextBossAt = save.nextBossAt || CONFIG.BOSS_AFTER_KILLS;
+    console.log(`[Save] 불러옴: 바뀐 칸 ${Object.keys(save.edits || {}).length}개`);
+  },
+
+  writeSave() {
+    if (this.state === 'loading' || this.state === 'title' || this.state === 'starting') return;
+    const old = Store.get(KEYS.world, null) || {};
+    const bag = {
+      inventory: this.inventory, weapons: [...this.weapons], picked: this.picked, lastWeapon: this.lastWeapon, kills: this.kills,
+    };
+    if (Multi.isGuest) { Store.set(KEYS.world, { ...old, bag }); return; }
+    Store.set(KEYS.world, {
+      seed: this.seed, edits: World.edits(), bag, monsterKills: Monsters.kills, nextBossAt: Monsters.nextBossAt,
+    });
+  },
+
+  // 시작 화면의 🌱 새 세상: 한 번 누르면 ❗ 로 바뀌고, 3초 안에 한 번 더 누르면 지우고 새로 시작
+  initSave(hasSave) {
+    setInterval(() => this.writeSave(), CONFIG.SAVE_MS);
+    addEventListener('pagehide', () => this.writeSave());
+    document.addEventListener('visibilitychange', () => { if (document.hidden) this.writeSave(); });
+    const btn = $('#btn-new');
+    btn.classList.toggle('hidden', !hasSave);
+    let armed = 0;
+    btn.addEventListener('click', () => {
+      if (performance.now() - armed < 3000) {
+        try { localStorage.removeItem(KEYS.world); } catch { /* 저장 불가 */ }
+        location.reload();
+        return;
+      }
+      armed = performance.now();
+      btn.textContent = '❗';
+      btn.classList.add('armed');
+      setTimeout(() => { btn.textContent = '🌱'; btn.classList.remove('armed'); }, 3000);
+    });
   },
 
   // 캐릭터 모양: 처음엔 무작위, 이 기기에 저장. 🎨 로 다음 모양
@@ -2859,33 +3015,30 @@ const Game = {
     const i = ty * World.w + tx, tt = World.tiles[i];
     if (this.dig.i !== i) this.dig = { i, n: 0 };
     this.dig.n++;
-    const w = this.weapon;
-    const need = tt === TILE.TREE ? (w === 'axe' ? 1 : CONFIG.TREE_HITS)
-      : tt === TILE.ROCK ? (w === 'axe' || w === 'sword' ? CONFIG.ROCK_HITS_TOOL : CONFIG.ROCK_HITS) : 1;
+    const dig = DIG[tt], num = v => (typeof v === 'string' ? CONFIG[v] : v);
+    const need = dig.tools && dig.tools.includes(this.weapon) ? num(dig.tool) : num(dig.hand);
     Sfx.hit();
     Floaters.add(tx * T + T / 2, ty * T + T / 4, this.dig.n < need ? '💥' : '✨', 16);
     if (this.dig.n < need || this.busy) return;
     this.dig = { i: -1, n: 0 };
     this.busy = true;
-    const ok = await Multi.editTile(i, tt, TILE.GRASS);
+    const ok = await Multi.editTile(i, tt, dig.after ?? TILE.GRASS);
     this.busy = false;
-    if (!ok) return;
-    if (tt === TILE.TREE) { this.addItem('tree'); this.addItem('wood'); }
-    else if (tt === TILE.ROCK) { this.addItem('rock'); this.addItem('stone'); }
-    else this.addItem('flower');
+    if (ok) dig.gives.forEach(type => this.addItem(type));
   },
 
   // 놓을 수 있는 칸: 풀밭/모래이고, 사람/몬스터/아이템이 없고, 집 문 앞이 아닌 곳
   canPlace(tx, ty) {
     if (tx <= 0 || ty <= 0 || tx >= World.w - 1 || ty >= World.h - 1) return false;
-    const tt = World.tile(tx, ty);
-    if (tt !== TILE.GRASS && tt !== TILE.SAND) return false;
+    const tt = World.tile(tx, ty), def = ITEMS[this.heldBlock], next = def && TILE[def.tile];
+    // 다리는 물 위에만, 나머지는 풀밭/모래에만
+    if (next === TILE.BRIDGE ? tt !== TILE.WATER : tt !== TILE.GRASS && tt !== TILE.SAND) return false;
     if (tx === World.door.x && ty > World.door.y && ty <= World.door.y + 4) return false;
     const x0 = tx * T, y0 = ty * T;
     const overlaps = (x, y, r) => x + r > x0 && x - r < x0 + T && y + r > y0 && y - r < y0 + T;
-    const pr = CONFIG.PLAYER_RADIUS * T, def = ITEMS[this.heldBlock];
-    // 길을 막는 것(나무, 바위)은 다른 사람/몬스터 자리에는 못 놓는다. 내 몸이 살짝 걸치는 건 놓은 뒤 내 칸 가운데로 옮긴다
-    if (def && BLOCKING.has(TILE[def.tile])) {
+    const pr = CONFIG.PLAYER_RADIUS * T;
+    // 길을 막는 것(나무, 바위, 벽돌, 횃불, 문)은 다른 사람/몬스터 자리에는 못 놓는다. 내 몸이 살짝 걸치는 건 놓은 뒤 내 칸 가운데로 옮긴다
+    if (MONSTER_BLOCKING.has(next)) {
       if (Multi.visiblePeers().some(p => overlaps(p.x, p.y, pr))) return false;
       if (Monsters.list.some(m => overlaps(m.x, m.y, Monsters.radius(m)))) return false;
     }
