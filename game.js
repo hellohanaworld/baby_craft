@@ -469,27 +469,28 @@ const Sfx = {
   hit() { this.tone(180, 0.1, { type: 'square', to: 90, vol: 0.08 }); },
   hurt() { this.tone(440, 0.2, { type: 'triangle', to: 220, vol: 0.1 }); },
   defeat() { [392, 523, 659].forEach((f, i) => this.tone(f, 0.12, { type: 'square', vol: 0.06, delay: i * 0.06 })); },
-  // 탁탁탁: 묵직함 없이 가볍고 짧은 발소리 (높은 잡음 한 번). 왼발/오른발 높이를 조금 다르게
+  // 사박사박: 날카롭지 않은 '쉭' 같은 화이트 노이즈 발소리 (낮은 소리와 아주 높은 소리는 깎는다)
   step(left) {
     const ctx = this.ctx;
     if (!ctx) return;
     const t0 = ctx.currentTime;
     if (!this.noise) {
-      this.noise = ctx.createBuffer(1, ctx.sampleRate * 0.12, ctx.sampleRate);
+      this.noise = ctx.createBuffer(1, ctx.sampleRate * 0.2, ctx.sampleRate);
       const d = this.noise.getChannelData(0);
-      for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length);
+      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
     }
-    const src = ctx.createBufferSource(), filter = ctx.createBiquadFilter(), gain = ctx.createGain();
+    const src = ctx.createBufferSource(), high = ctx.createBiquadFilter(), low = ctx.createBiquadFilter(), gain = ctx.createGain();
     src.buffer = this.noise;
-    filter.type = 'bandpass';
-    filter.frequency.value = left ? 2600 : 3100;
-    filter.Q.value = 1.2;
+    high.type = 'highpass';
+    high.frequency.value = 500;
+    low.type = 'lowpass';
+    low.frequency.value = left ? 4000 : 4800;
     gain.gain.setValueAtTime(0.0001, t0);
-    gain.gain.exponentialRampToValueAtTime(0.6, t0 + 0.004);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.045);
-    src.connect(filter).connect(gain).connect(ctx.destination);
+    gain.gain.exponentialRampToValueAtTime(0.25, t0 + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.13);
+    src.connect(high).connect(low).connect(gain).connect(ctx.destination);
     src.start(t0);
-    src.stop(t0 + 0.06);
+    src.stop(t0 + 0.15);
   },
   boss() { this.tone(110, 0.6, { type: 'sawtooth', to: 70, vol: 0.08 }); this.tone(147, 0.6, { type: 'sawtooth', to: 90, vol: 0.06, delay: 0.3 }); },
 };
