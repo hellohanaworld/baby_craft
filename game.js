@@ -30,6 +30,7 @@ const CONFIG = {
   MAX_HEARTS: 5,
   INVULN_SEC: 1.2,        // 다친 뒤 무적 시간
   HIT_FLASH_SEC: 0.35,    // 맞았을 때 빨갛게 번쩍이며 흔들리는 시간
+  STEP_SEC: 0.3,          // 발자국 소리 간격
   KNOCKBACK: 6,           // 맞았을 때 뒤로 밀리는 속도 (타일/초, 0.15초 동안)
   SPAWN_INVULN_SEC: 3,    // 기절 후 집에서 다시 시작할 때 무적 시간
   MONSTER_COUNT: 5,
@@ -468,6 +469,26 @@ const Sfx = {
   hit() { this.tone(180, 0.1, { type: 'square', to: 90, vol: 0.08 }); },
   hurt() { this.tone(440, 0.2, { type: 'triangle', to: 220, vol: 0.1 }); },
   defeat() { [392, 523, 659].forEach((f, i) => this.tone(f, 0.12, { type: 'square', vol: 0.06, delay: i * 0.06 })); },
+  // 터벅터벅: 낮은 '쿵' + 짧은 흙 밟는 소리. 왼발/오른발 높이를 조금 다르게
+  step(left) {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const t0 = ctx.currentTime;
+    if (!this.noise) {
+      this.noise = ctx.createBuffer(1, ctx.sampleRate * 0.12, ctx.sampleRate);
+      const d = this.noise.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length);
+    }
+    const src = ctx.createBufferSource(), filter = ctx.createBiquadFilter(), gain = ctx.createGain();
+    src.buffer = this.noise;
+    filter.type = 'lowpass';
+    filter.frequency.value = left ? 700 : 900;
+    gain.gain.setValueAtTime(0.5, t0);
+    gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.1);
+    src.connect(filter).connect(gain).connect(ctx.destination);
+    src.start(t0);
+    this.tone(left ? 95 : 115, 0.09, { to: 55, vol: 0.35 });
+  },
   boss() { this.tone(110, 0.6, { type: 'sawtooth', to: 70, vol: 0.08 }); this.tone(147, 0.6, { type: 'sawtooth', to: 90, vol: 0.06, delay: 0.3 }); },
 };
 
@@ -1463,6 +1484,8 @@ const Player = {
   dir: 'down',
   moving: false,
   walkT: 0,
+  stepT: 0,
+  stepLeft: false,
   swingT: 0,
   invulnT: 0,
   hitT: 0,
@@ -1489,7 +1512,7 @@ const Player = {
     const v = Input.vector();
     this.moving = v.x !== 0 || v.y !== 0;
     this.swingT = Math.max(0, this.swingT - dt);
-    if (!this.moving) return;
+    if (!this.moving) { this.stepT = 0; return; }
     this.walkT += dt;
     if (Math.abs(v.x) > Math.abs(v.y)) this.dir = v.x < 0 ? 'left' : 'right';
     else this.dir = v.y < 0 ? 'up' : 'down';
@@ -1498,6 +1521,12 @@ const Player = {
     if (this.canStand(nx, this.y)) this.x = nx;
     const ny = this.y + v.y * speed * dt;
     if (this.canStand(this.x, ny)) this.y = ny;
+    this.stepT -= dt;
+    if (this.stepT <= 0) {
+      this.stepT = CONFIG.STEP_SEC;
+      this.stepLeft = !this.stepLeft;
+      Sfx.step(this.stepLeft);
+    }
   },
 };
 
@@ -1575,10 +1604,22 @@ const Multi = {
     return { emoji: '', ko: name, en: name, boss: false, drops: {} };
   },
 
+  // 방 번호: 왼쪽 위에 작게 계속 + 처음엔 가운데에 크게 (누르면 다시 크게)
   showBadge(code) {
     const b = $('#room-badge');
     b.textContent = `👥 ${code}`;
     b.classList.remove('hidden');
+    b.onclick = () => this.showCode(code);
+    this.showCode(code);
+  },
+
+  showCode(code) {
+    const el = $('#room-code');
+    el.innerHTML = `<div class="room-code-label">👥 방 번호</div><div class="room-code-num">${code}</div>`;
+    el.classList.remove('hidden');
+    clearTimeout(this.codeTimer);
+    this.codeTimer = setTimeout(() => el.classList.add('hidden'), 8000);
+    el.onclick = () => el.classList.add('hidden');
   },
 
   async startHost() {
@@ -2337,6 +2378,7 @@ const Game = {
     btn.addEventListener('click', () => this.start());
     requestAnimationFrame(t => this.loop(t));
     this.keepAliveInBackground();
+    this.initFullscreen();
   },
 
   async start() {
@@ -2350,7 +2392,27 @@ const Game = {
     this.state = 'starting';
     Sfx.unlock();
     Speech.unlock();
+    this.goFullscreen();
     return true;
+  },
+
+  // 폰 아래 버튼(뒤로/홈)을 덜 건드리게 전체 화면으로. 누른 순간에만 허락된다.
+  // 실수로 빠져나가면 다음에 화면을 누를 때 다시 들어간다
+  goFullscreen() {
+    const el = document.documentElement;
+    const req = el.requestFullscreen || el.webkitRequestFullscreen;
+    this.wantFullscreen = true;
+    if (!req || document.fullscreenElement || document.webkitFullscreenElement) return;
+    try {
+      const p = req.call(el, { navigationUI: 'hide' });
+      if (p && p.catch) p.catch(() => {});
+    } catch { /* 미지원 */ }
+  },
+
+  initFullscreen() {
+    document.addEventListener('pointerdown', () => {
+      if (this.wantFullscreen && this.state === 'play') this.goFullscreen();
+    }, true);
   },
 
   async begin() {

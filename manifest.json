@@ -1,0 +1,9 @@
+{
+  "name": "Baby Craft",
+  "short_name": "Baby Craft",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "background_color": "#5cb85c",
+  "theme_color": "#5cb85c"
+}
