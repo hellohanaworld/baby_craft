@@ -43,6 +43,8 @@ const CONFIG = {
   FLEE_RANGE: 3.5,          // 타일. 초식동물/물고기는 사람이나 육식동물이 이만큼 오면 도망간다
   PET_FOLLOW: 1.3,        // 타일. 먹이를 받은 동물이 주인과 이만큼 떨어져 따라온다
   PET_TELEPORT: 12,       // 타일. 주인과 이보다 멀어지면 (집에서 다시 시작 등) 주인 옆으로 온다
+  PET_PLAY: [1.1, 2.4],   // 타일. 따라온 동물이 주인 둘레를 서성이는 거리 (가까이 ~ 멀리)
+  PET_HAPPY_SEC: 3,       // 먹이를 또 받으면 이만큼 신나서 콩콩 뛴다
   BITE_SEC: 1,            // 육식동물이 초식동물을 무는 간격
   THROW_RANGE: 5,         // 타일. 먹이 던지는 거리
   AGGRO_RANGE: 4.5,       // 타일. 이 안에 들어오면 몬스터가 다가온다
@@ -1668,7 +1670,8 @@ const Monsters = {
       id: this.nextId++, type, def, x: spot.x * T + T / 2, y: spot.y * T + T / 2, hp: def.hp,
       dirX: 0, dirY: 0, wanderT: 0, hitT: 0, biteT: 0, knock: { x: 0, y: 0, t: 0 },
       phase: Math.random() * Math.PI * 2, faceRight: false,
-      home: def.boss ? -1 : def.region, owner: null, ...extra,
+      home: def.boss ? -1 : def.region, owner: null,
+      hopT: 0, emote: '', emoteT: 0, happyT: 0, playT: 0, spot: null, ...extra,
     };
     this.list.push(m);
     return m;
@@ -1729,6 +1732,9 @@ const Monsters = {
     for (const m of [...this.list]) {
       m.hitT = Math.max(0, m.hitT - dt);
       m.biteT = Math.max(0, m.biteT - dt);
+      m.hopT = Math.max(0, m.hopT - dt);
+      m.emoteT = Math.max(0, m.emoteT - dt);
+      m.happyT = Math.max(0, m.happyT - dt);
       let v;
       if (m.knock.t > 0) {
         m.knock.t -= dt;
@@ -1777,18 +1783,68 @@ const Monsters = {
     if (m.owner) {
       const o = m.owner === Multi.sid ? Player : Multi.peers.get(m.owner);
       if (!o || (o !== Player && !o.seen)) m.owner = null; // 주인이 나갔다
-      else {
-        const dx = o.x - m.x, dy = o.y - m.y, d = Math.hypot(dx, dy);
-        if (d > CONFIG.PET_TELEPORT * T) { m.x = o.x; m.y = o.y; return { x: 0, y: 0 }; }
-        if (d < CONFIG.PET_FOLLOW * T) return { x: 0, y: 0 };
-        // 멀수록 빨리 (사람보다 조금 빠르게까지)
-        const s = Math.min(CONFIG.PLAYER_SPEED * T * 1.1, Math.max(speed, d * 2));
-        return { x: dx / d * s, y: dy / d * s };
-      }
+      else return this.petMove(m, dt, o);
     }
     const n = this.nearest(m, scary);
     if (n && n.d < CONFIG.FLEE_RANGE * T && n.d > 1) return { x: -n.dx / n.d * speed, y: -n.dy / n.d * speed };
     return this.wander(m, dt, 0.4);
+  },
+
+  // 따라온 동물: 주인 둘레에 저마다 자리를 잡고, 몇 초마다 자리를 바꾸며 서성인다. 가끔 콩 뛰며 💕 🎵.
+  // 주인이 멀어지면 서둘러 따라오고, 다른 동물과 겹치면 서로 비켜 선다
+  petMove(m, dt, o) {
+    const dx0 = o.x - m.x, dy0 = o.y - m.y, d0 = Math.hypot(dx0, dy0);
+    if (d0 > CONFIG.PET_TELEPORT * T) { m.x = o.x; m.y = o.y; m.spot = null; return { x: 0, y: 0 }; }
+    const pets = this.list.filter(p => p.owner === m.owner), k = pets.indexOf(m);
+    const happy = m.happyT > 0;
+    m.playT -= dt;
+    if (!m.spot || m.playT <= 0) {
+      // 저마다 다른 방향 (동물 수만큼 둘레를 나눈다) + 조금씩 흔들기
+      m.playT = randFloat(1.5, 3.5);
+      const a = (k / pets.length) * Math.PI * 2 + randFloat(-0.7, 0.7);
+      const [near, far] = CONFIG.PET_PLAY, r = (happy ? near : randFloat(near, far)) * T;
+      m.spot = { x: Math.cos(a) * r, y: Math.sin(a) * r };
+    }
+    let vx = 0, vy = 0;
+    const tx = o.x + m.spot.x - m.x, ty = o.y + m.spot.y - m.y, d = Math.hypot(tx, ty);
+    if (d > 6) {
+      // 주인과 멀면 서둘러 (사람보다 조금 빠르게까지), 가까우면 어슬렁어슬렁
+      const s = d0 > CONFIG.PET_PLAY[1] * T + T
+        ? Math.min(CONFIG.PLAYER_SPEED * T * 1.1, Math.max(m.def.speed * T, d0 * 2))
+        : m.def.speed * T * 0.55;
+      vx = tx / d * Math.min(s, d * 4);
+      vy = ty / d * Math.min(s, d * 4);
+    } else {
+      m.faceRight = o.x > m.x; // 멈춰 있을 때는 주인을 바라본다
+      // 애교: 가끔 콩 뛰며 하트/음표. 신났을 때는 계속 콩콩
+      if (m.hopT <= 0 && Math.random() < (happy ? 1 : dt * 0.35)) {
+        m.hopT = 0.4;
+        if (happy || Math.random() < 0.6) this.emote(m, happy ? (Math.random() < 0.5 ? '😍' : '💕') : ['💕', '🎵', '✨', '😊'][Math.floor(Math.random() * 4)]);
+      }
+    }
+    // 다른 동물과 겹치지 않게 서로 밀어낸다
+    for (const p of this.list) {
+      if (p === m || p.def.swim) continue;
+      const ox = m.x - p.x, oy = m.y - p.y, od = Math.hypot(ox, oy), min = 0.75 * T;
+      if (od > 0.01 && od < min) { vx += ox / od * (min - od) * 4; vy += oy / od * (min - od) * 4; }
+    }
+    return { x: vx, y: vy };
+  },
+
+  // 머리 위에 잠깐 뜨는 그림 (💕 🎵 😍). 손님 기기에도 보이게 몬스터 정보에 실어 보낸다
+  emote(m, icon, sec = 1.2) {
+    if (m.emoteT > 0.4 && m.emote === icon) return;
+    m.emote = icon;
+    m.emoteT = sec;
+  },
+
+  // 내 동물에게 먹이를 또 줌: 체력이 차고 신나서 콩콩 뛴다 (방장/혼자 기기)
+  cheer(m) {
+    m.hp = m.def.hp;
+    m.happyT = CONFIG.PET_HAPPY_SEC;
+    m.hopT = 0;
+    m.spot = null;
+    this.emote(m, '😍', 1.6);
   },
 
   // 가끔 방향을 바꿔 돌아다닌다. 사는 구역 밖으로 나왔으면 구역 가운데 쪽으로 돌아간다
@@ -1893,7 +1949,8 @@ const Monsters = {
       let done = a.left <= 0 || ARROW_BLOCKING.has(tt);
       if (a.food) {
         // 먹이: 아직 주인 없는 초식동물에 맞으면 따라온다. 못 맞히면 떨어진 자리에 놓인다 (다시 주울 수 있다)
-        const target = !done && this.list.find(m => this.tameable(m) && !m.owner && Math.hypot(m.x - a.x, m.y - (a.y + 8)) < this.radius(m) + 10);
+        const target = !done && this.list.find(m => this.tameable(m) && (!m.owner || m.owner === Multi.sid) &&
+          Math.hypot(m.x - a.x, m.y - (a.y + 8)) < this.radius(m) + 10);
         if (target) {
           this.feed(target);
           this.arrows.splice(this.arrows.indexOf(a), 1);
@@ -1910,10 +1967,10 @@ const Monsters = {
     }
   },
 
-  // 먹이가 동물에 맞음. 손님 기기는 방장에게 알리고 답('tamed')을 기다린다
+  // 먹이가 동물에 맞음: 처음이면 따라오고, 내 동물이면 좋아한다. 손님 기기는 방장에게 알리고 답('tamed'/'yum')을 기다린다
   feed(m) {
     if (Multi.isGuest) { Multi.send('feed', 'H', m.id); return; }
-    if (this.tame(m, Multi.sid)) Game.onPetTamed(m.def);
+    if (m.owner === Multi.sid) { this.cheer(m); Game.onPetHappy(m.def); } else if (this.tame(m, Multi.sid)) Game.onPetTamed(m.def);
   },
 
   // 못 맞힌 먹이: 날아온 길을 되짚어 설 수 있는 곳에 떨어뜨린다 (물이나 나무 위에 놓이지 않게)
@@ -2261,7 +2318,14 @@ const Multi = {
       followRemote(p, dt);
       if (p.seen && now - p.lastSeen > CONFIG.NET_TIMEOUT_MS) this.leave(p.sid);
     }
-    if (this.isGuest) for (const m of Monsters.list) followRemote(m, dt);
+    if (this.isGuest) {
+      for (const m of Monsters.list) {
+        followRemote(m, dt);
+        m.hopT = Math.max(0, (m.hopT || 0) - dt);
+        m.emoteT = Math.max(0, (m.emoteT || 0) - dt);
+        if (m.emoteT <= 0) m.emote = '';
+      }
+    }
     this.sendT -= dt * 1000;
     if (this.sendT > 0 || this.roomGone) return;
     this.sendT = CONFIG.NET_SEND_MS;
@@ -2307,7 +2371,8 @@ const Multi = {
     }
     return this.net.sendWorld({
       h: this.beat,
-      m: Monsters.list.map(m => [m.id, m.type, r(m.x), r(m.y), m.hp, m.faceRight ? 1 : 0, m.hitT > 0 ? 1 : 0, m.owner || 0]),
+      m: Monsters.list.map(m => [m.id, m.type, r(m.x), r(m.y), m.hp, m.faceRight ? 1 : 0, m.hitT > 0 ? 1 : 0, m.owner || 0,
+        m.hopT > 0 ? 1 : 0, m.emoteT > 0 ? m.emote : 0]),
     });
   },
 
@@ -2369,9 +2434,12 @@ const Multi = {
       Game.onMonsterDefeated({ def });
     } else if (kind === 'feed' && this.isHost) {
       const m = Monsters.list.find(mm => mm.id === args[0]);
-      if (m && Monsters.tame(m, from.sid)) this.send('tamed', from.sid, m.type);
+      if (m && m.owner === from.sid) { Monsters.cheer(m); this.send('yum', from.sid, m.type); }
+      else if (m && Monsters.tame(m, from.sid)) this.send('tamed', from.sid, m.type);
     } else if (kind === 'tamed') {
       if (MONSTERS[args[0]]) Game.onPetTamed(MONSTERS[args[0]]);
+    } else if (kind === 'yum') {
+      if (MONSTERS[args[0]]) Game.onPetHappy(MONSTERS[args[0]]);
     } else if (kind === 'petGone') {
       if (MONSTERS[args[0]]) Game.onPetLost(MONSTERS[args[0]]);
     } else if (kind === 'drop' && this.isHost) {
@@ -2392,7 +2460,7 @@ const Multi = {
     if (!w) return;
     const seen = new Set();
     const hadBoss = !!Monsters.boss;
-    for (const [id, type, x, y, hp, face, hit, owner] of (w.m || []).filter(Boolean)) {
+    for (const [id, type, x, y, hp, face, hit, owner, hop, emote] of (w.m || []).filter(Boolean)) {
       seen.add(id);
       let m = this.monsterMap.get(id);
       if (!m) {
@@ -2400,6 +2468,8 @@ const Multi = {
         this.monsterMap.set(id, m);
       }
       Object.assign(m, { tx: x, ty: y, hp, faceRight: !!face, owner: owner || null });
+      if (hop && !(m.hopT > 0)) m.hopT = 0.4;
+      if (emote && m.emote !== emote) { m.emote = String(emote).slice(0, 4); m.emoteT = 1.2; }
       if (hit) m.hitT = 0.25;
     }
     for (const id of [...this.monsterMap.keys()]) if (!seen.has(id)) this.monsterMap.delete(id);
@@ -2696,7 +2766,9 @@ const Render = {
 
   drawMonster(m, time) {
     const ctx = this.ctx, s = m.def.size;
-    const bob = Math.sin(time * 6 + m.phase) * 1.5;
+    // 콩 뛰기 (애교): 0.4초 동안 위로 솟았다 내려온다
+    const hop = m.hopT > 0 ? Math.sin(Math.PI * (1 - m.hopT / 0.4)) * 10 : 0;
+    const bob = Math.sin(time * 6 + m.phase) * 1.5 - hop;
     ctx.fillStyle = m.def.swim ? 'rgba(255,255,255,.35)' : 'rgba(0,0,0,.22)';
     ctx.beginPath();
     ctx.ellipse(m.x, m.y + s * 0.35, s * 0.4, s * 0.12, 0, 0, Math.PI * 2);
@@ -2721,6 +2793,17 @@ const Render = {
     for (let i = 0; i < max; i++) {
       ctx.fillStyle = i >= hp ? '#e0e0e0' : m.owner ? '#43a047' : '#e53935';
       ctx.fillRect(left + i * cw, top, cw - 2, ch);
+    }
+    // 머리 위 그림 (💕 🎵 😍): 떠오르며 사라진다
+    if (m.emoteT > 0 && m.emote) {
+      const k = Math.min(1, m.emoteT / 0.4);
+      ctx.save();
+      ctx.globalAlpha = k;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = `16px ${FONT_EMOJI}`;
+      ctx.fillText(m.emote, m.x, top - 12 - (1.2 - Math.min(1.2, m.emoteT)) * 10);
+      ctx.restore();
     }
     // 먹이를 받아 따라오는 동물: 체력 막대 옆에 💕 (내 동물은 크게)
     if (m.owner) {
@@ -3547,6 +3630,13 @@ const Game = {
     toast(`💕 ${def.emoji} ${itemNames(def).main}`);
     if (Store.settings.lang === 'en') Speech.speak(`The ${def.en} likes you!`, 'en');
     else Speech.speak(`${josa(def.ko, '이', '가')} 따라와요!`, 'ko');
+  },
+
+  onPetHappy(def) {
+    Sfx.pickup();
+    toast(`😍 ${def.emoji} ${itemNames(def).main}`);
+    if (Store.settings.lang === 'en') Speech.speak(`The ${def.en} loves it!`, 'en');
+    else Speech.speak(`${josa(def.ko, '이', '가')} 좋아해요!`, 'ko');
   },
 
   onPetLost(def) {
