@@ -106,7 +106,7 @@ Chrome 에서 <http://localhost:8000> 을 엽니다. ▶ 를 누르면 마이크
 
 | 옵션 | 값 | 예시 |
 |---|---|---|
-| `lang` | `ko`, `en`, `both` | `?lang=ko` |
+| `lang` | `ko`, `en`, `both` (지금 words.csv 에는 한국어 단어만 있어서 `en` 이어도 한국어 카드가 나온다) | `?lang=ko` |
 | `level` | `1`~`3` (누적: 2 → level 1~2) | `?level=1` |
 | `strict` | `loose`, `normal`, `strict` | `?strict=loose` |
 | `stt` | `0` 이면 음성 인식 끔 (탭 모드) | `?stt=0` |
