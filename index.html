@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#5cb85c">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>Baby Craft</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <!-- 상단 HUD: 인벤토리 -->
+  <div id="hud">
+    <div id="inventory" class="inventory"></div>
+  </div>
+
+  <!-- 터치 조작: 가상 조이스틱 + 액션 버튼 -->
+  <div id="controls">
+    <div id="joystick-zone">
+      <div id="joy-base"><div id="joy-knob"></div></div>
+    </div>
+    <button id="btn-action" class="big-btn" aria-label="action">✋</button>
+  </div>
+
+  <div id="toast-layer"></div>
+
+  <!-- 단어 카드 -->
+  <div id="card-overlay" class="overlay hidden">
+    <div id="card" class="card">
+      <div id="card-reveal" class="reveal"></div>
+      <div id="card-word" class="word"></div>
+      <div id="card-heard" class="heard"></div>
+      <div id="card-praise" class="praise"></div>
+      <div id="card-follow" class="follow hidden"></div>
+      <div class="card-buttons">
+        <button id="btn-speaker" class="big-btn" aria-label="listen">🔊</button>
+        <div id="mic" class="mic" data-state="idle">🎤</div>
+        <button id="btn-pass" class="big-btn hidden" aria-label="done">✅</button>
+      </div>
+      <div id="card-status" class="status"></div>
+    </div>
+    <div id="stars" class="stars"></div>
+  </div>
+
+  <!-- 시작 화면 -->
+  <div id="title" class="overlay">
+    <h1 class="logo">Baby Craft</h1>
+    <div class="logo-emoji">🪵 🪨 🗡️</div>
+    <button id="btn-start" class="big-btn start" disabled aria-label="start">▶</button>
+    <p id="title-msg" class="msg"></p>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>
