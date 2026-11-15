@@ -21,6 +21,9 @@ const CONFIG = {
   PLAYER_RADIUS: 0.3,     // 타일 단위 충돌 반경
   ITEM_COUNT: 16,
   ITEM_RESPAWN_MS: 6000,
+  HEART_COUNT: 4,         // 맵에 떠 있는 ❤️ 하트 수
+  HEART_RESPAWN_MS: 10000,
+  HEART_HEAL: 2,          // ❤️ 하나로 채우는 체력
   PICKUP_RADIUS: 0.7,     // 타일 단위
 
   // 전투
@@ -36,10 +39,11 @@ const CONFIG = {
   BOSS_AFTER_KILLS: 3,    // 몬스터를 이만큼 잡으면 보스 등장
   BOSS_CARDS: 3,          // 보스를 잡으면 읽을 카드 수
 
-  // 원격 2인용 (아빠)
-  DAD_HP: 5,
-  DAD_RESPAWN_MS: 3000,
+  // 원격 2인용
   NET_SEND_MS: 100,       // 상태를 보내는 간격
+  NET_EVENT_KEEP_MS: 3000, // 줍기/때리기 같은 이벤트를 이 시간 동안 계속 실어 보낸다
+  NET_TIMEOUT_MS: 8000,   // 이 시간 동안 소식이 없으면 상대가 나간 것으로 본다
+  NAME_MAX: 8,
 
   // 읽기 판정
   JUDGE_THRESHOLDS: { loose: 0.5, normal: 0.65, strict: 0.8 },
@@ -75,6 +79,8 @@ const ITEMS = {
   milk:   { emoji: '🥛', ko: '우유', en: 'milk',   kind: 'food',     weight: 1 },
   grape:  { emoji: '🍇', ko: '포도', en: 'grape',  kind: 'food',     weight: 1 },
   egg:    { emoji: '🥚', ko: '알',   en: 'egg',    kind: 'food',     weight: 1 },
+  // 하트는 따로 HEART_COUNT 개가 생긴다 (가방에 들어가지 않고 바로 체력을 채운다)
+  heart:  { emoji: '❤️', ko: '하트', en: 'heart',  kind: 'heart',    weight: 0 },
 };
 
 // 무기 (power 가 클수록 강하다. 제일 센 무기를 자동으로 든다)
@@ -176,7 +182,7 @@ function itemNames(def) {
 // ============================================================
 // Store — localStorage 래퍼 (기기 안에만 저장)
 // ============================================================
-const KEYS = { settings: 'bc.settings', stats: 'bc.stats', log: 'bc.log', csv: 'bc.wordsCsv', look: 'bc.look' };
+const KEYS = { settings: 'bc.settings', stats: 'bc.stats', log: 'bc.log', csv: 'bc.wordsCsv', look: 'bc.look', name: 'bc.name' };
 
 const Store = {
   settings: null,
@@ -1126,8 +1132,10 @@ const World = {
 const Items = {
   list: [],
   spots: [],
-  respawnQueue: [],
+  respawnQueue: [], // { at, heart }
+  pending: new Map(), // 2인용 손님: 주웠다고 알린 아이템 id → 시각 (답이 올 때까지 숨김)
   version: 0, // 바뀔 때마다 +1 (2인용일 때 바뀐 경우에만 보낸다)
+  nextId: 1,
 
   computeSpots() {
     const { house } = World;
@@ -1144,7 +1152,7 @@ const Items = {
   },
 
   randomType() {
-    const entries = Object.entries(ITEMS);
+    const entries = Object.entries(ITEMS).filter(([, d]) => d.weight > 0);
     let r = Math.random() * entries.reduce((sum, [, d]) => sum + d.weight, 0);
     for (const [type, d] of entries) {
       r -= d.weight;
@@ -1153,40 +1161,61 @@ const Items = {
     return entries[0][0];
   },
 
-  spawnOne(avoidPlayer) {
+  add(type, x, y, extra) {
+    this.list.push({ id: this.nextId++, type, tx: Math.floor(x / T), ty: Math.floor(y / T), x, y, phase: Math.random() * Math.PI * 2, ...extra });
+    this.version++;
+  },
+
+  spawnOne(type, avoidPlayers) {
     if (!this.spots.length) return;
     for (let attempt = 0; attempt < 50; attempt++) {
       const s = this.spots[Math.floor(Math.random() * this.spots.length)];
       if (this.list.some(it => it.tx === s.x && it.ty === s.y)) continue;
       const x = s.x * T + T / 2, y = s.y * T + T / 2;
-      if (avoidPlayer && Math.hypot(x - Player.x, y - Player.y) < 4 * T) continue;
-      this.list.push({ type: this.randomType(), tx: s.x, ty: s.y, x, y, phase: Math.random() * Math.PI * 2 });
-      this.version++;
+      if (avoidPlayers && Multi.nearPlayer(x, y, 4 * T)) continue;
+      this.add(type || this.randomType(), x, y);
       return;
     }
   },
 
   fill() {
     this.computeSpots();
-    for (let i = 0; i < CONFIG.ITEM_COUNT; i++) this.spawnOne(false);
+    for (let i = 0; i < CONFIG.ITEM_COUNT; i++) this.spawnOne(null, false);
+    for (let i = 0; i < CONFIG.HEART_COUNT; i++) this.spawnOne('heart', false);
   },
 
-  update() {
-    const r = CONFIG.PICKUP_RADIUS * T;
-    for (let i = this.list.length - 1; i >= 0; i--) {
-      const it = this.list[i];
-      if (Math.hypot(it.x - Player.x, it.y - Player.y) < r) {
-        this.list.splice(i, 1);
-        this.version++;
+  // 내 캐릭터가 아이템 위에 서면 줍는다. 손님 기기는 방장에게 알리고 답을 기다린다
+  pickup() {
+    const r = CONFIG.PICKUP_RADIUS * T, now = performance.now();
+    for (const [id, at] of this.pending) if (now - at > 2000) this.pending.delete(id);
+    for (const it of [...this.list]) {
+      if (this.pending.has(it.id) || Math.hypot(it.x - Player.x, it.y - Player.y) >= r) continue;
+      if (it.type === 'heart' && Game.hearts >= CONFIG.MAX_HEARTS) continue; // 체력이 가득이면 남겨 둔다
+      if (Multi.isGuest) {
+        this.pending.set(it.id, now);
+        Multi.send('pick', it.id);
+      } else {
+        this.take(it);
         Game.addItem(it.type);
-        // 몬스터가 떨어뜨린 것은 다시 생기지 않는다
-        if (!it.dropped) this.respawnQueue.push(performance.now() + CONFIG.ITEM_RESPAWN_MS);
       }
     }
+  },
+
+  take(it) {
+    this.list.splice(this.list.indexOf(it), 1);
+    this.version++;
+    // 몬스터가 떨어뜨린 것은 다시 생기지 않는다
+    if (it.dropped) return;
+    const heart = it.type === 'heart';
+    this.respawnQueue.push({ at: performance.now() + (heart ? CONFIG.HEART_RESPAWN_MS : CONFIG.ITEM_RESPAWN_MS), heart });
+  },
+
+  // 주운 만큼 시간이 지나면 다른 곳에 새로 생긴다 (방장/혼자 기기만)
+  respawn() {
     const now = performance.now();
-    while (this.respawnQueue.length && this.respawnQueue[0] <= now) {
-      this.respawnQueue.shift();
-      this.spawnOne(true);
+    for (const q of this.respawnQueue.filter(q => q.at <= now)) {
+      this.respawnQueue.splice(this.respawnQueue.indexOf(q), 1);
+      this.spawnOne(q.heart ? 'heart' : null, true);
     }
   },
 
@@ -1194,8 +1223,7 @@ const Items = {
   drop(type, x, y) {
     const dx = randFloat(-10, 10), dy = randFloat(-6, 6);
     if (World.canStand(x + dx, y + dy, 4)) { x += dx; y += dy; }
-    this.list.push({ type, tx: Math.floor(x / T), ty: Math.floor(y / T), x, y, phase: Math.random() * Math.PI * 2, dropped: true });
-    this.version++;
+    this.add(type, x, y, { dropped: true });
   },
 };
 
@@ -1208,6 +1236,8 @@ const Monsters = {
   respawnQueue: [],
   bossSpawned: false,
   nextId: 1,
+  kills: 0, // 이 세상에서 잡힌 몬스터 수 (보스 등장 조건). 무기 레시피는 각자 Game.kills 로 열린다
+  nextBossAt: CONFIG.BOSS_AFTER_KILLS,
 
   radius(m) { return (m.def.boss ? 0.55 : 0.3) * T; },
 
@@ -1221,7 +1251,7 @@ const Monsters = {
   spots(minFromHome) {
     return Items.spots.filter(s =>
       Math.hypot(s.x - World.door.x, s.y - World.door.y) >= minFromHome &&
-      Math.hypot(s.x * T - Player.x, s.y * T - Player.y) > 7 * T);
+      !Multi.nearPlayer(s.x * T, s.y * T, 7 * T));
   },
 
   randomType() {
@@ -1270,7 +1300,18 @@ const Monsters = {
 
   get boss() { return this.list.find(m => m.def.boss); },
 
+  // 몬스터가 노리는 사람: 놀고 있고(카드/제작 중이 아님) 안전지대 밖에 있는 캐릭터
+  targets() {
+    const list = [];
+    if (Game.state === 'play' && !this.safeZone(Player.x, Player.y)) list.push(Player);
+    const o = Multi.other;
+    if (Multi.otherActive() && !this.safeZone(o.x, o.y)) list.push(o);
+    return list;
+  },
+
+  // 몬스터 움직임 (방장/혼자 기기만)
   update(dt) {
+    const targets = this.targets();
     for (const m of [...this.list]) {
       m.hitT = Math.max(0, m.hitT - dt);
       let vx = 0, vy = 0;
@@ -1279,9 +1320,13 @@ const Monsters = {
         vx = m.knock.x;
         vy = m.knock.y;
       } else {
-        const dx = Player.x - m.x, dy = Player.y - m.y, d = Math.hypot(dx, dy);
+        let dx = 0, dy = 0, d = Infinity;
+        for (const p of targets) {
+          const pd = Math.hypot(p.x - m.x, p.y - m.y);
+          if (pd < d) { d = pd; dx = p.x - m.x; dy = p.y - m.y; }
+        }
         const speed = m.def.speed * T;
-        if (d < CONFIG.AGGRO_RANGE * T && d > 1 && !this.safeZone(Player.x, Player.y)) {
+        if (d < CONFIG.AGGRO_RANGE * T && d > 1) {
           vx = dx / d * speed;
           vy = dy / d * speed;
         } else {
@@ -1301,10 +1346,7 @@ const Monsters = {
       if (this.canStand(m, nx, m.y)) m.x = nx; else m.wanderT = 0;
       const ny = m.y + vy * dt;
       if (this.canStand(m, m.x, ny)) m.y = ny; else m.wanderT = 0;
-
-      if (Math.hypot(Player.x - m.x, Player.y - m.y) < this.radius(m) + CONFIG.PLAYER_RADIUS * T + 4) Game.hurt(m);
     }
-    this.updateArrows(dt);
 
     const now = performance.now();
     while (this.respawnQueue.length && this.respawnQueue[0] <= now) {
@@ -1313,7 +1355,17 @@ const Monsters = {
     }
   },
 
-  // 플레이어 공격: 활은 화살을 쏘고, 나머지는 앞쪽을 휘두른다
+  // 내 캐릭터가 몬스터에 닿으면 다친다 (각자 기기에서 자기 캐릭터만 확인)
+  touch() {
+    for (const m of this.list) {
+      if (Math.hypot(Player.x - m.x, Player.y - m.y) < this.radius(m) + CONFIG.PLAYER_RADIUS * T + 4) {
+        Game.hurt(m);
+        return;
+      }
+    }
+  },
+
+  // 내 공격: 활은 화살을 쏘고, 나머지는 앞쪽을 휘두른다. 상대 캐릭터도 맞는다
   attack() {
     const w = Game.weapon, power = WEAPONS[w].power;
     const [fx, fy] = FACING[Player.dir];
@@ -1326,11 +1378,12 @@ const Monsters = {
     }
     const cx = Player.x + fx * 0.5 * T, cy = Player.y + fy * 0.5 * T;
     for (const m of [...this.list]) {
-      if (Math.hypot(m.x - cx, m.y - cy) < CONFIG.ATTACK_RANGE * T + this.radius(m)) this.hit(m, power);
+      if (Math.hypot(m.x - cx, m.y - cy) < CONFIG.ATTACK_RANGE * T + this.radius(m)) this.damage(m, power);
     }
-    if (Multi.dadInRange(cx, cy, CONFIG.ATTACK_RANGE * T)) Multi.hitDad(power);
+    Multi.hitOther(cx, cy, CONFIG.ATTACK_RANGE * T);
   },
 
+  // 내가 쏜 화살 (각자 기기에서 움직인다)
   updateArrows(dt) {
     for (const a of [...this.arrows]) {
       const step = CONFIG.ARROW_SPEED * T * dt;
@@ -1340,31 +1393,50 @@ const Monsters = {
       const tt = World.tileAtPx(a.x, a.y + 8);
       let done = a.left <= 0 || tt === TILE.TREE || tt === TILE.ROCK || tt === TILE.HOUSE;
       const target = !done && this.list.find(m => Math.hypot(m.x - a.x, m.y - (a.y + 8)) < this.radius(m) + 8);
-      if (target) { this.hit(target, a.power); done = true; }
-      else if (!done && Multi.dadInRange(a.x, a.y + 8, 8)) { Multi.hitDad(a.power); done = true; }
+      if (target) { this.damage(target, a.power); done = true; }
+      else if (!done && Multi.hitOther(a.x, a.y + 8, 8)) done = true;
       if (done) this.arrows.splice(this.arrows.indexOf(a), 1);
     }
   },
 
-  hit(m, dmg) {
+  // 내가 몬스터를 때림. 손님 기기는 방장에게 알리고, 맞는 모습만 먼저 보여준다
+  damage(m, power) {
+    if (!Multi.isGuest) { this.hit(m, power, Player.x, Player.y); return; }
+    Multi.send('hitM', m.id, power, Math.round(Player.x), Math.round(Player.y));
+    m.hitT = 0.25;
+    Sfx.hit();
+    Floaters.add(m.x, m.y - m.def.size * 0.6, '💥', 16);
+  },
+
+  // 몬스터 체력을 깎는다 (방장/혼자 기기). byOther: 상대가 때림 → 잡았으면 true, 카드는 상대 기기에서
+  hit(m, dmg, fromX, fromY, byOther = false) {
     m.hp -= dmg;
     m.hitT = 0.25;
-    const dx = m.x - Player.x, dy = m.y - Player.y, d = Math.hypot(dx, dy) || 1;
+    const dx = m.x - fromX, dy = m.y - fromY, d = Math.hypot(dx, dy) || 1;
     const kb = (m.def.boss ? 3 : 6) * T;
     m.knock = { x: dx / d * kb, y: dy / d * kb, t: 0.15 };
     Sfx.hit();
     Floaters.add(m.x, m.y - m.def.size * 0.6, '💥', 16);
-    if (m.hp <= 0) this.kill(m);
+    if (m.hp > 0) return false;
+    this.kill(m, byOther);
+    return true;
   },
 
-  kill(m) {
+  kill(m, byOther) {
     this.list.splice(this.list.indexOf(m), 1);
     Sfx.defeat();
     for (let i = 0; i < 4; i++) Floaters.add(m.x + randFloat(-14, 14), m.y - randFloat(0, 20), '✨', 14);
     for (const [type, n] of Object.entries(m.def.drops)) for (let i = 0; i < n; i++) Items.drop(type, m.x, m.y);
-    if (!m.def.boss) this.respawnQueue.push(performance.now() + CONFIG.MONSTER_RESPAWN_MS);
-    console.log(`[Monsters] ${m.def.ko} 처치`);
-    Game.onMonsterDefeated(m);
+    if (m.def.boss) {
+      // 보스가 쓰러지면 몇 마리 더 잡은 뒤 다시 나온다
+      this.bossSpawned = false;
+      this.nextBossAt = this.kills + CONFIG.BOSS_AFTER_KILLS;
+    } else {
+      this.kills++;
+      this.respawnQueue.push(performance.now() + CONFIG.MONSTER_RESPAWN_MS);
+    }
+    console.log(`[Monsters] ${m.def.ko} 처치${byOther ? ` (${Multi.other.name})` : ''}`);
+    if (!byOther) Game.onMonsterDefeated(m);
   },
 };
 
@@ -1400,10 +1472,7 @@ const Player = {
     this.knock = { x: 0, y: 0, t: 0 };
   },
 
-  // 아빠 기기에서는 아빠도 집 주변 안전지대에 못 들어간다
-  canStand(x, y) {
-    return World.canStand(x, y) && !(Multi.isGuest && Monsters.safeZone(x, y));
-  },
+  canStand(x, y) { return World.canStand(x, y); },
 
   update(dt) {
     this.invulnT = Math.max(0, this.invulnT - dt);
@@ -1429,11 +1498,11 @@ const Player = {
 };
 
 // ============================================================
-// Multi — 원격 2인용. 아들 기기(host)가 게임을 진행하고, 아빠 기기(guest)는
-//         같은 맵에서 "아빠" 캐릭터를 조종한다. 통신은 net.js (Firebase)
+// Multi — 원격 2인용. 두 사람 모두 같은 규칙으로 논다 (체력, 가방, 무기, 단어 카드는 각자 기기에).
+//         방을 만든 기기(host)가 세상(아이템, 몬스터, 보스)을 돌리고, 들어온 기기(guest)는
+//         줍기/때리기를 이벤트로 알린다. 통신은 net.js (Firebase)
 // ============================================================
 const DIRS = ['up', 'down', 'left', 'right'];
-const DAD_DEF = { emoji: '', ko: '아빠', en: 'dad', boss: false, drops: {} };
 // 캐릭터 모양 (기기마다 하나를 고른다. 시작 화면 🎨 로 바꾸기)
 const LOOKS = [
   { shirt: '#2fb5c8', hair: '#5a3a1e', pants: '#3949ab', hat: null },
@@ -1465,35 +1534,41 @@ const Multi = {
   mode: 'solo', // solo | host | guest
   net: null,
   sendT: 0,
-
-  // host (아들 기기): 아빠 캐릭터
-  dad: makeRemote(),
-  dadHp: CONFIG.DAD_HP,
-  dadSwing: 0,
-  dadLastSeen: 0,
+  sid: Math.random().toString(36).slice(2, 8), // 이 기기 접속 id (상대가 새로 들어왔는지 구분)
   beat: 0,
-  dadDownSeq: 0,
-  dadDownUntil: 0,
-  dadRespawn: null,
+  events: [], // 보낼 이벤트 [seq, 시각, 종류, ...값]
+  eventSeq: 0,
   itemsVersion: -1,
+  monsterMap: new Map(), // 손님 기기: 방장에게 받은 몬스터
+  hostSeen: false,
 
-  // guest (아빠 기기): 아들 캐릭터와 몬스터
-  son: makeRemote(),
-  sonState: 'play',
-  hasState: false,
-  swingCount: 0,
-  lastDownSeq: 0,
-  monsterMap: new Map(),
+  // 상대 캐릭터 (이름표, 상태, 무기, 화살까지)
+  other: { ...makeRemote(), isPlayer: true, name: '', st: 'play', weapon: 'hand', arrows: [], lk: 0, sid: '', lastSeq: 0, lastSeen: 0 },
 
   get isHost() { return this.mode === 'host'; },
   get isGuest() { return this.mode === 'guest'; },
 
   // 내 모양 / 상대 모양 (같은 모양이면 상대를 다음 모양으로 보여줘서 구분되게)
-  remoteLookIndex: 0,
   myLook() { return LOOKS[Game.lookIndex]; },
   remoteLook() {
-    const i = this.remoteLookIndex % LOOKS.length;
+    const i = this.other.lk % LOOKS.length;
     return LOOKS[i === Game.lookIndex ? (i + 1) % LOOKS.length : i];
+  },
+
+  otherVisible() { return this.mode !== 'solo' && this.other.seen; },
+  // 놀고 있는 상대 (카드/제작/기절 중이면 몬스터도 안 쫓고 맞지도 않는다)
+  otherActive() { return this.otherVisible() && this.other.st === 'play'; },
+
+  // 아이템/몬스터를 새로 놓을 때 두 캐릭터 근처는 피한다
+  nearPlayer(x, y, d) {
+    if (Math.hypot(x - Player.x, y - Player.y) < d) return true;
+    return this.otherVisible() && Math.hypot(x - this.other.x, y - this.other.y) < d;
+  },
+
+  // 상대를 쓰러뜨렸을 때 카드용 (이모지가 없으니 아무 단어나 나온다)
+  otherDef() {
+    const name = this.other.name || '?';
+    return { emoji: '', ko: name, en: name, boss: false, drops: {} };
   },
 
   showBadge(code) {
@@ -1506,7 +1581,7 @@ const Multi = {
     const Net = await import('./net.js');
     this.net = await Net.host(Game.seed);
     this.mode = 'host';
-    this.net.onDad(d => this.onDad(d));
+    this.net.onGuest(d => this.onPeer(d));
     this.showBadge(this.net.code);
     console.log('[Multi] 방 만들기', this.net.code);
   },
@@ -1515,7 +1590,7 @@ const Multi = {
     const Net = await import('./net.js');
     this.net = await Net.join(code);
     this.mode = 'guest';
-    // 아들과 같은 맵. 아이템/몬스터는 아들 기기에서 받는다
+    // 같은 시드로 같은 맵. 아이템/몬스터는 방장 기기에서 받는다
     World.generate(this.net.seed);
     Player.reset();
     Items.computeSpots();
@@ -1523,146 +1598,157 @@ const Multi = {
     Items.respawnQueue = [];
     Monsters.list = [];
     Monsters.respawnQueue = [];
-    const spots = Monsters.spots(CONFIG.SAFE_RADIUS + 5);
-    const s = spots[Math.floor(Math.random() * spots.length)];
-    if (s) { Player.x = s.x * T + T / 2; Player.y = s.y * T + T / 2; }
     this.net.onState(st => this.onState(st));
     this.net.onItems(list => this.onItems(list));
-    $('#inventory').classList.add('hidden');
-    $('#btn-action').textContent = '👊';
     this.showBadge(code);
     console.log('[Multi] 참가', code);
   },
 
+  // 이벤트는 받는 쪽이 놓치지 않게 잠깐 동안 매번 같이 보낸다 (받는 쪽은 번호로 한 번만 처리)
+  send(kind, ...args) {
+    if (this.mode === 'solo') return;
+    this.events.push([++this.eventSeq, performance.now(), kind, ...args]);
+  },
+
+  // 내 공격이 상대에게 닿았는지. 맞으면 상대 기기에 알린다 (하트는 상대 기기에서 깎는다)
+  hitOther(x, y, r) {
+    const o = this.other;
+    if (!this.otherActive() || Monsters.safeZone(o.x, o.y) || o.invulnT > 0) return false;
+    if (Math.hypot(o.x - x, o.y - y) >= r + CONFIG.PLAYER_RADIUS * T) return false;
+    this.send('hitP');
+    o.hitT = 0.25;
+    Sfx.hit();
+    Floaters.add(o.x, o.y - 30, '💥', 16);
+    return true;
+  },
+
   tick(dt) {
     if (this.mode === 'solo') return;
-    if (this.isHost) {
-      followRemote(this.dad, dt);
-      if (this.dad.seen && performance.now() - this.dadLastSeen > 8000) this.dad.seen = false;
-    } else {
-      followRemote(this.son, dt);
-      for (const m of Monsters.list) followRemote(m, dt);
-    }
+    const o = this.other;
+    followRemote(o, dt);
+    if (o.seen && performance.now() - o.lastSeen > CONFIG.NET_TIMEOUT_MS) this.leave();
+    if (this.isGuest) for (const m of Monsters.list) followRemote(m, dt);
     this.sendT -= dt * 1000;
     if (this.sendT > 0) return;
     this.sendT = CONFIG.NET_SEND_MS;
-    const sent = this.isHost ? this.sendHost() : this.sendGuest();
+    const sent = this.isHost ? this.sendHost() : this.net.sendGuest(this.myPacket());
     sent.catch(err => console.warn('[Multi] 전송 실패', err));
   },
 
-  // ---------- host (아들 기기) ----------
+  leave() {
+    if (this.other.seen) toast(`👋 ${this.other.name}`);
+    this.other.seen = false;
+  },
+
+  // 두 기기가 똑같이 보내는 내 캐릭터 정보
+  myPacket() {
+    const r = Math.round, now = performance.now();
+    this.events = this.events.filter(ev => now - ev[1] < CONFIG.NET_EVENT_KEEP_MS);
+    // h: 가만히 서 있어도 값이 바뀌게 해서 상대 쪽에서 '나갔다'고 보지 않게 한다
+    this.beat = (this.beat + 1) % 1000;
+    return {
+      sid: this.sid,
+      h: this.beat,
+      n: Game.playerName,
+      lk: Game.lookIndex,
+      st: Game.state,
+      p: [r(Player.x), r(Player.y), DIRS.indexOf(Player.dir), Player.moving ? 1 : 0,
+        Player.swingT > 0 ? 1 : 0, Player.invulnT > 0 ? 1 : 0],
+      w: Game.weapon,
+      a: Monsters.arrows.map(a => [r(a.x), r(a.y), a.fx, a.fy]),
+      ev: this.events.map(([seq, , kind, ...args]) => [seq, kind, ...args]),
+    };
+  },
+
+  // ---------- host: 내 캐릭터 + 세상 ----------
   sendHost() {
     const r = Math.round;
     if (Items.version !== this.itemsVersion) {
       this.itemsVersion = Items.version;
-      this.net.sendItems(Items.list.map(it => [it.type, r(it.x), r(it.y)]))
+      this.net.sendItems(Items.list.map(it => [it.id, it.type, r(it.x), r(it.y)]))
         .catch(err => console.warn('[Multi] 아이템 전송 실패', err));
     }
     return this.net.sendState({
-      st: Game.state,
-      lk: Game.lookIndex,
-      p: [r(Player.x), r(Player.y), DIRS.indexOf(Player.dir), Player.moving ? 1 : 0,
-        Player.swingT > 0 ? 1 : 0, Player.invulnT > 0 ? 1 : 0],
-      w: Game.weapon,
+      ...this.myPacket(),
       m: Monsters.list.map(m => [m.id, m.type, r(m.x), r(m.y), m.hp, m.faceRight ? 1 : 0, m.hitT > 0 ? 1 : 0]),
-      a: Monsters.arrows.map(a => [r(a.x), r(a.y), a.fx, a.fy]),
-      dh: this.dadHp,
-      dd: this.dadRespawn ? [this.dadDownSeq, r(this.dadRespawn[0]), r(this.dadRespawn[1])] : 0,
-      dx: this.dad.hitT > 0 ? 1 : 0,
     });
   },
 
-  onDad(d) {
-    const e = this.dad;
-    if (!d) { e.seen = false; return; }
-    if (!e.seen) { e.x = d.x; e.y = d.y; toast(`👨 ${itemNames(DAD_DEF).main}!`); }
-    e.seen = true;
-    this.remoteLookIndex = d.lk || 0;
-    this.dadLastSeen = performance.now();
-    e.tx = d.x;
-    e.ty = d.y;
-    e.dir = DIRS[d.r] || 'down';
-    e.moving = !!d.m;
-    if (d.w > this.dadSwing) {
-      this.dadSwing = d.w;
-      e.swingT = 0.25;
-      this.dadAttack();
+  // 상대 캐릭터 정보 받기 (두 기기 공통)
+  onPeer(d) {
+    const o = this.other;
+    if (!d) { this.leave(); return; }
+    const p = d.p;
+    const evs = (d.ev || []).filter(Boolean);
+    if (!o.seen || d.sid !== o.sid) {
+      // 새로 들어옴: 위치를 바로 맞추고, 그 전 이벤트는 무시
+      o.x = p[0];
+      o.y = p[1];
+      o.lastSeq = evs.reduce((max, ev) => Math.max(max, ev[0]), 0);
+      if (!o.seen) toast(`👋 ${d.n || ''}`);
+    }
+    o.seen = true;
+    o.sid = d.sid;
+    o.lastSeen = performance.now();
+    o.name = String(d.n || '').slice(0, CONFIG.NAME_MAX);
+    o.lk = d.lk || 0;
+    o.st = d.st;
+    o.tx = p[0];
+    o.ty = p[1];
+    o.dir = DIRS[p[2]] || 'down';
+    o.moving = !!p[3];
+    if (p[4] && o.swingT <= 0) o.swingT = 0.25;
+    if (p[5]) o.invulnT = 0.2;
+    o.weapon = WEAPONS[d.w] ? d.w : 'hand';
+    o.arrows = (d.a || []).filter(Boolean).map(([x, y, fx, fy]) => ({ x, y, fx, fy }));
+    for (const ev of evs.sort((a, b) => a[0] - b[0])) {
+      if (ev[0] <= o.lastSeq) continue;
+      o.lastSeq = ev[0];
+      this.handle(ev[1], ev.slice(2));
     }
   },
 
-  dadVisible() { return this.isHost && this.dad.seen && performance.now() > this.dadDownUntil; },
-
-  dadInRange(x, y, r) {
-    return this.dadVisible() && Math.hypot(this.dad.x - x, this.dad.y - y) < r + CONFIG.PLAYER_RADIUS * T;
+  handle(kind, args) {
+    if (kind === 'pick' && this.isHost) {
+      // 손님이 주웠다고 함 → 아직 있으면 주고, 없으면(내가 먼저 주움) 무시
+      const it = Items.list.find(i => i.id === args[0]);
+      if (it) { Items.take(it); this.send('got', it.type); }
+    } else if (kind === 'got') {
+      if (ITEMS[args[0]]) Game.addItem(args[0]);
+    } else if (kind === 'hitM' && this.isHost) {
+      const [id, power, x, y] = args;
+      const m = Monsters.list.find(mm => mm.id === id);
+      if (m && Monsters.hit(m, power, x, y, true)) this.send('kill', m.type);
+    } else if (kind === 'kill') {
+      const def = args[0] === 'boss' ? BOSS : MONSTERS[args[0]];
+      if (!def) return;
+      Sfx.defeat();
+      Game.onMonsterDefeated({ def });
+    } else if (kind === 'hitP') {
+      Game.hurt(this.other);
+    } else if (kind === 'ko') {
+      // 내가 상대를 쓰러뜨림 → 몬스터를 잡은 것처럼 단어 카드
+      Sfx.defeat();
+      const o = this.other;
+      for (let i = 0; i < 4; i++) Floaters.add(o.x + randFloat(-14, 14), o.y - randFloat(0, 20), '✨', 14);
+      Game.onMonsterDefeated({ def: this.otherDef() });
+    }
   },
 
-  // 아빠가 휘둘렀을 때 아들이 앞에 있으면 하트 1개 (집 주변에서는 안전)
-  dadAttack() {
-    if (!this.dadVisible() || Game.state !== 'play' || Monsters.safeZone(Player.x, Player.y)) return;
-    const [fx, fy] = FACING[this.dad.dir];
-    const cx = this.dad.x + fx * 0.5 * T, cy = this.dad.y + fy * 0.5 * T;
-    if (Math.hypot(Player.x - cx, Player.y - cy) < CONFIG.ATTACK_RANGE * T + CONFIG.PLAYER_RADIUS * T + 4) Game.hurt(this.dad);
-  },
-
-  // 아들이 아빠를 때림. 쓰러뜨리면 몬스터처럼 단어 카드
-  hitDad(power) {
-    if (!this.dadVisible() || Game.state !== 'play') return;
-    this.dadHp -= power;
-    this.dad.hitT = 0.25;
-    Sfx.hit();
-    Floaters.add(this.dad.x, this.dad.y - 30, '💥', 16);
-    if (this.dadHp > 0) return;
-    this.dadHp = CONFIG.DAD_HP;
-    this.dadDownSeq++;
-    this.dadDownUntil = performance.now() + CONFIG.DAD_RESPAWN_MS;
-    const spots = Monsters.spots(CONFIG.SAFE_RADIUS + 5);
-    const s = spots[Math.floor(Math.random() * spots.length)];
-    this.dadRespawn = s ? [s.x * T + T / 2, s.y * T + T / 2] : [this.dad.x, this.dad.y];
-    Sfx.defeat();
-    for (let i = 0; i < 4; i++) Floaters.add(this.dad.x + randFloat(-14, 14), this.dad.y - randFloat(0, 20), '✨', 14);
-    console.log('[Multi] 아빠를 물리쳤다');
-    Game.onMonsterDefeated({ def: DAD_DEF });
-  },
-
-  // ---------- guest (아빠 기기) ----------
-  sendGuest() {
-    // h: 가만히 서 있어도 값이 바뀌게 해서 아들 쪽에서 '나갔다'고 보지 않게 한다
-    this.beat = (this.beat + 1) % 1000;
-    return this.net.sendDad({ h: this.beat,
-      x: Math.round(Player.x), y: Math.round(Player.y), r: DIRS.indexOf(Player.dir),
-      m: Player.moving ? 1 : 0, w: this.swingCount, lk: Game.lookIndex,
-    });
-  },
-
-  dadSwingAttack() {
-    this.swingCount++;
-  },
-
+  // ---------- guest: 방장 캐릭터 + 세상 받기 ----------
   onState(s) {
     if (!s) {
-      if (this.hasState) toast('📴');
-      this.hasState = false;
+      if (this.hostSeen) toast('📴');
+      this.hostSeen = false;
+      this.leave();
       return;
     }
-    const e = this.son, p = s.p;
-    if (!this.hasState) {
-      e.x = p[0];
-      e.y = p[1];
-      this.lastDownSeq = s.dd ? s.dd[0] : 0;
-    }
-    this.hasState = true;
-    e.tx = p[0];
-    e.ty = p[1];
-    e.dir = DIRS[p[2]] || 'down';
-    e.moving = !!p[3];
-    if (p[4] && e.swingT <= 0) e.swingT = 0.25;
-    if (p[5]) e.invulnT = 0.2;
-    e.weapon = s.w;
-    this.sonState = s.st;
-    this.remoteLookIndex = s.lk || 0;
+    this.hostSeen = true;
+    this.onPeer(s);
 
     const seen = new Set();
-    for (const [id, type, x, y, hp, face, hit] of s.m || []) {
+    const hadBoss = !!Monsters.boss;
+    for (const [id, type, x, y, hp, face, hit] of (s.m || []).filter(Boolean)) {
       seen.add(id);
       let m = this.monsterMap.get(id);
       if (!m) {
@@ -1673,35 +1759,17 @@ const Multi = {
       if (hit) m.hitT = 0.25;
     }
     for (const id of [...this.monsterMap.keys()]) if (!seen.has(id)) this.monsterMap.delete(id);
-    Monsters.list = [...this.monsterMap.values()];
-    Monsters.arrows = (s.a || []).map(([x, y, fx, fy]) => ({ x, y, fx, fy }));
-
-    if (Game.hearts !== s.dh) { Game.hearts = s.dh; Game.renderHearts(); }
-    if (s.dx) Player.invulnT = Math.max(Player.invulnT, 0.25);
-    if (s.dd && s.dd[0] !== this.lastDownSeq) {
-      this.lastDownSeq = s.dd[0];
-      this.dadDown(s.dd[1], s.dd[2]);
+    Monsters.list = [...this.monsterMap.values()].filter(m => m.def);
+    if (!hadBoss && Monsters.boss) {
+      Sfx.boss();
+      toast(`${BOSS.emoji} ${itemNames(BOSS).main}!`);
     }
   },
 
   onItems(list) {
-    Items.list = (list || []).map(([type, x, y], i) => ({ type, x, y, tx: Math.floor(x / T), ty: Math.floor(y / T), phase: i }));
-  },
-
-  // 아빠가 쓰러짐 → 잠깐 💫 후 먼 곳에서 다시 시작
-  async dadDown(x, y) {
-    Game.state = 'faint';
-    Input.reset();
-    Sfx.soft();
-    const el = $('#faint');
-    el.textContent = '💫';
-    el.classList.remove('hidden');
-    await delay(CONFIG.DAD_RESPAWN_MS);
-    el.classList.add('hidden');
-    Player.x = x;
-    Player.y = y;
-    Player.invulnT = CONFIG.INVULN_SEC;
-    Game.state = 'play';
+    Items.list = (list || []).filter(Boolean).map(([id, type, x, y]) =>
+      ({ id, type, x, y, tx: Math.floor(x / T), ty: Math.floor(y / T), phase: id }));
+    for (const id of [...Items.pending.keys()]) if (!Items.list.some(it => it.id === id)) Items.pending.delete(id);
   },
 };
 
@@ -1834,20 +1902,20 @@ const Render = {
     ctx.drawImage(World.canvas, 0, 0);
 
     // y 순서대로 그려서 앞뒤가 자연스럽게
-    const drawables = Items.list.map(it => ({ y: it.y, draw: () => this.drawItem(it, time) }));
+    const drawables = Items.list.filter(it => !Items.pending.has(it.id)).map(it => ({ y: it.y, draw: () => this.drawItem(it, time) }));
     for (const m of Monsters.list) drawables.push({ y: m.y, draw: () => this.drawMonster(m, time) });
-    // 아빠 기기에서는 Player 가 아빠다
-    if (Multi.isGuest) drawables.push({ y: Player.y, draw: () => this.drawCharacter(Player, Multi.myLook(), 'hand', itemNames(DAD_DEF).main) });
-    else drawables.push({ y: Player.y, draw: () => this.drawCharacter(Player, Multi.myLook(), Game.weapon, '') });
-    if (Multi.dadVisible()) {
-      drawables.push({ y: Multi.dad.y, draw: () => this.drawCharacter(Multi.dad, Multi.remoteLook(), 'hand', itemNames(DAD_DEF).main) });
-    }
-    if (Multi.isGuest && Multi.hasState) {
-      const son = Multi.son, icon = STATUS_ICONS[Multi.sonState];
-      drawables.push({ y: son.y, draw: () => { this.drawCharacter(son, Multi.remoteLook(), son.weapon, ''); if (icon) this.drawStatus(son, icon, time); } });
+    drawables.push({ y: Player.y, draw: () => this.drawCharacter(Player, Multi.myLook(), Game.weapon, Game.playerName, true) });
+    const o = Multi.other;
+    if (Multi.otherVisible()) {
+      drawables.push({ y: o.y, draw: () => {
+        this.drawCharacter(o, Multi.remoteLook(), o.weapon, o.name, false);
+        const icon = STATUS_ICONS[o.st];
+        if (icon) this.drawStatus(o, icon, time);
+      } });
     }
     drawables.sort((a, b) => a.y - b.y).forEach(d => d.draw());
     Monsters.arrows.forEach(a => this.drawArrow(a));
+    if (Multi.otherVisible()) o.arrows.forEach(a => this.drawArrow(a));
     this.drawFloaters();
     this.drawCraftHint(time);
 
@@ -1855,8 +1923,7 @@ const Render = {
     this.drawEdgeArrow(World.door.x * T + T / 2, World.door.y * T, '🏠', Craft.canMakeAny() ? '🔨' : '');
     const boss = Monsters.boss;
     if (boss) this.drawEdgeArrow(boss.x, boss.y, BOSS.emoji, '');
-    if (Multi.isGuest && Multi.hasState) this.drawEdgeArrow(Multi.son.x, Multi.son.y, '👦', '');
-    if (Multi.dadVisible()) this.drawEdgeArrow(Multi.dad.x, Multi.dad.y, '👨', '');
+    if (Multi.otherVisible()) this.drawEdgeArrow(o.x, o.y, '🧑', '', o.name);
   },
 
   drawMonster(m, time) {
@@ -1991,8 +2058,9 @@ const Render = {
     ctx.restore();
   },
 
-  // 8칸 x 13칸 픽셀 캐릭터. e: 위치/방향/걷기/휘두르기 상태, look: 옷 색, weapon: 손에 든 무기, label: 머리 위 이름
-  drawCharacter(e, look, weapon, label) {
+  // 8칸 x 13칸 픽셀 캐릭터. e: 위치/방향/걷기/휘두르기 상태, look: 옷 색, weapon: 손에 든 무기,
+  // label: 머리 위 이름, mine: 내 캐릭터면 이름을 파란색으로
+  drawCharacter(e, look, weapon, label, mine) {
     const ctx = this.ctx, { x, y, dir } = e;
     const u = 2.5;
     const left = x - 4 * u, top = y + 6 - 13 * u;
@@ -2068,7 +2136,7 @@ const Render = {
       ctx.lineJoin = 'round';
       ctx.lineWidth = 3;
       ctx.strokeStyle = 'rgba(255,255,255,.95)';
-      ctx.fillStyle = '#c62828';
+      ctx.fillStyle = mine ? '#1565c0' : '#c62828';
       ctx.font = `900 11px ${FONT_UI}`;
       const ly = top - (look.hat ? 12 : 7);
       ctx.strokeText(label, x, ly);
@@ -2113,14 +2181,14 @@ const Render = {
     this.ctx = saved;
   },
 
-  // 아들이 카드/제작/기절 중이면 아빠 화면에서 머리 위에 표시
+  // 상대가 카드/제작/기절 중이면 머리 위(이름표 위)에 표시
   drawStatus(e, icon, time) {
     const ctx = this.ctx;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = '#000';
     ctx.font = `18px ${FONT_EMOJI}`;
-    ctx.fillText(icon, e.x, e.y - 46 + Math.sin(time * 4) * 2);
+    ctx.fillText(icon, e.x, e.y - 56 + Math.sin(time * 4) * 2);
   },
 
   // 만들 수 있는 무기가 있으면 집 위에 🔨 가 통통 튄다
@@ -2139,8 +2207,8 @@ const Render = {
     ctx.fillText('🔨', x, y + 1);
   },
 
-  // 집/보스가 화면 밖에 있으면 가장자리에 그 방향 화살표
-  drawEdgeArrow(wx, wy, icon, badge) {
+  // 집/보스/상대가 화면 밖에 있으면 가장자리에 그 방향 화살표 (label: 아래에 이름)
+  drawEdgeArrow(wx, wy, icon, badge, label) {
     const ctx = this.ctx;
     const hx = (wx - this.camX) * this.scale;
     const hy = (wy - this.camY) * this.scale;
@@ -2174,6 +2242,15 @@ const Render = {
     ctx.font = `32px ${FONT_EMOJI}`;
     ctx.fillText(icon, ax, ay + 2);
     if (badge) ctx.fillText(badge, ax + 26, ay - 24);
+    if (label) {
+      ctx.font = `900 13px ${FONT_UI}`;
+      ctx.lineJoin = 'round';
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = 'rgba(255,255,255,.95)';
+      ctx.fillStyle = '#c62828';
+      ctx.strokeText(label, ax, ay + 40);
+      ctx.fillText(label, ax, ay + 40);
+    }
   },
 };
 
@@ -2188,9 +2265,9 @@ const Game = {
   weapons: new Set(),
   hearts: CONFIG.MAX_HEARTS,
   lookIndex: 0,
+  playerName: '',
   kills: 0,
   bossKills: 0,
-  nextBossAt: CONFIG.BOSS_AFTER_KILLS,
   cardsRead: 0,
   startedAt: 0,
   wasOnDoor: false,
@@ -2229,6 +2306,7 @@ const Game = {
     $('#btn-restart').addEventListener('click', () => location.reload());
     this.initMultiPanel();
     this.initLook();
+    this.initName();
     $('#btn-continue').addEventListener('click', () => this.continueGame());
 
     this.state = 'title';
@@ -2239,15 +2317,54 @@ const Game = {
   },
 
   async start() {
-    if (this.state !== 'title') return;
+    if (!this.prepare()) return;
+    await this.begin();
+  },
+
+  // 시작 버튼을 눌렀을 때 바로 (소리 권한은 누른 순간에 받아야 한다). 이름이 없으면 시작하지 않는다
+  prepare() {
+    if (this.state !== 'title' || !this.readName()) return false;
     this.state = 'starting';
     Sfx.unlock();
     Speech.unlock();
+    return true;
+  },
+
+  async begin() {
     $('#btn-start').disabled = true;
     await this.checkMic();
     $('#title').classList.add('hidden');
+    this.renderInventory();
+    this.renderHearts();
     this.startedAt = performance.now();
     this.state = 'play';
+  },
+
+  // 캐릭터 이름: 머리 위에 보인다. 이 기기에 저장해서 다음부터는 바로 시작
+  initName() {
+    const input = $('#name-input');
+    input.maxLength = CONFIG.NAME_MAX;
+    input.value = Store.get(KEYS.name, '') || '';
+    // 글자를 칠 때 WASD/스페이스가 게임 조작으로 가지 않게
+    input.addEventListener('keydown', e => {
+      e.stopPropagation();
+      if (e.key === 'Enter') input.blur();
+    });
+  },
+
+  readName() {
+    const input = $('#name-input');
+    const name = input.value.trim().slice(0, CONFIG.NAME_MAX);
+    if (!name) {
+      input.classList.remove('shake');
+      void input.offsetWidth; // 애니메이션 다시 시작
+      input.classList.add('shake');
+      input.focus();
+      return false;
+    }
+    this.playerName = name;
+    Store.set(KEYS.name, name);
+    return true;
   },
 
   // 캐릭터 모양: 처음엔 무작위, 이 기기에 저장. 🎨 로 다음 모양
@@ -2266,7 +2383,7 @@ const Game = {
     });
   },
 
-  // 시작 화면의 👥: 🏠 방 만들기(아들) / 번호 입력 후 ▶ 참가(아빠)
+  // 시작 화면의 👥: 🏠 방 만들기 / 번호 입력 후 ▶ 참가
   initMultiPanel() {
     const panel = $('#mp-panel'), input = $('#mp-code'), msg = $('#mp-msg');
     $('#btn-multi').disabled = false;
@@ -2280,23 +2397,24 @@ const Game = {
   },
 
   async startHost() {
-    if (this.state !== 'title') return;
+    if (!this.prepare()) return;
     this.mpMsg('⏳');
-    await this.start();
     try {
       await Multi.startHost();
     } catch (err) {
       console.warn('[Multi] 방 만들기 실패', err);
-      toast('⚠️ 👥');
+      this.mpMsg('⚠️ 연결 실패');
+      this.state = 'title';
+      return;
     }
+    await this.begin();
   },
 
   async startGuest(code) {
     if (this.state !== 'title') return;
     if (!/^\d{4}$/.test(code)) { this.mpMsg('🔢 ????'); return; }
-    this.state = 'starting';
+    if (!this.prepare()) return;
     this.mpMsg('⏳');
-    Sfx.unlock();
     try {
       await Multi.startGuest(code);
     } catch (err) {
@@ -2305,10 +2423,7 @@ const Game = {
       this.state = 'title';
       return;
     }
-    this.renderHearts();
-    $('#title').classList.add('hidden');
-    this.startedAt = performance.now();
-    this.state = 'play';
+    await this.begin();
   },
 
   // 시작할 때 한 번 마이크 권한을 받아 둔다 (카드 도중에 권한 창이 뜨지 않게)
@@ -2345,16 +2460,21 @@ const Game = {
   },
 
   update(dt) {
-    if (this.state !== 'play') {
-      Player.moving = false;
-      return;
+    const playing = this.state === 'play';
+    if (playing) Player.update(dt);
+    else Player.moving = false;
+    // 세상(아이템, 몬스터)은 방장/혼자 기기가 돌린다. 혼자 할 때는 카드/제작 중에 멈추고,
+    // 2인용에서는 상대가 계속 놀 수 있게 계속 돌린다. 손님 기기는 받아서 그리기만 한다
+    if (!Multi.isGuest && (playing || Multi.isHost)) {
+      Items.respawn();
+      Monsters.update(dt);
     }
-    Player.update(dt);
-    // 아빠 기기는 아빠 캐릭터만 움직인다. 나머지는 아들 기기에서 받아서 그린다
-    if (Multi.isGuest) return;
-    Items.update();
-    Monsters.update(dt);
-    if (this.state !== 'play') return; // 위에서 처치/기절로 상태가 바뀌었을 수 있다
+    if (playing || Multi.mode !== 'solo') Monsters.updateArrows(dt);
+    if (this.state !== 'play') return; // 화살로 처치해서 상태가 바뀌었을 수 있다
+    Items.pickup();
+    Monsters.touch();
+    if (this.state !== 'play') return; // 다쳐서 기절했을 수 있다
+    if (!Multi.isGuest && !Monsters.bossSpawned && Monsters.kills >= Monsters.nextBossAt) Monsters.spawnBoss();
     const onDoor = World.tileAtPx(Player.x, Player.y) === TILE.DOOR;
     if (onDoor && !this.wasOnDoor) this.enterHome();
     this.wasOnDoor = onDoor;
@@ -2367,8 +2487,7 @@ const Game = {
     if (this.state === 'play' && Player.swingT <= 0.1) {
       Player.swingT = 0.25;
       Sfx.swing();
-      if (Multi.isGuest) Multi.dadSwingAttack();
-      else Monsters.attack();
+      Monsters.attack();
     }
   },
 
@@ -2430,12 +2549,13 @@ const Game = {
         toast(`🔓 ${w.emoji} ${itemNames(w).main}`);
       }
     }
-    if (!Monsters.bossSpawned && this.kills >= this.nextBossAt) Monsters.spawnBoss();
     this.state = 'play';
   },
 
+  // src: 몬스터 또는 상대 캐릭터(isPlayer). 집 주변 안전지대에서는 상대에게 맞지 않는다
   hurt(m) {
     if (this.state !== 'play' || Player.invulnT > 0) return;
+    if (m.isPlayer && Monsters.safeZone(Player.x, Player.y)) return;
     this.hearts--;
     Player.invulnT = CONFIG.INVULN_SEC;
     const dx = Player.x - m.x, dy = Player.y - m.y, d = Math.hypot(dx, dy) || 1;
@@ -2443,8 +2563,10 @@ const Game = {
     Sfx.hurt();
     Floaters.add(Player.x, Player.y - 30, '💔', 16);
     this.renderHearts();
-    if (this.hearts <= 0) this.faint();
-    else if (this.hearts === 1) this.autoEat();
+    if (this.hearts <= 0) {
+      if (m.isPlayer) Multi.send('ko'); // 쓰러뜨린 상대 기기에 단어 카드
+      this.faint();
+    } else if (this.hearts === 1) this.autoEat();
   },
 
   // 체력이 1 남으면 가진 음식을 자동으로 먹는다
@@ -2494,12 +2616,10 @@ const Game = {
     else Speech.speak(`${josa(BOSS.ko, '을', '를')} 물리쳤어요! 최고예요!`, 'ko');
   },
 
-  // 같은 맵에서 계속: 몬스터는 계속 나오고, 몇 마리 더 잡으면 용이 다시 나온다
+  // 같은 맵에서 계속: 몬스터는 계속 나오고, 몇 마리 더 잡으면 용이 다시 나온다 (Monsters.kill 참고)
   continueGame() {
     if (this.state !== 'end') return;
     $('#end-overlay').classList.add('hidden');
-    Monsters.bossSpawned = false;
-    this.nextBossAt = this.kills + CONFIG.BOSS_AFTER_KILLS;
     Player.invulnT = CONFIG.INVULN_SEC;
     this.state = 'play';
   },
@@ -2519,6 +2639,13 @@ const Game = {
 
   addItem(type) {
     const def = ITEMS[type];
+    if (def.kind === 'heart') {
+      this.hearts = Math.min(CONFIG.MAX_HEARTS, this.hearts + CONFIG.HEART_HEAL);
+      Sfx.pickup();
+      toast(`${def.emoji} ${itemNames(def).main} ❤️+${CONFIG.HEART_HEAL}`);
+      this.renderHearts();
+      return;
+    }
     // 다쳤을 때 음식을 주우면 바로 먹는다
     if (def.kind === 'food' && this.hearts < CONFIG.MAX_HEARTS) {
       this.hearts++;

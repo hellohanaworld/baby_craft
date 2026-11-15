@@ -30,7 +30,7 @@ async function connect() {
 
 const path = (code, key) => ref(db, `rooms/${code}/${key}`);
 
-// 아들 기기: 방을 만들고 게임 상태를 보낸다
+// 방 만드는 기기: 방을 만들고 세상(아이템, 몬스터)과 내 캐릭터를 보낸다
 export async function host(seed) {
   await connect();
   let code;
@@ -45,21 +45,21 @@ export async function host(seed) {
     code,
     sendState: s => set(path(code, 's'), s),
     sendItems: list => set(path(code, 'items'), list),
-    onDad: cb => onValue(path(code, 'd'), snap => cb(snap.val())),
+    onGuest: cb => onValue(path(code, 'g'), snap => cb(snap.val())),
     close: () => remove(ref(db, `rooms/${code}`)),
   };
 }
 
-// 아빠 기기: 방 번호로 들어가서 아빠 캐릭터 위치를 보낸다
+// 들어가는 기기: 방 번호로 들어가서 내 캐릭터를 보낸다
 export async function join(code) {
   await connect();
   const snap = await get(path(code, 'host'));
   if (!snap.exists()) throw new Error('no-room');
-  onDisconnect(path(code, 'd')).remove();
+  onDisconnect(path(code, 'g')).remove();
   return {
     code,
     seed: snap.val().seed,
-    sendDad: d => set(path(code, 'd'), d),
+    sendGuest: d => set(path(code, 'g'), d),
     onState: cb => onValue(path(code, 's'), s => cb(s.val())),
     onItems: cb => onValue(path(code, 'items'), s => cb(s.val())),
   };

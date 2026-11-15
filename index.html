@@ -78,6 +78,7 @@
   <div id="title" class="overlay">
     <h1 class="logo">Baby Craft</h1>
     <div class="logo-emoji">🪵 🪨 🗡️</div>
+    <input id="name-input" class="name-input" placeholder="이름" autocomplete="off" aria-label="name">
     <div class="title-buttons">
       <div class="look-picker">
         <canvas id="look-preview" class="look-preview"></canvas>
@@ -86,7 +87,7 @@
       <button id="btn-start" class="big-btn start" disabled aria-label="start">▶</button>
       <button id="btn-multi" class="big-btn multi" disabled aria-label="two players">👥</button>
     </div>
-    <!-- 원격 2인용: 아들 기기는 🏠 방 만들기, 아빠 기기는 번호 입력 후 ▶ -->
+    <!-- 원격 2인용: 한 기기는 🏠 방 만들기, 다른 기기는 번호 입력 후 ▶ -->
     <div id="mp-panel" class="mp-panel hidden">
       <button id="btn-host" class="big-btn" aria-label="make room">🏠</button>
       <span class="mp-or">|</span>
