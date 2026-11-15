@@ -251,6 +251,9 @@ function itemNames(def) {
 // ============================================================
 // Store — localStorage 래퍼 (기기 안에만 저장)
 // ============================================================
+// net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
+const NET_URL = './net.js?v=18';
+
 const KEYS = { settings: 'bc.settings', stats: 'bc.stats', log: 'bc.log', csv: 'bc.wordsCsv', look: 'bc.look', name: 'bc.name', world: 'bc.world' };
 
 const Store = {
@@ -1941,6 +1944,44 @@ const Monsters = {
 };
 
 // ============================================================
+// Cloud — 캐릭터 이름별 가방을 Firebase 에 저장한다. 다른 기기에서도 같은 이름으로 들어오면 이어서 한다.
+//         연결이 안 되면(인터넷 없음, 보안 규칙 없음) 이 기기 저장만 쓴다
+// ============================================================
+// 이름 → 저장 칸 이름 (Firebase 가 못 쓰는 . # $ [ ] / 는 _ 로, 영어는 소문자로)
+const bagKey = name => (name || '').normalize('NFC').trim().toLowerCase().replace(/[.#$[\]/\u0000-\u001f\u007f]/g, '_');
+
+const Cloud = {
+  net: null, // 연결되면 net.js
+  key: '',
+  sent: '', // 마지막으로 올린 가방 (바뀐 경우에만 올린다)
+
+  async load(name) {
+    this.key = bagKey(name);
+    try {
+      const net = await import(NET_URL);
+      const bag = await Promise.race([net.loadBag(this.key), delay(6000).then(() => { throw new Error('timeout'); })]);
+      this.net = net;
+      console.log(`[Cloud] "${this.key}" 가방 ${bag ? '있음' : '없음'}`);
+      return { bag };
+    } catch (err) {
+      console.warn('[Cloud] 연결 안 됨, 이 기기 저장만 씀', err);
+      return null;
+    }
+  },
+
+  save(bag) {
+    if (!this.net) return;
+    const json = JSON.stringify(bag);
+    if (json === this.sent) return;
+    this.sent = json;
+    this.net.saveBag(this.key, bag).catch(err => {
+      this.sent = '';
+      console.warn('[Cloud] 가방 저장 실패', err);
+    });
+  },
+};
+
+// ============================================================
 // Floaters — 💥 ✨ 처럼 잠깐 떠올랐다 사라지는 그림
 // ============================================================
 const Floaters = {
@@ -2109,7 +2150,7 @@ const Multi = {
   },
 
   async startHost() {
-    const Net = await import('./net.js?v=17');
+    const Net = await import(NET_URL);
     this.net = await Net.host(Game.seed, this.sid);
     const edits = World.edits();
     if (Object.keys(edits).length) await this.net.putTiles(edits);
@@ -2120,7 +2161,7 @@ const Multi = {
   },
 
   async startGuest(code) {
-    const Net = await import('./net.js?v=17');
+    const Net = await import(NET_URL);
     this.net = await Net.join(code, this.sid);
     this.mode = 'guest';
     // 같은 시드로 같은 맵. 바뀐 칸, 아이템, 몬스터는 방에서 받는다
@@ -3113,7 +3154,7 @@ const Game = {
   async begin() {
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
     $('#btn-start').disabled = true;
-    await this.checkMic();
+    await Promise.all([this.checkMic(), this.syncBag()]);
     $('#title').classList.add('hidden');
     $('#minimap').classList.remove('hidden');
     document.body.classList.add('playing');
@@ -3155,24 +3196,61 @@ const Game = {
     // 맵 만드는 방법이 바뀌기 전 저장이면 바뀐 칸은 버린다 (다른 맵에 붙으면 엉망이 된다). 가방은 그대로
     if (save.gen === WORLD_GEN) World.applyEdits(save.edits);
     else console.log('[Save] 맵이 새로 바뀌어서 예전에 바꾼 칸은 버림');
-    const bag = save.bag || {};
-    for (const [type, n] of Object.entries(bag.inventory || {})) if (ITEMS[type] && n > 0) this.inventory[type] = n;
-    for (const id of bag.weapons || []) if (WEAPONS[id]) this.weapons.add(id);
-    if (holdable(bag.picked)) this.picked = bag.picked;
-    if (WEAPONS[bag.lastWeapon]) this.lastWeapon = bag.lastWeapon;
-    this.kills = bag.kills || 0;
-    for (const r of RECIPES) if (r.unlock > 0 && this.kills >= r.unlock) this.unlockShown.add(r.result);
+    this.applyBag(save.bag);
     Monsters.kills = save.monsterKills || 0;
     Monsters.nextBossAt = save.nextBossAt || CONFIG.BOSS_AFTER_KILLS;
     console.log(`[Save] 불러옴: 바뀐 칸 ${Object.keys(save.edits || {}).length}개`);
   },
 
+  // 가방 (아이템, 무기, 손에 든 것, 잡은 수) 을 지금 것으로 바꾼다
+  applyBag(bag = {}) {
+    this.inventory = {};
+    this.weapons = new Set();
+    this.unlockShown = new Set();
+    for (const [type, n] of Object.entries(bag.inventory || {})) if (ITEMS[type] && n > 0) this.inventory[type] = n;
+    for (const id of bag.weapons || []) if (WEAPONS[id]) this.weapons.add(id);
+    this.picked = holdable(bag.picked) ? bag.picked : null;
+    this.lastWeapon = WEAPONS[bag.lastWeapon] ? bag.lastWeapon : null;
+    this.kills = bag.kills || 0;
+    for (const r of RECIPES) if (r.unlock > 0 && this.kills >= r.unlock) this.unlockShown.add(r.result);
+    this.bagJson = JSON.stringify(this.bagItems());
+    this.bagT = bag.t || 0;
+  },
+
+  bagItems() {
+    return { inventory: this.inventory, weapons: [...this.weapons], picked: this.picked, lastWeapon: this.lastWeapon, kills: this.kills };
+  },
+
+  // 가방 + 누구 것인지(owner: 이름) + 마지막으로 바뀐 때(t). 바뀌었을 때만 t 를 새로
+  bagData() {
+    const items = this.bagItems(), json = JSON.stringify(items);
+    if (json !== this.bagJson) { this.bagJson = json; this.bagT = Date.now(); }
+    return { ...items, owner: bagKey(this.playerName), t: this.bagT };
+  },
+
+  // 시작할 때: 서버에 같은 이름의 가방이 있으면 이어서 한다 (이 기기 가방이 그 이름 것이고 더 나중 것이면 이 기기 것).
+  // 서버에 없으면 이 기기 가방이 그 이름 것(또는 이름 없는 예전 저장)일 때만 가져가고, 다른 이름 것이면 빈 가방으로
+  async syncBag() {
+    const local = (Store.get(KEYS.world, null) || {}).bag || {};
+    const key = bagKey(this.playerName), mine = !local.owner || local.owner === key;
+    const cloud = await Cloud.load(this.playerName);
+    if (!cloud) return; // 연결 안 됨: 이 기기 가방 그대로
+    const remote = cloud.bag;
+    if (remote && !(mine && (local.t || 0) > (remote.t || 0))) {
+      this.applyBag(remote);
+      console.log('[Cloud] 서버 가방으로 이어서');
+    } else if (!remote && !mine) {
+      this.applyBag({});
+      console.log('[Cloud] 새 이름: 빈 가방');
+    }
+    Cloud.save(this.bagData());
+  },
+
   writeSave() {
     if (this.state === 'loading' || this.state === 'title' || this.state === 'starting') return;
     const old = Store.get(KEYS.world, null) || {};
-    const bag = {
-      inventory: this.inventory, weapons: [...this.weapons], picked: this.picked, lastWeapon: this.lastWeapon, kills: this.kills,
-    };
+    const bag = this.bagData();
+    Cloud.save(bag);
     if (Multi.isGuest) { Store.set(KEYS.world, { ...old, bag }); return; }
     Store.set(KEYS.world, {
       gen: WORLD_GEN, seed: this.seed, edits: World.edits(), bag, pets: Monsters.myPets(),

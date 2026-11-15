@@ -10,6 +10,7 @@
 //   w      몬스터 (방장이 쓴다)
 //   items  아이템 (방장이 쓴다)
 //   t/{칸} 캐거나 놓아서 바뀐 맵 칸 (누구나 쓴다. 같은 칸을 동시에 바꾸면 한 사람만 된다)
+// bags/{캐릭터 이름}  가방 (같은 이름으로 들어오면 어느 기기에서든 이어서 한다)
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import { getAuth, signInAnonymously } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
 import {
@@ -49,6 +50,17 @@ export async function host(seed, sid) {
   await set(path(code, 'host'), { seed, t: serverTimestamp() });
   onDisconnect(ref(db, `rooms/${code}`)).remove();
   return room(code, seed, sid);
+}
+
+// 캐릭터 이름별 가방: 없으면 null
+export async function loadBag(name) {
+  await connect();
+  return (await get(ref(db, `bags/${name}`))).val();
+}
+
+export async function saveBag(name, bag) {
+  await connect();
+  await set(ref(db, `bags/${name}`), bag);
 }
 
 // 방 번호로 들어가기
