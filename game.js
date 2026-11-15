@@ -29,6 +29,9 @@ const CONFIG = {
   // 전투
   MAX_HEARTS: 5,
   INVULN_SEC: 1.2,        // 다친 뒤 무적 시간
+  HIT_FLASH_SEC: 0.35,    // 맞았을 때 빨갛게 번쩍이며 흔들리는 시간
+  KNOCKBACK: 6,           // 맞았을 때 뒤로 밀리는 속도 (타일/초, 0.15초 동안)
+  SPAWN_INVULN_SEC: 3,    // 기절 후 집에서 다시 시작할 때 무적 시간
   MONSTER_COUNT: 5,
   MONSTER_RESPAWN_MS: 8000,
   AGGRO_RANGE: 4.5,       // 타일. 이 안에 들어오면 몬스터가 다가온다
@@ -79,7 +82,7 @@ const ITEMS = {
   milk:   { emoji: '🥛', ko: '우유', en: 'milk',   kind: 'food',     weight: 1 },
   grape:  { emoji: '🍇', ko: '포도', en: 'grape',  kind: 'food',     weight: 1 },
   egg:    { emoji: '🥚', ko: '알',   en: 'egg',    kind: 'food',     weight: 1 },
-  // 하트는 따로 HEART_COUNT 개가 생긴다 (가방에 들어가지 않고 바로 체력을 채운다)
+  // 하트는 따로 HEART_COUNT 개가 생긴다. 다쳤으면 바로 체력을 채우고, 가득이면 가방에 넣어 둔다
   heart:  { emoji: '❤️', ko: '하트', en: 'heart',  kind: 'heart',    weight: 0 },
 };
 
@@ -1190,7 +1193,6 @@ const Items = {
     for (const [id, at] of this.pending) if (now - at > 2000) this.pending.delete(id);
     for (const it of [...this.list]) {
       if (this.pending.has(it.id) || Math.hypot(it.x - Player.x, it.y - Player.y) >= r) continue;
-      if (it.type === 'heart' && Game.hearts >= CONFIG.MAX_HEARTS) continue; // 체력이 가득이면 남겨 둔다
       if (Multi.isGuest) {
         this.pending.set(it.id, now);
         Multi.send('pick', it.id);
@@ -1463,6 +1465,7 @@ const Player = {
   walkT: 0,
   swingT: 0,
   invulnT: 0,
+  hitT: 0,
   knock: { x: 0, y: 0, t: 0 },
 
   reset() {
@@ -1476,6 +1479,7 @@ const Player = {
 
   update(dt) {
     this.invulnT = Math.max(0, this.invulnT - dt);
+    this.hitT = Math.max(0, this.hitT - dt);
     if (this.knock.t > 0) {
       this.knock.t -= dt;
       const kx = this.x + this.knock.x * dt, ky = this.y + this.knock.y * dt;
@@ -1543,7 +1547,7 @@ const Multi = {
   hostSeen: false,
 
   // 상대 캐릭터 (이름표, 상태, 무기, 화살까지)
-  other: { ...makeRemote(), isPlayer: true, name: '', st: 'play', weapon: 'hand', arrows: [], lk: 0, sid: '', lastSeq: 0, lastSeen: 0 },
+  other: { ...makeRemote(), isPlayer: true, name: '', hearts: CONFIG.MAX_HEARTS, st: 'play', weapon: 'hand', arrows: [], lk: 0, sid: '', lastSeq: 0, lastSeen: 0 },
 
   get isHost() { return this.mode === 'host'; },
   get isGuest() { return this.mode === 'guest'; },
@@ -1613,10 +1617,15 @@ const Multi = {
   // 내 공격이 상대에게 닿았는지. 맞으면 상대 기기에 알린다 (하트는 상대 기기에서 깎는다)
   hitOther(x, y, r) {
     const o = this.other;
-    if (!this.otherActive() || Monsters.safeZone(o.x, o.y) || o.invulnT > 0) return false;
+    if (!this.otherActive() || o.invulnT > 0) return false;
     if (Math.hypot(o.x - x, o.y - y) >= r + CONFIG.PLAYER_RADIUS * T) return false;
     this.send('hitP');
-    o.hitT = 0.25;
+    o.hitT = CONFIG.HIT_FLASH_SEC;
+    o.invulnT = CONFIG.INVULN_SEC; // 같은 공격으로 여러 번 맞히지 않게
+    // 상대 기기에서 밀려난 위치가 오기 전에 이 화면에서도 바로 뒤로 밀어 보여준다
+    const dx = o.x - Player.x, dy = o.y - Player.y, d = Math.hypot(dx, dy) || 1;
+    const push = CONFIG.KNOCKBACK * T * 0.15;
+    if (World.canStand(o.x + dx / d * push, o.y + dy / d * push)) { o.x += dx / d * push; o.y += dy / d * push; }
     Sfx.hit();
     Floaters.add(o.x, o.y - 30, '💥', 16);
     return true;
@@ -1653,7 +1662,8 @@ const Multi = {
       lk: Game.lookIndex,
       st: Game.state,
       p: [r(Player.x), r(Player.y), DIRS.indexOf(Player.dir), Player.moving ? 1 : 0,
-        Player.swingT > 0 ? 1 : 0, Player.invulnT > 0 ? 1 : 0],
+        Player.swingT > 0 ? 1 : 0, Player.invulnT > 0 ? 1 : 0, Player.hitT > 0 ? 1 : 0],
+      hp: Game.hearts,
       w: Game.weapon,
       a: Monsters.arrows.map(a => [r(a.x), r(a.y), a.fx, a.fy]),
       ev: this.events.map(([seq, , kind, ...args]) => [seq, kind, ...args]),
@@ -1698,7 +1708,9 @@ const Multi = {
     o.dir = DIRS[p[2]] || 'down';
     o.moving = !!p[3];
     if (p[4] && o.swingT <= 0) o.swingT = 0.25;
-    if (p[5]) o.invulnT = 0.2;
+    if (p[5]) o.invulnT = Math.max(o.invulnT, 0.2);
+    if (p[6] && o.hitT <= 0) o.hitT = CONFIG.HIT_FLASH_SEC;
+    o.hearts = Number.isInteger(d.hp) ? d.hp : CONFIG.MAX_HEARTS;
     o.weapon = WEAPONS[d.w] ? d.w : 'hand';
     o.arrows = (d.a || []).filter(Boolean).map(([x, y, fx, fy]) => ({ x, y, fx, fy }));
     for (const ev of evs.sort((a, b) => a[0] - b[0])) {
@@ -1904,11 +1916,12 @@ const Render = {
     // y 순서대로 그려서 앞뒤가 자연스럽게
     const drawables = Items.list.filter(it => !Items.pending.has(it.id)).map(it => ({ y: it.y, draw: () => this.drawItem(it, time) }));
     for (const m of Monsters.list) drawables.push({ y: m.y, draw: () => this.drawMonster(m, time) });
-    drawables.push({ y: Player.y, draw: () => this.drawCharacter(Player, Multi.myLook(), Game.weapon, Game.playerName, true) });
+    const showHearts = Multi.mode !== 'solo';
+    drawables.push({ y: Player.y, draw: () => this.drawCharacter(Player, Multi.myLook(), Game.weapon, Game.playerName, true, showHearts ? Game.hearts : null) });
     const o = Multi.other;
     if (Multi.otherVisible()) {
       drawables.push({ y: o.y, draw: () => {
-        this.drawCharacter(o, Multi.remoteLook(), o.weapon, o.name, false);
+        this.drawCharacter(o, Multi.remoteLook(), o.weapon, o.name, false, o.hearts);
         const icon = STATUS_ICONS[o.st];
         if (icon) this.drawStatus(o, icon, time);
       } });
@@ -2060,16 +2073,19 @@ const Render = {
 
   // 8칸 x 13칸 픽셀 캐릭터. e: 위치/방향/걷기/휘두르기 상태, look: 옷 색, weapon: 손에 든 무기,
   // label: 머리 위 이름, mine: 내 캐릭터면 이름을 파란색으로
-  drawCharacter(e, look, weapon, label, mine) {
-    const ctx = this.ctx, { x, y, dir } = e;
+  drawCharacter(e, look, weapon, label, mine, hearts) {
+    const ctx = this.ctx, { y, dir } = e;
     const u = 2.5;
+    // 맞은 순간: 좌우로 흔들리며 빨갛게 번쩍인다
+    const hitT = e.hitT || 0;
+    const x = e.x + (hitT > 0 ? Math.sin(hitT * 80) * 2.5 : 0);
+    const flash = hitT > 0 && Math.floor(hitT * 20) % 2 === 0;
     const left = x - 4 * u, top = y + 6 - 13 * u;
     const step = e.moving ? Math.sin(e.walkT * 12) * 0.6 : 0;
-    const box = (gx, gy, w, h, color) => { ctx.fillStyle = color; ctx.fillRect(left + gx * u, top + gy * u, w * u, h * u); };
-    // 다친 직후 무적 시간에는 깜빡인다
+    const box = (gx, gy, w, h, color) => { ctx.fillStyle = flash ? '#ff5252' : color; ctx.fillRect(left + gx * u, top + gy * u, w * u, h * u); };
+    // 다친 뒤 무적 시간에는 깜빡인다
     ctx.save();
-    const blinkT = Math.max(e.invulnT || 0, e.hitT || 0);
-    if (blinkT > 0 && Math.floor(blinkT * 10) % 2) ctx.globalAlpha = 0.4;
+    if (hitT <= 0 && e.invulnT > 0 && Math.floor(e.invulnT * 10) % 2) ctx.globalAlpha = 0.4;
 
     ctx.fillStyle = 'rgba(0,0,0,.25)';
     ctx.beginPath();
@@ -2141,6 +2157,12 @@ const Render = {
       const ly = top - (look.hat ? 12 : 7);
       ctx.strokeText(label, x, ly);
       ctx.fillText(label, x, ly);
+      // 2인용: 이름 위에 남은 하트
+      if (hearts != null) {
+        ctx.fillStyle = '#000';
+        ctx.font = `7px ${FONT_EMOJI}`;
+        for (let i = 0; i < CONFIG.MAX_HEARTS; i++) ctx.fillText(i < hearts ? '❤️' : '🤍', x + (i - (CONFIG.MAX_HEARTS - 1) / 2) * 8, ly - 10);
+      }
     }
     ctx.restore();
   },
@@ -2188,7 +2210,7 @@ const Render = {
     ctx.textBaseline = 'middle';
     ctx.fillStyle = '#000';
     ctx.font = `18px ${FONT_EMOJI}`;
-    ctx.fillText(icon, e.x, e.y - 56 + Math.sin(time * 4) * 2);
+    ctx.fillText(icon, e.x, e.y - 66 + Math.sin(time * 4) * 2);
   },
 
   // 만들 수 있는 무기가 있으면 집 위에 🔨 가 통통 튄다
@@ -2314,6 +2336,7 @@ const Game = {
     btn.disabled = false;
     btn.addEventListener('click', () => this.start());
     requestAnimationFrame(t => this.loop(t));
+    this.keepAliveInBackground();
   },
 
   async start() {
@@ -2331,6 +2354,7 @@ const Game = {
   },
 
   async begin() {
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
     $('#btn-start').disabled = true;
     await this.checkMic();
     $('#title').classList.add('hidden');
@@ -2449,14 +2473,30 @@ const Game = {
   },
 
   loop(ts) {
-    const dt = Math.min(0.05, (ts - (this.lastTime || ts)) / 1000);
-    this.lastTime = ts;
-    this.update(dt);
-    Multi.tick(dt);
-    Floaters.update(dt);
+    this.step(ts);
     Render.draw(ts / 1000);
     if (Card.active) Card.el.mic.style.setProperty('--level', Meter.read().toFixed(2));
     requestAnimationFrame(t => this.loop(t));
+  },
+
+  // 지난 시간만큼 게임을 진행한다. 0.05초씩 나눠서 움직여 벽을 뚫지 않게 한다
+  step(ts) {
+    let left = Math.min(1, (ts - (this.lastTime || ts)) / 1000);
+    this.lastTime = ts;
+    Multi.tick(left);
+    while (left > 0) {
+      const dt = Math.min(0.05, left);
+      left -= dt;
+      this.update(dt);
+      Floaters.update(dt);
+    }
+  },
+
+  // 2인용인데 이 탭이 안 보이면(다른 탭/앱) 화면 그리기가 멈춘다. 그래도 상대와 통신은 계속한다
+  keepAliveInBackground() {
+    setInterval(() => {
+      if (document.hidden && Multi.mode !== 'solo') this.step(performance.now());
+    }, 250);
   },
 
   update(dt) {
@@ -2552,14 +2592,14 @@ const Game = {
     this.state = 'play';
   },
 
-  // src: 몬스터 또는 상대 캐릭터(isPlayer). 집 주변 안전지대에서는 상대에게 맞지 않는다
+  // m: 몬스터 또는 상대 캐릭터(isPlayer). 맞으면 빨갛게 번쩍이며 때린 쪽 반대로 밀린다
   hurt(m) {
     if (this.state !== 'play' || Player.invulnT > 0) return;
-    if (m.isPlayer && Monsters.safeZone(Player.x, Player.y)) return;
     this.hearts--;
     Player.invulnT = CONFIG.INVULN_SEC;
+    Player.hitT = CONFIG.HIT_FLASH_SEC;
     const dx = Player.x - m.x, dy = Player.y - m.y, d = Math.hypot(dx, dy) || 1;
-    Player.knock = { x: dx / d * 8 * T, y: dy / d * 8 * T, t: 0.15 };
+    Player.knock = { x: dx / d * CONFIG.KNOCKBACK * T, y: dy / d * CONFIG.KNOCKBACK * T, t: 0.15 };
     Sfx.hurt();
     Floaters.add(Player.x, Player.y - 30, '💔', 16);
     this.renderHearts();
@@ -2569,14 +2609,16 @@ const Game = {
     } else if (this.hearts === 1) this.autoEat();
   },
 
-  // 체력이 1 남으면 가진 음식을 자동으로 먹는다
+  // 체력이 1 남으면 가방의 하트나 음식을 자동으로 먹는다
   autoEat() {
-    const food = Object.keys(ITEMS).find(type => ITEMS[type].kind === 'food' && this.inventory[type] > 0);
+    const food = this.inventory.heart > 0 ? 'heart'
+      : Object.keys(ITEMS).find(type => ITEMS[type].kind === 'food' && this.inventory[type] > 0);
     if (!food) return;
     this.inventory[food]--;
-    this.hearts = Math.min(CONFIG.MAX_HEARTS, this.hearts + 2);
+    const heal = food === 'heart' ? CONFIG.HEART_HEAL : 2;
+    this.hearts = Math.min(CONFIG.MAX_HEARTS, this.hearts + heal);
     const def = ITEMS[food];
-    toast(`${def.emoji} ${itemNames(def).main} ❤️+2`);
+    toast(`${def.emoji} ${itemNames(def).main} ❤️+${heal}`);
     Sfx.pickup();
     this.renderInventory();
     this.renderHearts();
@@ -2597,7 +2639,7 @@ const Game = {
     this.hearts = CONFIG.MAX_HEARTS;
     this.renderHearts();
     await this.showCards(1);
-    Player.invulnT = CONFIG.INVULN_SEC;
+    Player.invulnT = CONFIG.SPAWN_INVULN_SEC;
     this.state = 'play';
   },
 
@@ -2639,7 +2681,7 @@ const Game = {
 
   addItem(type) {
     const def = ITEMS[type];
-    if (def.kind === 'heart') {
+    if (def.kind === 'heart' && this.hearts < CONFIG.MAX_HEARTS) {
       this.hearts = Math.min(CONFIG.MAX_HEARTS, this.hearts + CONFIG.HEART_HEAL);
       Sfx.pickup();
       toast(`${def.emoji} ${itemNames(def).main} ❤️+${CONFIG.HEART_HEAL}`);
