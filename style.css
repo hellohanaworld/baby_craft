@@ -86,6 +86,8 @@ button { font-family: inherit; color: inherit; }
   box-shadow: 0 3px 0 rgba(0, 0, 0, .25);
 }
 .inv-slot .e { font-size: 30px; line-height: 1; }
+/* 블록 아이템 그림 (맵 칸 그림 그대로, 글자 크기에 맞춤) */
+.tile-icon { width: 1em; height: 1em; image-rendering: pixelated; vertical-align: -0.12em; border-radius: 4px; }
 .inv-slot .names { display: flex; flex-direction: column; line-height: 1.05; }
 .inv-slot .n { font-size: 20px; font-weight: 800; color: var(--ink); }
 .inv-slot .s { font-size: 14px; color: #666; font-family: var(--font-en); }

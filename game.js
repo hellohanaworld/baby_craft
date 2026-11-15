@@ -80,7 +80,7 @@ const FONT_EMOJI = '"Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",sans
 // 게임 아이템 (이름은 화면에 글자로 같이 보여준다)
 const ITEMS = {
   wood:   { emoji: '🪵', ko: '통나무', en: 'log',  kind: 'material', weight: 4 },
-  stone:  { emoji: '🪨', ko: '돌',   en: 'rock',   kind: 'material', weight: 3, tile: 'ROCK' }, // 손에 들면 바위로 놓을 수 있다
+  stone:  { emoji: '🪨', ko: '돌',   en: 'rock',   kind: 'material', weight: 3 },
   string: { emoji: '🧵', ko: '실',   en: 'string', kind: 'material', weight: 2 },
   iron:   { emoji: '🔩', ko: '쇠',   en: 'iron',   kind: 'material', weight: 2 },
   apple:  { emoji: '🍎', ko: '사과', en: 'apple',  kind: 'food',     weight: 2 },
@@ -89,9 +89,11 @@ const ITEMS = {
   egg:    { emoji: '🥚', ko: '알',   en: 'egg',    kind: 'food',     weight: 1 },
   // 하트는 따로 HEART_COUNT 개가 생긴다. 다쳤으면 바로 체력을 채우고, 가득이면 가방에 넣어 둔다
   heart:  { emoji: '❤️', ko: '하트', en: 'heart',  kind: 'heart',    weight: 0 },
-  // 맵에서 캔 것. 손에 들고 ✋ 를 누르면 앞칸에 놓는다 (tile: 놓으면 되는 맵 칸. 🪨 돌도 놓을 수 있다)
-  tree:   { emoji: '🌳', ko: '나무', en: 'tree',   kind: 'block', tile: 'TREE',   weight: 0 },
-  flower: { emoji: '🌷', ko: '꽃',   en: 'flower', kind: 'block', tile: 'FLOWER', weight: 0 },
+  // 맵에서 캔 것. 손에 들고 ✋ 를 누르면 앞칸에 놓는다 (tile: 놓으면 되는 맵 칸).
+  // 그림은 이모지 대신 맵 칸 그림 그대로 (iconHtml / tileIcon)
+  tree:   { emoji: '🌳', ko: '나무', en: 'tree',    kind: 'block', tile: 'TREE',   weight: 0 },
+  flower: { emoji: '🌷', ko: '꽃',   en: 'flower',  kind: 'block', tile: 'FLOWER', weight: 0 },
+  rock:   { emoji: '🪨', ko: '바위', en: 'boulder', kind: 'block', tile: 'ROCK',   weight: 0 },
 };
 
 // 무기 (power 가 클수록 강하다. 제일 센 무기를 자동으로 든다)
@@ -1044,6 +1046,23 @@ const MINI_COLORS = ['#7ccf6f', '#2e7d32', '#3b8de0', '#e9d68f', '#8d939b', '#f4
 // 손에 들 수 있는 것: 무기 또는 놓을 수 있는 블록
 const holdable = id => !!WEAPONS[id] || !!(ITEMS[id] && ITEMS[id].tile);
 const holdEmoji = id => (WEAPONS[id] || ITEMS[id] || WEAPONS.hand).emoji;
+
+// 맵 칸 그림 한 칸짜리 (블록 아이템 그림). 한 번 그려서 저장
+const tileIcons = {};
+function tileIcon(name) {
+  if (!tileIcons[name]) {
+    const c = document.createElement('canvas');
+    c.width = c.height = T;
+    World.drawTile(c.getContext('2d'), 0, 0, TILE[name]);
+    tileIcons[name] = { canvas: c, url: c.toDataURL() };
+  }
+  return tileIcons[name];
+}
+
+// 화면(HTML)에 쓰는 아이템 그림: 블록은 맵 칸 그림, 나머지는 이모지
+function iconHtml(def) {
+  return def.tile ? `<img class="tile-icon" src="${tileIcon(def.tile).url}" alt="">` : def.emoji;
+}
 
 const World = {
   w: 0,
@@ -2144,12 +2163,8 @@ const Render = {
     else if (spot && !Monsters.anyInFront()) color = `rgba(255,255,255,${0.55 + Math.sin(time * 6) * 0.25})`;
     if (!color) return;
     if (block && spot) {
-      ctx.globalAlpha = 0.45;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillStyle = '#000';
-      ctx.font = `22px ${FONT_EMOJI}`;
-      ctx.fillText(ITEMS[block].emoji, t.x * T + T / 2, t.y * T + T / 2);
+      ctx.globalAlpha = 0.6;
+      ctx.drawImage(tileIcon(ITEMS[block].tile).canvas, t.x * T, t.y * T);
       ctx.globalAlpha = 1;
     }
     ctx.strokeStyle = color;
@@ -2389,7 +2404,9 @@ const Render = {
       ctx.textBaseline = 'middle';
       ctx.fillStyle = '#000';
       ctx.font = `15px ${FONT_EMOJI}`;
-      ctx.fillText(holdEmoji(held), 0, -4);
+      const block = ITEMS[held] && ITEMS[held].tile;
+      if (block) ctx.drawImage(tileIcon(block).canvas, -8, -12, 16, 16);
+      else ctx.fillText(holdEmoji(held), 0, -4);
       ctx.restore();
     }
 
@@ -2854,7 +2871,7 @@ const Game = {
     this.busy = false;
     if (!ok) return;
     if (tt === TILE.TREE) { this.addItem('tree'); this.addItem('wood'); }
-    else if (tt === TILE.ROCK) this.addItem('stone');
+    else if (tt === TILE.ROCK) { this.addItem('rock'); this.addItem('stone'); }
     else this.addItem('flower');
   },
 
@@ -3054,7 +3071,7 @@ const Game = {
     this.closeWeaponPicker(false);
     this.renderInventory();
     const def = WEAPONS[id] || ITEMS[id];
-    toast(`${def.emoji} ${itemNames(def).main}`);
+    toast(`${iconHtml(def)} ${itemNames(def).main}`);
   },
 
   get pickerOpen() { return !$('#weapon-picker').classList.contains('hidden'); },
@@ -3072,7 +3089,7 @@ const Game = {
       const btn = document.createElement('button');
       const def = WEAPONS[id] || ITEMS[id];
       btn.className = `big-btn weapon-choice${id === this.held ? ' on' : ''}`;
-      btn.innerHTML = ITEMS[id] ? `${def.emoji}<b>${this.inventory[id]}</b>` : def.emoji;
+      btn.innerHTML = ITEMS[id] ? `${iconHtml(def)}<b>${this.inventory[id]}</b>` : def.emoji;
       btn.setAttribute('aria-label', def.en);
       btn.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); this.setWeapon(id); });
       picker.appendChild(btn);
@@ -3130,7 +3147,7 @@ const Game = {
     this.inventory[type] = (this.inventory[type] || 0) + 1;
     Sfx.pickup();
     const { main, sub } = itemNames(def);
-    toast(`${def.emoji} ${main}${sub ? ` <small>${sub}</small>` : ''} +1`);
+    toast(`${iconHtml(def)} ${main}${sub ? ` <small>${sub}</small>` : ''} +1`);
     this.renderInventory(type);
   },
 
@@ -3139,8 +3156,8 @@ const Game = {
     inv.innerHTML = '';
     // 손에 든 것 (✋ 버튼 그림도 같이 바꾼다)
     const w = WEAPONS[this.held] || ITEMS[this.held];
-    $('#btn-action').textContent = w.emoji;
-    $('#btn-weapon').textContent = w.emoji;
+    $('#btn-action').innerHTML = iconHtml(w);
+    $('#btn-weapon').innerHTML = iconHtml(w);
     const choices = this.ownedWeapons().length > 1;
     $('#btn-weapon').classList.toggle('hidden', !choices);
     if (choices) {
@@ -3148,7 +3165,7 @@ const Game = {
       const slot = document.createElement('div');
       slot.className = 'inv-slot weapon';
       slot.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); this.toggleWeaponPicker(); });
-      slot.innerHTML = `<span class="e">${w.emoji}</span><span class="names"><span class="n">${main}</span>` +
+      slot.innerHTML = `<span class="e">${iconHtml(w)}</span><span class="names"><span class="n">${main}</span>` +
         `${sub ? `<span class="s">${sub}</span>` : ''}</span>`;
       inv.appendChild(slot);
     }
@@ -3161,7 +3178,7 @@ const Game = {
       const def = ITEMS[type], { main, sub } = itemNames(def);
       const slot = document.createElement('div');
       slot.className = `inv-slot${type === bumpType ? ' bump' : ''}`;
-      slot.innerHTML = `<span class="e">${def.emoji}</span><span class="names"><span class="n">${main}</span>` +
+      slot.innerHTML = `<span class="e">${iconHtml(def)}</span><span class="names"><span class="n">${main}</span>` +
         `${sub ? `<span class="s">${sub}</span>` : ''}</span><b>${this.inventory[type]}</b>`;
       inv.appendChild(slot);
     }
