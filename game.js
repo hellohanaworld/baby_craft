@@ -1806,6 +1806,8 @@ const Game = {
   weapons: new Set(),
   hearts: CONFIG.MAX_HEARTS,
   kills: 0,
+  bossKills: 0,
+  nextBossAt: CONFIG.BOSS_AFTER_KILLS,
   cardsRead: 0,
   startedAt: 0,
   wasOnDoor: false,
@@ -1841,6 +1843,7 @@ const Game = {
     this.renderInventory();
     this.renderHearts();
     $('#btn-restart').addEventListener('click', () => location.reload());
+    $('#btn-continue').addEventListener('click', () => this.continueGame());
 
     this.state = 'title';
     const btn = $('#btn-start');
@@ -1910,6 +1913,7 @@ const Game = {
   onAction() {
     if (this.state === 'title') { this.start(); return; }
     if (this.state === 'card') { Card.tapPass(); return; }
+    if (this.state === 'end') { this.continueGame(); return; }
     if (this.state === 'play' && Player.swingT <= 0.1) {
       Player.swingT = 0.25;
       Sfx.swing();
@@ -1975,7 +1979,7 @@ const Game = {
         toast(`🔓 ${w.emoji} ${itemNames(w).main}`);
       }
     }
-    if (!Monsters.bossSpawned && this.kills >= CONFIG.BOSS_AFTER_KILLS) Monsters.spawnBoss();
+    if (!Monsters.bossSpawned && this.kills >= this.nextBossAt) Monsters.spawnBoss();
     this.state = 'play';
   },
 
@@ -2026,15 +2030,27 @@ const Game = {
 
   victory() {
     this.state = 'end';
+    this.bossKills++;
     const mins = Math.max(1, Math.round((performance.now() - this.startedAt) / 60000));
-    console.log(`[Game] 승리! 처치 ${this.kills + 1}, 카드 ${this.cardsRead}, ${mins}분`);
+    const total = this.kills + this.bossKills;
+    console.log(`[Game] 승리! 처치 ${total}, 카드 ${this.cardsRead}, ${mins}분`);
     $('#end-title').textContent = PRAISE[Store.settings.lang === 'en' ? 'en' : 'ko'];
-    $('#end-stats').innerHTML = `<span>👾 ${this.kills + 1}</span><span>📖 ${this.cardsRead}</span><span>⏱️ ${mins}</span>`;
+    $('#end-stats').innerHTML = `<span>👾 ${total}</span><span>📖 ${this.cardsRead}</span><span>⏱️ ${mins}</span>`;
     $('#end-overlay').classList.remove('hidden');
     Sfx.success();
     burst();
     if (Store.settings.lang === 'en') Speech.speak('You beat the dragon!', 'en');
     else Speech.speak(`${josa(BOSS.ko, '을', '를')} 물리쳤어요! 최고예요!`, 'ko');
+  },
+
+  // 같은 맵에서 계속: 몬스터는 계속 나오고, 몇 마리 더 잡으면 용이 다시 나온다
+  continueGame() {
+    if (this.state !== 'end') return;
+    $('#end-overlay').classList.add('hidden');
+    Monsters.bossSpawned = false;
+    this.nextBossAt = this.kills + CONFIG.BOSS_AFTER_KILLS;
+    Player.invulnT = CONFIG.INVULN_SEC;
+    this.state = 'play';
   },
 
   renderHearts() {

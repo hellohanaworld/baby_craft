@@ -305,6 +305,8 @@ body.touch #controls { display: block; }
 .end-trophy { font-size: 24vmin; line-height: 1; }
 .end-title { font-size: 10vmin; font-weight: 900; color: #e65100; }
 .end-stats { display: flex; gap: 5vmin; font-size: 7vmin; font-weight: 800; color: var(--ink); }
+.end-buttons { display: flex; gap: 6vmin; align-items: center; }
+.restart { width: 110px; height: 110px; border-radius: 50%; font-size: 52px; }
 
 /* ---------- 시작 화면 ---------- */
 #title {
