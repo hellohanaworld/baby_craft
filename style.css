@@ -426,35 +426,19 @@ body.touch #controls { display: block; }
 .mp-msg { width: 100%; text-align: center; font-size: 24px; font-weight: 800; color: #6d4c41; }
 .mp-msg:empty { display: none; }
 .room-badge {
-  pointer-events: auto;
-  height: 48px;
-  padding: 0 12px;
-  font-family: inherit;
+  position: fixed;
+  left: max(10px, env(safe-area-inset-left));
+  top: max(10px, env(safe-area-inset-top));
+  z-index: 15;
+  padding: 6px 14px;
   border-radius: 14px;
   background: rgba(255, 255, 255, .92);
   border: 3px solid #5d4037;
   font-size: 26px;
   font-weight: 900;
   color: var(--ink);
-  cursor: pointer;
+  pointer-events: none;
 }
-.room-code {
-  position: fixed;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  z-index: 45;
-  padding: 16px 40px 20px;
-  border-radius: 24px;
-  background: rgba(255, 255, 255, .96);
-  border: 5px solid #5d4037;
-  box-shadow: 0 8px 0 rgba(0, 0, 0, .25);
-  text-align: center;
-  color: var(--ink);
-  cursor: pointer;
-}
-.room-code-label { font-size: 28px; font-weight: 900; }
-.room-code-num { font-size: 96px; font-weight: 900; letter-spacing: 12px; line-height: 1.1; color: #1e88e5; }
 .msg {
   margin: 0;
   max-width: 90vw;

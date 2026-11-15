@@ -462,6 +462,8 @@ const Sfx = {
     osc.stop(t0 + dur + 0.05);
   },
 
+  // 버튼을 누르거나 닫을 때 '톡'
+  click() { this.tone(700, 0.06, { type: 'triangle', to: 1000, vol: 0.1 }); },
   pickup() { this.tone(660, 0.08); this.tone(990, 0.14, { delay: 0.07 }); },
   success() { [523, 659, 784, 1047].forEach((f, i) => this.tone(f, 0.22, { type: 'triangle', delay: i * 0.09 })); },
   soft() { this.tone(330, 0.25, { to: 260, vol: 0.1 }); },
@@ -1625,22 +1627,11 @@ const Multi = {
     return { emoji: '', ko: name, en: name, boss: false, drops: {} };
   },
 
-  // 방 번호: 하트 옆에 작게 계속 + 처음엔 가운데에 크게 (작은 번호를 누르면 다시 크게)
+  // 방 번호: 왼쪽 위에 작게
   showBadge(code) {
     const b = $('#room-badge');
     b.textContent = `👥 ${code}`;
     b.classList.remove('hidden');
-    b.onpointerdown = e => { e.preventDefault(); e.stopPropagation(); this.showCode(code); };
-    this.showCode(code);
-  },
-
-  showCode(code) {
-    const el = $('#room-code');
-    el.innerHTML = `<div class="room-code-label">👥 방 번호</div><div class="room-code-num">${code}</div>`;
-    el.classList.remove('hidden');
-    clearTimeout(this.codeTimer);
-    this.codeTimer = setTimeout(() => el.classList.add('hidden'), 8000);
-    el.onclick = () => el.classList.add('hidden');
   },
 
   async startHost() {
@@ -1905,7 +1896,7 @@ const Input = {
     $('#btn-action').addEventListener('pointerdown', e => { e.preventDefault(); Game.onAction(); });
     $('#btn-weapon').addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); Game.toggleWeaponPicker(); });
     // 고르는 칸 바깥을 누르면 닫는다
-    addEventListener('pointerdown', e => { if (!e.target.closest('#weapon-picker')) Game.closeWeaponPicker(); });
+    addEventListener('pointerdown', e => { if (!e.target.closest('#weapon-picker')) Game.closeWeaponPicker(!e.target.closest('button')); });
     addEventListener('contextmenu', e => e.preventDefault());
   },
 
@@ -2406,6 +2397,17 @@ const Game = {
     this.keepAliveInBackground();
     this.initFullscreen();
     this.initBag();
+    this.initClickSound();
+  },
+
+  // 모든 버튼에 '톡' 소리 (공격 버튼은 휘두르는 소리가 따로 있어서 뺀다)
+  initClickSound() {
+    addEventListener('pointerdown', e => {
+      const b = e.target.closest && e.target.closest('button, .inv-slot.weapon');
+      if (!b || b.disabled || b.id === 'btn-action') return;
+      Sfx.unlock();
+      Sfx.click();
+    }, true);
   },
 
   async start() {
@@ -2790,16 +2792,15 @@ const Game = {
 
   setWeapon(id) {
     this.pickedWeapon = id;
-    this.closeWeaponPicker();
+    this.closeWeaponPicker(false);
     this.renderInventory();
-    Sfx.door();
     toast(`${WEAPONS[id].emoji} ${itemNames(WEAPONS[id]).main}`);
   },
 
   // 무기 고르는 칸: 오른쪽 아래 작은 동그라미(또는 위 무기 칸, Q 키)를 누르면 열린다
   toggleWeaponPicker() {
     const picker = $('#weapon-picker');
-    if (!picker.classList.contains('hidden')) return this.closeWeaponPicker();
+    if (!picker.classList.contains('hidden')) return this.closeWeaponPicker(false);
     if (this.state !== 'play') return;
     picker.innerHTML = '';
     for (const id of this.ownedWeapons()) {
@@ -2813,7 +2814,13 @@ const Game = {
     picker.classList.remove('hidden');
   },
 
-  closeWeaponPicker() { $('#weapon-picker').classList.add('hidden'); },
+  // 버튼으로 닫을 때는 버튼 소리가 이미 나니까 sound=false
+  closeWeaponPicker(sound = true) {
+    const picker = $('#weapon-picker');
+    if (picker.classList.contains('hidden')) return;
+    picker.classList.add('hidden');
+    if (sound) Sfx.click();
+  },
 
   // 다음 무기로 바로 바꾸기 (Q 키)
   nextWeapon() {
