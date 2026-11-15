@@ -39,13 +39,14 @@ async function connect() {
 
 const path = (code, key) => ref(db, `rooms/${code}/${key}`);
 
-// 방 만들기: 빈 번호를 골라 방을 만든다. 방장 창이 닫히면 방 전체를 지운다
-export async function host(seed, sid) {
+// 방 만들기: 빈 번호를 골라 방을 만든다 (want: 지난번 번호. 비어 있으면 그 번호로). 방장 창이 닫히면 방 전체를 지운다
+export async function host(seed, sid, want) {
   await connect();
-  let code;
-  for (let i = 0; i < 10; i++) {
-    code = String(1000 + Math.floor(Math.random() * 9000));
-    if (!(await get(path(code, 'host'))).exists()) break;
+  let code = null;
+  if (/^[0-9]{4}$/.test(want || '') && !(await get(path(want, 'host'))).exists()) code = want;
+  for (let i = 0; !code && i < 10; i++) {
+    const c = String(1000 + Math.floor(Math.random() * 9000));
+    if (!(await get(path(c, 'host'))).exists() || i === 9) code = c;
   }
   await set(path(code, 'host'), { seed, t: serverTimestamp() });
   onDisconnect(ref(db, `rooms/${code}`)).remove();
@@ -84,7 +85,8 @@ function room(code, seed, sid) {
     sendItems: list => set(path(code, 'items'), list),
     onItems: cb => onValue(path(code, 'items'), s => cb(s.val())),
     putTiles: edits => set(path(code, 't'), edits),
-    onRoomGone: cb => onValue(path(code, 'host'), s => { if (!s.exists()) cb(); }),
+    // 방 정보가 바뀔 때마다 (방장이 나가면 null, 같은 번호로 다시 열면 다시 온다)
+    onRoom: cb => onValue(path(code, 'host'), s => cb(s.val())),
     // 맵 칸: 처음 붙을 때 지금까지 바뀐 칸이 모두 오고, 그 뒤로는 바뀔 때마다 온다
     onTiles: cb => {
       const each = s => cb(Number(s.key), s.val());

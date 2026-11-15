@@ -254,9 +254,10 @@ function itemNames(def) {
 // Store — localStorage 래퍼 (기기 안에만 저장)
 // ============================================================
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
-const NET_URL = './net.js?v=18';
+const NET_URL = './net.js?v=19';
 
-const KEYS = { settings: 'bc.settings', stats: 'bc.stats', log: 'bc.log', csv: 'bc.wordsCsv', look: 'bc.look', name: 'bc.name', world: 'bc.world' };
+// room: 지난번 방 번호 { host: 내가 만든 방, join: 들어간 방 } (새로고침해도 같은 번호로)
+const KEYS = { room: 'bc.room', settings: 'bc.settings', stats: 'bc.stats', log: 'bc.log', csv: 'bc.wordsCsv', look: 'bc.look', name: 'bc.name', world: 'bc.world' };
 
 const Store = {
   settings: null,
@@ -2233,7 +2234,9 @@ const Multi = {
 
   async startHost() {
     const Net = await import(NET_URL);
-    this.net = await Net.host(Game.seed, this.sid);
+    const last = Store.get(KEYS.room, {}) || {};
+    this.net = await Net.host(Game.seed, this.sid, last.host);
+    Store.set(KEYS.room, { ...last, host: this.net.code });
     const edits = World.edits();
     if (Object.keys(edits).length) await this.net.putTiles(edits);
     this.mode = 'host';
@@ -2257,7 +2260,8 @@ const Multi = {
     this.listen();
     this.net.onWorld(w => this.onWorld(w));
     this.net.onItems(list => this.onItems(list));
-    this.net.onRoomGone(() => this.onRoomGone());
+    this.net.onRoom(h => (h ? this.onRoomBack(h) : this.onRoomGone()));
+    Store.set(KEYS.room, { ...(Store.get(KEYS.room, {}) || {}), join: code });
     this.showBadge(code);
     console.log('[Multi] 참가', code);
   },
@@ -2271,6 +2275,19 @@ const Multi = {
     if (!this.roomGone) toast('📴');
     this.roomGone = true;
     for (const sid of [...this.peers.keys()]) this.leave(sid);
+  },
+
+  // 방장이 같은 번호로 방을 다시 열었다 (새로고침, 새 버전): 그 방장의 맵으로 다시 맞추고 이어서 논다.
+  // 바뀐 칸은 방장이 다시 올려서 onTiles 로 온다
+  onRoomBack(h) {
+    if (!this.roomGone) return; // 처음 들어갈 때
+    this.roomGone = false;
+    World.generate(h.seed);
+    Items.computeSpots();
+    this.monsterMap.clear();
+    Monsters.list = [];
+    toast('📶');
+    console.log('[Multi] 방이 다시 열려서 이어서', this.net.code);
   },
 
   // 이벤트는 받는 쪽이 놓치지 않게 잠깐 동안 매번 같이 보낸다 (받는 쪽은 번호로 한 번만 처리)
@@ -3411,7 +3428,8 @@ const Game = {
     $('#btn-host').addEventListener('click', () => this.startHost());
     $('#btn-join').addEventListener('click', () => this.startGuest(input.value.trim()));
     input.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') this.startGuest(input.value.trim()); });
-    const code = new URLSearchParams(location.search).get('join');
+    // 들어갈 방 번호: 주소의 ?join=1234, 없으면 지난번에 들어갔던 방 (새로고침해도 ▶ 한 번이면 다시 들어간다)
+    const code = new URLSearchParams(location.search).get('join') || (Store.get(KEYS.room, {}) || {}).join;
     if (/^\d{4}$/.test(code || '')) { input.value = code; panel.classList.remove('hidden'); }
     this.mpMsg = text => { msg.textContent = text; };
   },
