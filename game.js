@@ -1975,9 +1975,28 @@ const Player = {
 
   canStand(x, y) { return World.canStand(x, y); },
 
+  unstuck() {
+    const cx = Math.floor(this.x / T), cy = Math.floor(this.y / T);
+    for (let d = 1; d <= 20; d++) {
+      let best = null;
+      for (let ty = cy - d; ty <= cy + d; ty++) {
+        for (let tx = cx - d; tx <= cx + d; tx++) {
+          if (Math.max(Math.abs(tx - cx), Math.abs(ty - cy)) !== d) continue;
+          const x = tx * T + T / 2, y = ty * T + T / 2;
+          if (!this.canStand(x, y)) continue;
+          const dist = Math.hypot(x - this.x, y - this.y);
+          if (!best || dist < best.dist) best = { x, y, dist };
+        }
+      }
+      if (best) { this.x = best.x; this.y = best.y; this.knock.t = 0; return; }
+    }
+  },
+
   update(dt) {
     this.invulnT = Math.max(0, this.invulnT - dt);
     this.hitT = Math.max(0, this.hitT - dt);
+    // 설 수 없는 곳에 갇혔으면 (다른 사람이 발밑 다리를 캔 경우 등) 가장 가까운 땅으로
+    if (!this.canStand(this.x, this.y)) this.unstuck();
     if (this.knock.t > 0) {
       this.knock.t -= dt;
       const kx = this.x + this.knock.x * dt, ky = this.y + this.knock.y * dt;
@@ -3289,9 +3308,16 @@ const Game = {
   },
 
   // 캘 칸: 바라보는 옆칸, 아니면 밟고 있는 꽃
+  // 사람이 서 있는 다리는 캐지 않는다 (캐면 물이 되어 갇힌다)
   digTile() {
     const f = this.frontTile(), me = { x: Math.floor(Player.x / T), y: Math.floor(Player.y / T) };
-    return [f, me].find(t => World.diggable(t.x, t.y)) || null;
+    return [f, me].find(t => World.diggable(t.x, t.y) && !(DIG[World.tile(t.x, t.y)].after === TILE.WATER && this.someoneOn(t.x, t.y))) || null;
+  },
+
+  // 그 칸에 나나 다른 사람의 몸이 걸쳐 있는지
+  someoneOn(tx, ty) {
+    const r = CONFIG.PLAYER_RADIUS * T, x0 = tx * T, y0 = ty * T;
+    return [Player, ...Multi.visiblePeers()].some(p => p.x + r > x0 && p.x - r < x0 + T && p.y + r > y0 && p.y - r < y0 + T);
   },
 
   // 놓을 칸: 내 칸 기준 4방향 중 바라보는 쪽 → 양옆 → 뒤 순서로 놓을 수 있는 첫 칸 (없으면 null)
