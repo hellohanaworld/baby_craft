@@ -79,6 +79,8 @@ function room(code, seed, sid) {
     code,
     seed,
     sendMe: d => set(me, d),
+    // 소식이 끊긴 사람 지우기 (방장이 한다. 창이 갑자기 닫혀 남은 캐릭터)
+    removePlayer: sid => remove(path(code, `p/${sid}`)),
     onPlayers: cb => onValue(path(code, 'p'), s => cb(s.val() || {})),
     sendWorld: w => set(path(code, 'w'), w),
     onWorld: cb => onValue(path(code, 'w'), s => cb(s.val())),

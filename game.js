@@ -254,7 +254,16 @@ function itemNames(def) {
 // Store — localStorage 래퍼 (기기 안에만 저장)
 // ============================================================
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
-const NET_URL = './net.js?v=19';
+const NET_URL = './net.js?v=20';
+
+// 이 탭에서 하던 여럿이 하기 { mode: 'host'|'guest', code }. 새로고침하면 시작 화면 없이 그 방으로 저절로 다시 간다.
+// sessionStorage 라 창을 닫았다 새로 열면 지워져서 시작 화면이 나온다
+const Session = {
+  KEY: 'bc.session',
+  get() { try { return JSON.parse(sessionStorage.getItem(this.KEY)); } catch { return null; } },
+  set(v) { try { sessionStorage.setItem(this.KEY, JSON.stringify(v)); } catch { /* 저장 불가 */ } },
+  clear() { try { sessionStorage.removeItem(this.KEY); } catch { /* 저장 불가 */ } },
+};
 
 // room: 지난번 방 번호 { host: 내가 만든 방, join: 들어간 방 } (새로고침해도 같은 번호로)
 const KEYS = { room: 'bc.room', settings: 'bc.settings', stats: 'bc.stats', log: 'bc.log', csv: 'bc.wordsCsv', look: 'bc.look', name: 'bc.name', world: 'bc.world' };
@@ -2196,6 +2205,7 @@ const Multi = {
   eventSeq: 0,
   itemsVersion: -1,
   monsterMap: new Map(), // 손님 기기: 방장에게 받은 몬스터
+  stale: new Map(), // 소식이 끊긴 사람: 접속 id → 마지막 h (그 값 그대로면 무시)
   peers: new Map(), // 같은 방의 다른 사람들: 접속 id → 캐릭터 (이름표, 상태, 무기, 화살까지)
 
   get isHost() { return this.mode === 'host'; },
@@ -2237,6 +2247,7 @@ const Multi = {
     const last = Store.get(KEYS.room, {}) || {};
     this.net = await Net.host(Game.seed, this.sid, last.host);
     Store.set(KEYS.room, { ...last, host: this.net.code });
+    Session.set({ mode: 'host', code: this.net.code });
     const edits = World.edits();
     if (Object.keys(edits).length) await this.net.putTiles(edits);
     this.mode = 'host';
@@ -2262,6 +2273,7 @@ const Multi = {
     this.net.onItems(list => this.onItems(list));
     this.net.onRoom(h => (h ? this.onRoomBack(h) : this.onRoomGone()));
     Store.set(KEYS.room, { ...(Store.get(KEYS.room, {}) || {}), join: code });
+    Session.set({ mode: 'guest', code });
     this.showBadge(code);
     console.log('[Multi] 참가', code);
   },
@@ -2335,7 +2347,7 @@ const Multi = {
     const now = performance.now();
     for (const p of this.peers.values()) {
       followRemote(p, dt);
-      if (p.seen && now - p.lastSeen > CONFIG.NET_TIMEOUT_MS) this.leave(p.sid);
+      if (p.seen && now - p.lastSeen > CONFIG.NET_TIMEOUT_MS) this.timeout(p);
     }
     if (this.isGuest) {
       for (const m of Monsters.list) {
@@ -2358,6 +2370,13 @@ const Multi = {
     if (!p) return;
     if (p.seen) toast(`👋 ${p.name}`);
     this.peers.delete(sid);
+  },
+
+  // 소식이 끊긴 사람 (h 가 더 바뀌지 않음): 방에 남은 캐릭터는 방장이 지우고, 그때까지는 다시 나타나지 않게 무시한다
+  timeout(p) {
+    this.stale.set(p.sid, p.beat);
+    this.leave(p.sid);
+    if (this.isHost) this.net.removePlayer(p.sid).catch(() => {});
   },
 
   // 모두가 똑같이 보내는 내 캐릭터 정보
@@ -2397,7 +2416,11 @@ const Multi = {
 
   // 방 안 모든 사람 정보 (내 것은 빼고)
   onPlayers(all) {
-    for (const [sid, d] of Object.entries(all)) if (sid !== this.sid && d && d.p) this.onPeer(sid, d);
+    for (const [sid, d] of Object.entries(all)) {
+      if (sid === this.sid || !d || !d.p || this.stale.get(sid) === d.h) continue;
+      this.stale.delete(sid);
+      this.onPeer(sid, d);
+    }
     for (const sid of [...this.peers.keys()]) if (!all[sid]) this.leave(sid);
   },
 
@@ -2413,7 +2436,8 @@ const Multi = {
       toast(`👋 ${d.n || ''}`);
     }
     p.seen = true;
-    p.lastSeen = performance.now();
+    // 살아 있는지는 h(보낼 때마다 바뀌는 수)로 본다. 다른 사람 소식에 같이 실려 온 옛 값은 치지 않는다
+    if (p.beat !== d.h) { p.beat = d.h; p.lastSeen = performance.now(); }
     p.name = String(d.n || '').slice(0, CONFIG.NAME_MAX);
     p.lk = d.lk || 0;
     p.st = d.st;
@@ -3230,6 +3254,8 @@ const Game = {
     this.initFullscreen();
     this.initBag();
     this.initClickSound();
+    this.initHome();
+    this.autoResume();
   },
 
   // 모든 버튼에 '톡' 소리 (공격 버튼은 휘두르는 소리가 따로 있어서 뺀다)
@@ -3244,6 +3270,7 @@ const Game = {
 
   async start() {
     if (!this.prepare()) return;
+    Session.clear(); // 혼자 하기: 새로고침해도 방으로 가지 않는다
     await this.begin();
   },
 
@@ -3462,6 +3489,62 @@ const Game = {
       return;
     }
     await this.begin();
+  },
+
+  // 왼쪽 위 🏠: 한 번 묻고 처음 화면(이름 입력)으로. 저장하고 방에서 나간 다음 새로 불러온다
+  initHome() {
+    const box = $('#home-confirm'), yes = $('#btn-home-yes'), no = $('#btn-home-no');
+    let back = null, sel = 1; // 처음엔 ❌ 를 가리킨다 (실수로 나가지 않게)
+    const mark = () => { yes.classList.toggle('sel', sel === 0); no.classList.toggle('sel', sel === 1); };
+    const close = () => {
+      box.classList.add('hidden');
+      if (this.state === 'menu') this.state = back;
+    };
+    const go = () => {
+      this.writeSave();
+      Session.clear();
+      location.reload();
+    };
+    $('#btn-home').addEventListener('click', () => {
+      if (this.state !== 'play') return;
+      back = this.state;
+      this.state = 'menu';
+      Input.reset();
+      this.closeWeaponPicker(false);
+      $('#home-confirm-text').textContent = Store.settings.lang === 'en' ? 'Go back to the start?' : '처음 화면으로 갈까요?';
+      sel = 1;
+      mark();
+      box.classList.remove('hidden');
+    });
+    yes.addEventListener('click', go);
+    no.addEventListener('click', close);
+    // 키보드: ←→ 고르기, 스페이스/엔터, Esc/Q 는 ❌
+    addEventListener('keydown', e => {
+      if (box.classList.contains('hidden')) return;
+      e.stopImmediatePropagation();
+      e.preventDefault();
+      if (['ArrowLeft', 'ArrowRight', 'KeyA', 'KeyD'].includes(e.code)) { sel = 1 - sel; mark(); Sfx.click(); }
+      else if ((e.code === 'Space' || e.code === 'Enter') && !e.repeat) { Sfx.click(); if (sel === 0) go(); else close(); }
+      else if (e.code === 'Escape' || e.code === 'KeyQ') { Sfx.click(); close(); }
+    }, true);
+  },
+
+  // 새로고침 전에 여럿이 하기 중이었으면 시작 화면 없이 그 방으로 바로 (방장은 같은 번호로 다시 열고,
+  // 손님은 방이 열릴 때까지 기다린다). 소리는 브라우저 규칙상 첫 키/터치 뒤부터 난다
+  async autoResume() {
+    const s = Session.get();
+    if (!s || !/^\d{4}$/.test(s.code || '') || !$('#name-input').value.trim()) return;
+    addEventListener('pointerdown', () => { Sfx.unlock(); Speech.unlock(); }, { once: true, capture: true });
+    addEventListener('keydown', () => { Sfx.unlock(); Speech.unlock(); }, { once: true, capture: true });
+    $('#mp-panel').classList.remove('hidden');
+    if (s.mode === 'host') { await this.startHost(); return; }
+    $('#mp-code').value = s.code;
+    for (let i = 0; i < 40 && this.state === 'title'; i++) {
+      await this.startGuest(s.code);
+      if (this.state !== 'title') return;
+      this.mpMsg(`⏳ ${s.code}`); // 방이 아직 안 열림 (방장도 새로고침 중): 잠깐 뒤 다시
+      await delay(3000);
+    }
   },
 
   // 시작할 때 한 번 마이크 권한을 받아 둔다 (카드 도중에 권한 창이 뜨지 않게)

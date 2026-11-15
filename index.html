@@ -8,7 +8,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <link rel="manifest" href="manifest.json">
   <title>Baby Craft</title>
-  <link rel="stylesheet" href="style.css?v=29">
+  <link rel="stylesheet" href="style.css?v=30">
 </head>
 <body>
   <canvas id="game"></canvas>
@@ -22,7 +22,23 @@
     <div id="inventory" class="inventory"></div>
   </div>
 
-  <div id="room-badge" class="room-badge hidden"></div>
+  <!-- 왼쪽 위: 🏠 처음 화면으로 + 방 번호 -->
+  <div class="top-left">
+    <button id="btn-home" class="home-btn" aria-label="home">🏠</button>
+    <div id="room-badge" class="room-badge hidden"></div>
+  </div>
+
+  <!-- 🏠 를 눌렀을 때 한 번 묻기 -->
+  <div id="home-confirm" class="overlay hidden">
+    <div class="confirm-box">
+      <div class="confirm-q">🏠❓</div>
+      <div id="home-confirm-text" class="confirm-text"></div>
+      <div class="confirm-btns">
+        <button id="btn-home-yes" class="big-btn" aria-label="yes">✅</button>
+        <button id="btn-home-no" class="big-btn" aria-label="no">❌</button>
+      </div>
+    </div>
+  </div>
   <canvas id="minimap" class="minimap hidden"></canvas>
 
   <div id="faint" class="faint hidden"></div>
@@ -95,6 +111,6 @@
     <p id="title-msg" class="msg"></p>
   </div>
 
-  <script src="game.js?v=29"></script>
+  <script src="game.js?v=31"></script>
 </body>
 </html>
