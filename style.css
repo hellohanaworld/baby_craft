@@ -55,8 +55,11 @@ button { font-family: inherit; color: inherit; }
   z-index: 10;
   pointer-events: none;
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
 }
+.hearts { font-size: 26px; letter-spacing: 2px; filter: drop-shadow(0 2px 0 rgba(0, 0, 0, .3)); }
 .inventory { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; max-width: 100%; }
 .inv-slot {
   background: rgba(255, 255, 255, .92);
@@ -268,6 +271,40 @@ body.touch #controls { display: block; }
 .make { width: 100%; max-width: 220px; background: #ffca28; }
 .recipe.ready .make { animation: glow 1s infinite; }
 .inv-slot.weapon { border-color: #f9a825; background: #fff8e1; }
+
+.recipe.locked .recipe-result { filter: grayscale(1); opacity: .6; }
+.lock { font-size: 30px; font-weight: 800; color: #6d4c41; padding: 10px; }
+
+/* ---------- 기절 / 승리 ---------- */
+.faint {
+  position: fixed;
+  left: 50%; top: 40%;
+  transform: translate(-50%, -50%);
+  z-index: 35;
+  font-size: 16vmin;
+  font-weight: 900;
+  color: #fff;
+  text-shadow: 0 .6vmin 0 #4a148c, 0 0 3vmin rgba(74, 20, 140, .6);
+  white-space: nowrap;
+  pointer-events: none;
+  animation: pop .4s cubic-bezier(.2, 1.6, .4, 1);
+}
+#end-overlay { z-index: 55; background: rgba(255, 213, 79, .55); }
+.end {
+  background: var(--card);
+  border: 6px solid var(--wood);
+  border-radius: 32px;
+  padding: 4vmin 6vmin;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2.5vmin;
+  box-shadow: 0 10px 0 rgba(0, 0, 0, .3);
+  animation: pop .5s cubic-bezier(.2, 1.6, .4, 1);
+}
+.end-trophy { font-size: 24vmin; line-height: 1; }
+.end-title { font-size: 10vmin; font-weight: 900; color: #e65100; }
+.end-stats { display: flex; gap: 5vmin; font-size: 7vmin; font-weight: 800; color: var(--ink); }
 
 /* ---------- 시작 화면 ---------- */
 #title {

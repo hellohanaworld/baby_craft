@@ -23,6 +23,19 @@ const CONFIG = {
   ITEM_RESPAWN_MS: 6000,
   PICKUP_RADIUS: 0.7,     // 타일 단위
 
+  // 전투
+  MAX_HEARTS: 5,
+  INVULN_SEC: 1.2,        // 다친 뒤 무적 시간
+  MONSTER_COUNT: 5,
+  MONSTER_RESPAWN_MS: 8000,
+  AGGRO_RANGE: 4.5,       // 타일. 이 안에 들어오면 몬스터가 다가온다
+  SAFE_RADIUS: 4,         // 타일. 집 주변은 몬스터가 못 들어오는 안전지대
+  ATTACK_RANGE: 0.9,      // 타일. 근접 무기 사거리
+  ARROW_SPEED: 10,        // 타일/초
+  ARROW_RANGE: 6,         // 타일
+  BOSS_AFTER_KILLS: 3,    // 몬스터를 이만큼 잡으면 보스 등장
+  BOSS_CARDS: 3,          // 보스를 잡으면 읽을 카드 수
+
   // 읽기 판정
   JUDGE_THRESHOLDS: { loose: 0.5, normal: 0.65, strict: 0.8 },
   CONTAINS_SCORE: 0.95,   // 인식 결과 문장 안에 정답이 들어있을 때 점수
@@ -67,12 +80,23 @@ const WEAPONS = {
   sword: { emoji: '🗡️', ko: '칼',   en: 'sword', power: 4 },
 };
 
-// 제작대 레시피 (집 안)
+// 제작대 레시피 (집 안). unlock: 몬스터를 이만큼 잡아야 열린다
 const RECIPES = [
-  { result: 'axe',   needs: { wood: 2, stone: 1 } },
-  { result: 'bow',   needs: { wood: 1, string: 2 } },
-  { result: 'sword', needs: { iron: 2, stone: 1, wood: 1 } },
+  { result: 'axe',   needs: { wood: 2, stone: 1 },           unlock: 0 },
+  { result: 'bow',   needs: { wood: 1, string: 2 },          unlock: 1 },
+  { result: 'sword', needs: { iron: 2, stone: 1, wood: 1 }, unlock: 2 },
 ];
+
+// 몬스터 (이름도 글자로 같이 보여준다. emoji 가 words.csv 와 같으면 처치 후 그 단어 카드가 나온다)
+const MONSTERS = {
+  spider: { emoji: '🕷️', ko: '거미', en: 'spider', hp: 3, speed: 1.6, size: 24, drops: { string: 2 },          weight: 3 },
+  fox:    { emoji: '🦊', ko: '여우', en: 'fox',    hp: 4, speed: 1.9, size: 26, drops: { iron: 1, wood: 1 }, weight: 3 },
+  hippo:  { emoji: '🦛', ko: '하마', en: 'hippo',  hp: 5, speed: 1.3, size: 28, drops: { stone: 2 },          weight: 2 },
+  bear:   { emoji: '🐻', ko: '곰',   en: 'bear',   hp: 6, speed: 1.5, size: 28, drops: { iron: 2 },           weight: 2 },
+};
+const BOSS = { emoji: '🐉', ko: '용', en: 'dragon', hp: 12, speed: 1.4, size: 56, drops: {}, boss: true };
+
+const FACING = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
 
 // ============================================================
 // 유틸
@@ -416,6 +440,10 @@ const Sfx = {
   soft() { this.tone(330, 0.25, { to: 260, vol: 0.1 }); },
   swing() { this.tone(240, 0.12, { type: 'triangle', to: 120, vol: 0.06 }); },
   door() { this.tone(392, 0.12, { type: 'triangle' }); this.tone(523, 0.18, { type: 'triangle', delay: 0.1 }); },
+  hit() { this.tone(180, 0.1, { type: 'square', to: 90, vol: 0.08 }); },
+  hurt() { this.tone(440, 0.2, { type: 'triangle', to: 220, vol: 0.1 }); },
+  defeat() { [392, 523, 659].forEach((f, i) => this.tone(f, 0.12, { type: 'square', vol: 0.06, delay: i * 0.06 })); },
+  boss() { this.tone(110, 0.6, { type: 'sawtooth', to: 70, vol: 0.08 }); this.tone(147, 0.6, { type: 'sawtooth', to: 90, vol: 0.06, delay: 0.3 }); },
 };
 
 // ============================================================
@@ -460,7 +488,7 @@ const Speech = {
       u.pitch = 1.1;
       let done = false;
       // 안드로이드에서 onend 가 안 오는 경우가 있어 시간 제한을 둔다
-      const timer = setTimeout(() => finish(), 2000 + text.length * 350);
+      const timer = setTimeout(() => finish(), 1500 + text.length * 250);
       const finish = () => {
         if (done) return;
         done = true;
@@ -835,7 +863,11 @@ const Craft = {
   },
 
   has(type, n) { return (Game.inventory[type] || 0) >= n; },
-  canMake(r) { return !Game.weapons.has(r.result) && Object.entries(r.needs).every(([type, n]) => this.has(type, n)); },
+  unlocked(r) { return Game.kills >= r.unlock; },
+  canMake(r) {
+    return this.unlocked(r) && !Game.weapons.has(r.result) &&
+      Object.entries(r.needs).every(([type, n]) => this.has(type, n));
+  },
   canMakeAny() { return RECIPES.some(r => this.canMake(r)); },
 
   show() {
@@ -848,18 +880,21 @@ const Craft = {
   render() {
     this.el.list.innerHTML = RECIPES.map((r, i) => {
       const w = WEAPONS[r.result], names = itemNames(w);
-      const owned = Game.weapons.has(r.result), ready = this.canMake(r);
-      const needs = Object.entries(r.needs).map(([type, n]) => {
-        const def = ITEMS[type], have = Math.min(Game.inventory[type] || 0, n);
-        return `<div class="need${have >= n ? ' ok' : ''}"><span class="e">${def.emoji}</span>` +
-          `<span class="n">${itemNames(def).main}</span><b>${have}/${n}</b></div>`;
-      }).join('<span class="plus">+</span>');
-      return `<div class="recipe${owned ? ' owned' : ''}${ready ? ' ready' : ''}">
+      const owned = Game.weapons.has(r.result), ready = this.canMake(r), locked = !this.unlocked(r);
+      // 잠긴 레시피: 몬스터를 몇 마리 더 잡아야 하는지 👾 로 보여준다
+      const needs = locked
+        ? `<div class="lock">🔒 👾 ${Game.kills}/${r.unlock}</div>`
+        : Object.entries(r.needs).map(([type, n]) => {
+          const def = ITEMS[type], have = Math.min(Game.inventory[type] || 0, n);
+          return `<div class="need${have >= n ? ' ok' : ''}"><span class="e">${def.emoji}</span>` +
+            `<span class="n">${itemNames(def).main}</span><b>${have}/${n}</b></div>`;
+        }).join('<span class="plus">+</span>');
+      return `<div class="recipe${owned ? ' owned' : ''}${ready ? ' ready' : ''}${locked ? ' locked' : ''}">
         <div class="recipe-result"><span class="e">${w.emoji}</span>
           <span class="names"><span class="n">${names.main}</span>${names.sub ? `<span class="s">${names.sub}</span>` : ''}</span>
           <span class="power">${'⭐'.repeat(w.power)}</span></div>
         <div class="recipe-needs">${needs}</div>
-        <button class="big-btn make" data-recipe="${i}" ${ready ? '' : 'disabled'}>${owned ? '✅' : '🔨'}</button>
+        <button class="big-btn make" data-recipe="${i}" ${ready ? '' : 'disabled'}>${owned ? '✅' : locked ? '🔒' : '🔨'}</button>
       </div>`;
     }).join('');
   },
@@ -967,8 +1002,7 @@ const World = {
   },
   tileAtPx(x, y) { return this.tile(Math.floor(x / T), Math.floor(y / T)); },
 
-  canStand(x, y) {
-    const r = CONFIG.PLAYER_RADIUS * T;
+  canStand(x, y, r = CONFIG.PLAYER_RADIUS * T) {
     for (const [dx, dy] of [[-r, -r], [r, -r], [-r, r], [r, r]]) {
       if (BLOCKING.has(this.tileAtPx(x + dx, y + dy))) return false;
     }
@@ -1121,7 +1155,8 @@ const Items = {
       if (Math.hypot(it.x - Player.x, it.y - Player.y) < r) {
         this.list.splice(i, 1);
         Game.addItem(it.type);
-        this.respawnQueue.push(performance.now() + CONFIG.ITEM_RESPAWN_MS);
+        // 몬스터가 떨어뜨린 것은 다시 생기지 않는다
+        if (!it.dropped) this.respawnQueue.push(performance.now() + CONFIG.ITEM_RESPAWN_MS);
       }
     }
     const now = performance.now();
@@ -1129,6 +1164,191 @@ const Items = {
       this.respawnQueue.shift();
       this.spawnOne(true);
     }
+  },
+
+  // 몬스터가 떨어뜨린 재료 (다시 생기지 않는다)
+  drop(type, x, y) {
+    const dx = randFloat(-10, 10), dy = randFloat(-6, 6);
+    if (World.canStand(x + dx, y + dy, 4)) { x += dx; y += dy; }
+    this.list.push({ type, tx: Math.floor(x / T), ty: Math.floor(y / T), x, y, phase: Math.random() * Math.PI * 2, dropped: true });
+  },
+};
+
+// ============================================================
+// Monsters — 돌아다니다가 가까이 오면 다가온다. 집 주변(안전지대)은 못 들어온다
+// ============================================================
+const Monsters = {
+  list: [],
+  arrows: [],
+  respawnQueue: [],
+  bossSpawned: false,
+
+  radius(m) { return (m.def.boss ? 0.55 : 0.3) * T; },
+
+  safeZone(x, y) {
+    return Math.hypot(x - (World.door.x * T + T / 2), y - (World.door.y * T + T / 2)) < CONFIG.SAFE_RADIUS * T;
+  },
+
+  canStand(m, x, y) { return !this.safeZone(x, y) && World.canStand(x, y, this.radius(m)); },
+
+  // 집에서 멀고 플레이어와도 먼 곳
+  spots(minFromHome) {
+    return Items.spots.filter(s =>
+      Math.hypot(s.x - World.door.x, s.y - World.door.y) >= minFromHome &&
+      Math.hypot(s.x * T - Player.x, s.y * T - Player.y) > 7 * T);
+  },
+
+  randomType() {
+    const entries = Object.entries(MONSTERS);
+    let r = Math.random() * entries.reduce((sum, [, d]) => sum + d.weight, 0);
+    for (const [type, d] of entries) {
+      r -= d.weight;
+      if (r <= 0) return type;
+    }
+    return entries[0][0];
+  },
+
+  spawn(type, spot) {
+    const def = type === 'boss' ? BOSS : MONSTERS[type];
+    this.list.push({
+      type, def, x: spot.x * T + T / 2, y: spot.y * T + T / 2, hp: def.hp,
+      dirX: 0, dirY: 0, wanderT: 0, hitT: 0, knock: { x: 0, y: 0, t: 0 },
+      phase: Math.random() * Math.PI * 2, faceRight: false,
+    });
+  },
+
+  spawnRandom() {
+    const spots = this.spots(CONFIG.SAFE_RADIUS + 5);
+    if (spots.length) this.spawn(this.randomType(), spots[Math.floor(Math.random() * spots.length)]);
+  },
+
+  fill() {
+    for (let i = 0; i < CONFIG.MONSTER_COUNT; i++) this.spawnRandom();
+  },
+
+  spawnBoss() {
+    this.bossSpawned = true;
+    const spots = this.spots(CONFIG.SAFE_RADIUS + 5);
+    if (!spots.length) return;
+    // 집에서 가장 먼 곳
+    const far = spots.reduce((a, b) =>
+      Math.hypot(b.x - World.door.x, b.y - World.door.y) > Math.hypot(a.x - World.door.x, a.y - World.door.y) ? b : a);
+    this.spawn('boss', far);
+    const { main } = itemNames(BOSS);
+    console.log('[Monsters] 보스 등장');
+    Sfx.boss();
+    toast(`${BOSS.emoji} ${main}!`);
+    if (Store.settings.lang === 'en') Speech.speak(`A ${BOSS.en}!`, 'en');
+    else Speech.speak(`${josa(BOSS.ko, '이', '가')} 나타났어요!`, 'ko');
+  },
+
+  get boss() { return this.list.find(m => m.def.boss); },
+
+  update(dt) {
+    for (const m of [...this.list]) {
+      m.hitT = Math.max(0, m.hitT - dt);
+      let vx = 0, vy = 0;
+      if (m.knock.t > 0) {
+        m.knock.t -= dt;
+        vx = m.knock.x;
+        vy = m.knock.y;
+      } else {
+        const dx = Player.x - m.x, dy = Player.y - m.y, d = Math.hypot(dx, dy);
+        const speed = m.def.speed * T;
+        if (d < CONFIG.AGGRO_RANGE * T && d > 1 && !this.safeZone(Player.x, Player.y)) {
+          vx = dx / d * speed;
+          vy = dy / d * speed;
+        } else {
+          m.wanderT -= dt;
+          if (m.wanderT <= 0) {
+            m.wanderT = randFloat(1.2, 3);
+            const a = Math.random() * Math.PI * 2, go = Math.random() < 0.6;
+            m.dirX = go ? Math.cos(a) : 0;
+            m.dirY = go ? Math.sin(a) : 0;
+          }
+          vx = m.dirX * speed * 0.5;
+          vy = m.dirY * speed * 0.5;
+        }
+        if (Math.abs(vx) > 1) m.faceRight = vx > 0;
+      }
+      const nx = m.x + vx * dt;
+      if (this.canStand(m, nx, m.y)) m.x = nx; else m.wanderT = 0;
+      const ny = m.y + vy * dt;
+      if (this.canStand(m, m.x, ny)) m.y = ny; else m.wanderT = 0;
+
+      if (Math.hypot(Player.x - m.x, Player.y - m.y) < this.radius(m) + CONFIG.PLAYER_RADIUS * T + 4) Game.hurt(m);
+    }
+    this.updateArrows(dt);
+
+    const now = performance.now();
+    while (this.respawnQueue.length && this.respawnQueue[0] <= now) {
+      this.respawnQueue.shift();
+      this.spawnRandom();
+    }
+  },
+
+  // 플레이어 공격: 활은 화살을 쏘고, 나머지는 앞쪽을 휘두른다
+  attack() {
+    const w = Game.weapon, power = WEAPONS[w].power;
+    const [fx, fy] = FACING[Player.dir];
+    if (w === 'bow') {
+      this.arrows.push({
+        x: Player.x + fx * 10, y: Player.y - 8 + fy * 10, fx, fy,
+        left: CONFIG.ARROW_RANGE * T, power,
+      });
+      return;
+    }
+    const cx = Player.x + fx * 0.5 * T, cy = Player.y + fy * 0.5 * T;
+    for (const m of [...this.list]) {
+      if (Math.hypot(m.x - cx, m.y - cy) < CONFIG.ATTACK_RANGE * T + this.radius(m)) this.hit(m, power);
+    }
+  },
+
+  updateArrows(dt) {
+    for (const a of [...this.arrows]) {
+      const step = CONFIG.ARROW_SPEED * T * dt;
+      a.x += a.fx * step;
+      a.y += a.fy * step;
+      a.left -= step;
+      const tt = World.tileAtPx(a.x, a.y + 8);
+      let done = a.left <= 0 || tt === TILE.TREE || tt === TILE.ROCK || tt === TILE.HOUSE;
+      const target = !done && this.list.find(m => Math.hypot(m.x - a.x, m.y - (a.y + 8)) < this.radius(m) + 8);
+      if (target) { this.hit(target, a.power); done = true; }
+      if (done) this.arrows.splice(this.arrows.indexOf(a), 1);
+    }
+  },
+
+  hit(m, dmg) {
+    m.hp -= dmg;
+    m.hitT = 0.25;
+    const dx = m.x - Player.x, dy = m.y - Player.y, d = Math.hypot(dx, dy) || 1;
+    const kb = (m.def.boss ? 3 : 6) * T;
+    m.knock = { x: dx / d * kb, y: dy / d * kb, t: 0.15 };
+    Sfx.hit();
+    Floaters.add(m.x, m.y - m.def.size * 0.6, '💥', 16);
+    if (m.hp <= 0) this.kill(m);
+  },
+
+  kill(m) {
+    this.list.splice(this.list.indexOf(m), 1);
+    Sfx.defeat();
+    for (let i = 0; i < 4; i++) Floaters.add(m.x + randFloat(-14, 14), m.y - randFloat(0, 20), '✨', 14);
+    for (const [type, n] of Object.entries(m.def.drops)) for (let i = 0; i < n; i++) Items.drop(type, m.x, m.y);
+    if (!m.def.boss) this.respawnQueue.push(performance.now() + CONFIG.MONSTER_RESPAWN_MS);
+    console.log(`[Monsters] ${m.def.ko} 처치`);
+    Game.onMonsterDefeated(m);
+  },
+};
+
+// ============================================================
+// Floaters — 💥 ✨ 처럼 잠깐 떠올랐다 사라지는 그림
+// ============================================================
+const Floaters = {
+  list: [],
+  add(x, y, text, size = 16) { this.list.push({ x, y, text, size, t: 0 }); },
+  update(dt) {
+    for (const f of this.list) f.t += dt;
+    this.list = this.list.filter(f => f.t < 0.9);
   },
 };
 
@@ -1142,14 +1362,24 @@ const Player = {
   moving: false,
   walkT: 0,
   swingT: 0,
+  invulnT: 0,
+  knock: { x: 0, y: 0, t: 0 },
 
   reset() {
     this.x = World.spawn.x;
     this.y = World.spawn.y;
     this.dir = 'down';
+    this.knock = { x: 0, y: 0, t: 0 };
   },
 
   update(dt) {
+    this.invulnT = Math.max(0, this.invulnT - dt);
+    if (this.knock.t > 0) {
+      this.knock.t -= dt;
+      const kx = this.x + this.knock.x * dt, ky = this.y + this.knock.y * dt;
+      if (World.canStand(kx, this.y)) this.x = kx;
+      if (World.canStand(this.x, ky)) this.y = ky;
+    }
     const v = Input.vector();
     this.moving = v.x !== 0 || v.y !== 0;
     this.swingT = Math.max(0, this.swingT - dt);
@@ -1295,12 +1525,95 @@ const Render = {
 
     // y 순서대로 그려서 앞뒤가 자연스럽게
     const drawables = Items.list.map(it => ({ y: it.y, draw: () => this.drawItem(it, time) }));
+    for (const m of Monsters.list) drawables.push({ y: m.y, draw: () => this.drawMonster(m, time) });
     drawables.push({ y: Player.y, draw: () => this.drawPlayer() });
     drawables.sort((a, b) => a.y - b.y).forEach(d => d.draw());
+    Monsters.arrows.forEach(a => this.drawArrow(a));
+    this.drawFloaters();
     this.drawCraftHint(time);
 
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    this.drawHomeArrow();
+    this.drawEdgeArrow(World.door.x * T + T / 2, World.door.y * T, '🏠', Craft.canMakeAny() ? '🔨' : '');
+    const boss = Monsters.boss;
+    if (boss) this.drawEdgeArrow(boss.x, boss.y, BOSS.emoji, '');
+  },
+
+  drawMonster(m, time) {
+    const ctx = this.ctx, s = m.def.size;
+    const bob = Math.sin(time * 6 + m.phase) * 1.5;
+    ctx.fillStyle = 'rgba(0,0,0,.22)';
+    ctx.beginPath();
+    ctx.ellipse(m.x, m.y + s * 0.35, s * 0.4, s * 0.12, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.save();
+    ctx.translate(m.x, m.y - s * 0.15 + bob);
+    if (m.faceRight) ctx.scale(-1, 1); // 이모지는 대부분 왼쪽을 본다
+    if (m.hitT > 0 && Math.floor(m.hitT * 20) % 2) ctx.globalAlpha = 0.35;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#000';
+    ctx.font = `${s}px ${FONT_EMOJI}`;
+    ctx.fillText(m.def.emoji, 0, 0);
+    ctx.restore();
+
+    // 체력 막대
+    const w = m.def.boss ? 44 : 24, top = m.y - s * 0.15 - s * 0.62 - 6;
+    ctx.fillStyle = 'rgba(0,0,0,.45)';
+    ctx.fillRect(m.x - w / 2 - 1, top - 1, w + 2, 6);
+    ctx.fillStyle = m.def.boss ? '#e53935' : '#66bb6a';
+    ctx.fillRect(m.x - w / 2, top, w * Math.max(0, m.hp) / m.def.hp, 4);
+
+    // 이름표
+    const { main, sub } = itemNames(m.def);
+    const ny = m.y + s * 0.45 + 6;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(255,255,255,.95)';
+    ctx.fillStyle = m.def.boss ? '#b71c1c' : '#222';
+    ctx.font = `800 ${m.def.boss ? 13 : 10}px ${FONT_UI}`;
+    ctx.strokeText(main, m.x, ny);
+    ctx.fillText(main, m.x, ny);
+    if (sub) {
+      ctx.font = `700 7px ${FONT_UI}`;
+      ctx.fillStyle = '#555';
+      ctx.strokeText(sub, m.x, ny + 9);
+      ctx.fillText(sub, m.x, ny + 9);
+    }
+  },
+
+  drawArrow(a) {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.translate(a.x, a.y);
+    ctx.rotate(Math.atan2(a.fy, a.fx));
+    ctx.fillStyle = '#6d4c41';
+    ctx.fillRect(-9, -1, 14, 2);
+    ctx.fillStyle = '#90a4ae';
+    ctx.beginPath();
+    ctx.moveTo(9, 0);
+    ctx.lineTo(4, -3);
+    ctx.lineTo(4, 3);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#e53935';
+    ctx.fillRect(-10, -2, 3, 4);
+    ctx.restore();
+  },
+
+  drawFloaters() {
+    const ctx = this.ctx;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#000';
+    for (const f of Floaters.list) {
+      ctx.globalAlpha = Math.max(0, 1 - f.t / 0.9);
+      ctx.font = `${f.size}px ${FONT_EMOJI}`;
+      ctx.fillText(f.text, f.x, f.y - f.t * 30);
+    }
+    ctx.globalAlpha = 1;
   },
 
   drawItem(it, time) {
@@ -1364,6 +1677,9 @@ const Render = {
     const left = x - 4 * u, top = y + 6 - 13 * u;
     const step = Player.moving ? Math.sin(Player.walkT * 12) * 0.6 : 0;
     const box = (gx, gy, w, h, color) => { ctx.fillStyle = color; ctx.fillRect(left + gx * u, top + gy * u, w * u, h * u); };
+    // 다친 직후 무적 시간에는 깜빡인다
+    ctx.save();
+    if (Player.invulnT > 0 && Math.floor(Player.invulnT * 10) % 2) ctx.globalAlpha = 0.4;
 
     ctx.fillStyle = 'rgba(0,0,0,.25)';
     ctx.beginPath();
@@ -1422,6 +1738,7 @@ const Render = {
       ctx.fillText(WEAPONS[Game.weapon].emoji, 0, -4);
       ctx.restore();
     }
+    ctx.restore();
   },
 
   // 만들 수 있는 무기가 있으면 집 위에 🔨 가 통통 튄다
@@ -1440,11 +1757,11 @@ const Render = {
     ctx.fillText('🔨', x, y + 1);
   },
 
-  // 집이 화면 밖에 있으면 가장자리에 🏠 화살표
-  drawHomeArrow() {
+  // 집/보스가 화면 밖에 있으면 가장자리에 그 방향 화살표
+  drawEdgeArrow(wx, wy, icon, badge) {
     const ctx = this.ctx;
-    const hx = (World.door.x * T + T / 2 - this.camX) * this.scale;
-    const hy = (World.door.y * T - this.camY) * this.scale;
+    const hx = (wx - this.camX) * this.scale;
+    const hy = (wy - this.camY) * this.scale;
     if (hx > 0 && hx < this.cssW && hy > 0 && hy < this.cssH) return;
     // 위쪽은 인벤토리, 아래쪽은 조이스틱/버튼을 피해서 놓는다
     const mx = 70, top = 100, bottom = document.body.classList.contains('touch') ? 200 : 70;
@@ -1473,8 +1790,8 @@ const Render = {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.font = `32px ${FONT_EMOJI}`;
-    ctx.fillText('🏠', ax, ay + 2);
-    if (Craft.canMakeAny()) ctx.fillText('🔨', ax + 26, ay - 24);
+    ctx.fillText(icon, ax, ay + 2);
+    if (badge) ctx.fillText(badge, ax + 26, ay - 24);
   },
 };
 
@@ -1482,11 +1799,15 @@ const Render = {
 // Game — 상태 관리 + 메인 루프
 // ============================================================
 const Game = {
-  state: 'loading', // loading → title → play ↔ card → craft
+  state: 'loading', // loading → title → play ↔ card / craft / faint → end
   tapMode: false,
   tapReason: '',
   inventory: {},
   weapons: new Set(),
+  hearts: CONFIG.MAX_HEARTS,
+  kills: 0,
+  cardsRead: 0,
+  startedAt: 0,
   wasOnDoor: false,
   lastTime: 0,
 
@@ -1516,7 +1837,10 @@ const Game = {
     World.generate();
     Player.reset();
     Items.fill();
+    Monsters.fill();
     this.renderInventory();
+    this.renderHearts();
+    $('#btn-restart').addEventListener('click', () => location.reload());
 
     this.state = 'title';
     const btn = $('#btn-start');
@@ -1533,6 +1857,7 @@ const Game = {
     $('#btn-start').disabled = true;
     await this.checkMic();
     $('#title').classList.add('hidden');
+    this.startedAt = performance.now();
     this.state = 'play';
   },
 
@@ -1562,6 +1887,7 @@ const Game = {
     const dt = Math.min(0.05, (ts - (this.lastTime || ts)) / 1000);
     this.lastTime = ts;
     this.update(dt);
+    Floaters.update(dt);
     Render.draw(ts / 1000);
     if (Card.active) Card.el.mic.style.setProperty('--level', Meter.read().toFixed(2));
     requestAnimationFrame(t => this.loop(t));
@@ -1574,6 +1900,8 @@ const Game = {
     }
     Player.update(dt);
     Items.update();
+    Monsters.update(dt);
+    if (this.state !== 'play') return; // 위에서 처치/기절로 상태가 바뀌었을 수 있다
     const onDoor = World.tileAtPx(Player.x, Player.y) === TILE.DOOR;
     if (onDoor && !this.wasOnDoor) this.enterHome();
     this.wasOnDoor = onDoor;
@@ -1582,24 +1910,137 @@ const Game = {
   onAction() {
     if (this.state === 'title') { this.start(); return; }
     if (this.state === 'card') { Card.tapPass(); return; }
-    if (this.state === 'play') {
+    if (this.state === 'play' && Player.swingT <= 0.1) {
       Player.swingT = 0.25;
       Sfx.swing();
+      Monsters.attack();
     }
   },
 
-  // 집에 들어가면: 단어 카드(전투가 생기기 전까지 임시) → 제작대
+  // 집에 들어가면: 체력 회복 → 제작대
   async enterHome() {
-    this.state = 'card';
+    this.state = 'craft';
     Input.reset();
     Sfx.door();
-    await delay(250);
-    await Card.show(Words.pick());
-    this.state = 'craft';
+    this.hearts = CONFIG.MAX_HEARTS;
+    this.renderHearts();
     await Craft.show();
     Player.reset();
     this.wasOnDoor = false;
     this.state = 'play';
+  },
+
+  // 단어 카드 n 장 (첫 장은 emoji 가 같은 단어 우선)
+  async showCards(n, emoji) {
+    this.state = 'card';
+    Input.reset();
+    for (let i = 0; i < n; i++) {
+      await Card.show(Words.pick(i === 0 && emoji ? { emoji } : {}));
+      this.cardsRead++;
+    }
+  },
+
+  // 한 번에 여러 마리를 잡아도 카드가 겹치지 않게 차례대로 처리한다
+  defeated: [],
+  handlingDefeats: false,
+  unlockShown: new Set(),
+
+  onMonsterDefeated(m) {
+    if (!m.def.boss) this.kills++;
+    this.state = 'card';
+    Input.reset();
+    this.defeated.push(m);
+    if (!this.handlingDefeats) this.handleDefeats();
+  },
+
+  async handleDefeats() {
+    this.handlingDefeats = true;
+    await delay(700); // 쓰러지는 모습을 잠깐 보여준다
+    while (this.defeated.length) {
+      const m = this.defeated.shift();
+      await this.showCards(m.def.boss ? CONFIG.BOSS_CARDS : 1, m.def.emoji);
+      if (m.def.boss) {
+        this.handlingDefeats = false;
+        this.victory();
+        return;
+      }
+    }
+    this.handlingDefeats = false;
+
+    // 새로 열린 레시피 알림
+    for (const r of RECIPES) {
+      if (r.unlock > 0 && this.kills >= r.unlock && !this.unlockShown.has(r.result)) {
+        this.unlockShown.add(r.result);
+        const w = WEAPONS[r.result];
+        toast(`🔓 ${w.emoji} ${itemNames(w).main}`);
+      }
+    }
+    if (!Monsters.bossSpawned && this.kills >= CONFIG.BOSS_AFTER_KILLS) Monsters.spawnBoss();
+    this.state = 'play';
+  },
+
+  hurt(m) {
+    if (this.state !== 'play' || Player.invulnT > 0) return;
+    this.hearts--;
+    Player.invulnT = CONFIG.INVULN_SEC;
+    const dx = Player.x - m.x, dy = Player.y - m.y, d = Math.hypot(dx, dy) || 1;
+    Player.knock = { x: dx / d * 8 * T, y: dy / d * 8 * T, t: 0.15 };
+    Sfx.hurt();
+    Floaters.add(Player.x, Player.y - 30, '💔', 16);
+    this.renderHearts();
+    if (this.hearts <= 0) this.faint();
+    else if (this.hearts === 1) this.autoEat();
+  },
+
+  // 체력이 1 남으면 가진 음식을 자동으로 먹는다
+  autoEat() {
+    const food = Object.keys(ITEMS).find(type => ITEMS[type].kind === 'food' && this.inventory[type] > 0);
+    if (!food) return;
+    this.inventory[food]--;
+    this.hearts = Math.min(CONFIG.MAX_HEARTS, this.hearts + 2);
+    const def = ITEMS[food];
+    toast(`${def.emoji} ${itemNames(def).main} ❤️+2`);
+    Sfx.pickup();
+    this.renderInventory();
+    this.renderHearts();
+  },
+
+  // 기절해도 아이템은 그대로. 집에서 다시 시작 + 단어 카드
+  async faint() {
+    this.state = 'faint';
+    Input.reset();
+    console.log('[Game] 기절');
+    const el = $('#faint');
+    el.textContent = Store.settings.lang === 'en' ? '💫 Oops!' : '💫 기절!';
+    el.classList.remove('hidden');
+    await delay(1600);
+    el.classList.add('hidden');
+    Player.reset();
+    this.wasOnDoor = false;
+    this.hearts = CONFIG.MAX_HEARTS;
+    this.renderHearts();
+    await this.showCards(1);
+    Player.invulnT = CONFIG.INVULN_SEC;
+    this.state = 'play';
+  },
+
+  victory() {
+    this.state = 'end';
+    const mins = Math.max(1, Math.round((performance.now() - this.startedAt) / 60000));
+    console.log(`[Game] 승리! 처치 ${this.kills + 1}, 카드 ${this.cardsRead}, ${mins}분`);
+    $('#end-title').textContent = PRAISE[Store.settings.lang === 'en' ? 'en' : 'ko'];
+    $('#end-stats').innerHTML = `<span>👾 ${this.kills + 1}</span><span>📖 ${this.cardsRead}</span><span>⏱️ ${mins}</span>`;
+    $('#end-overlay').classList.remove('hidden');
+    Sfx.success();
+    burst();
+    if (Store.settings.lang === 'en') Speech.speak('You beat the dragon!', 'en');
+    else Speech.speak(`${josa(BOSS.ko, '을', '를')} 물리쳤어요! 최고예요!`, 'ko');
+  },
+
+  renderHearts() {
+    let html = '';
+    for (let i = 0; i < CONFIG.MAX_HEARTS; i++) html += i < this.hearts ? '❤️' : '🤍';
+    $('#hearts').textContent = html;
   },
 
   // 가진 무기 중 제일 센 것
@@ -1611,6 +2052,14 @@ const Game = {
 
   addItem(type) {
     const def = ITEMS[type];
+    // 다쳤을 때 음식을 주우면 바로 먹는다
+    if (def.kind === 'food' && this.hearts < CONFIG.MAX_HEARTS) {
+      this.hearts++;
+      Sfx.pickup();
+      toast(`${def.emoji} ${itemNames(def).main} ❤️+1`);
+      this.renderHearts();
+      return;
+    }
     this.inventory[type] = (this.inventory[type] || 0) + 1;
     Sfx.pickup();
     const { main, sub } = itemNames(def);
@@ -1649,6 +2098,6 @@ const Game = {
 };
 
 // 콘솔 디버깅용: BC.Judge.judge('나무', ['나모']), BC.Game.enterHome() 등
-window.BC = { CONFIG, Store, Words, Judge, Speech, Card, Craft, World, Items, Player, Game };
+window.BC = { CONFIG, Store, Words, Judge, Speech, Card, Craft, World, Items, Monsters, Player, Game };
 
 Game.init();

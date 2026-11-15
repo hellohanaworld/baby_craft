@@ -11,10 +11,13 @@
 <body>
   <canvas id="game"></canvas>
 
-  <!-- 상단 HUD: 인벤토리 -->
+  <!-- 상단 HUD: 체력 + 인벤토리 -->
   <div id="hud">
+    <div id="hearts" class="hearts"></div>
     <div id="inventory" class="inventory"></div>
   </div>
+
+  <div id="faint" class="faint hidden"></div>
 
   <!-- 터치 조작: 가상 조이스틱 + 액션 버튼 -->
   <div id="controls">
@@ -51,6 +54,16 @@
         <button id="btn-craft-close" class="big-btn" aria-label="close">🚪</button>
       </div>
       <div id="recipes" class="recipes"></div>
+    </div>
+  </div>
+
+  <!-- 보스 처치 -->
+  <div id="end-overlay" class="overlay hidden">
+    <div class="end">
+      <div class="end-trophy">🏆</div>
+      <div id="end-title" class="end-title"></div>
+      <div id="end-stats" class="end-stats"></div>
+      <button id="btn-restart" class="big-btn start" aria-label="restart">🔄</button>
     </div>
   </div>
 
