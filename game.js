@@ -873,7 +873,25 @@ const Card = {
     Sfx.success();
     burst();
     const praise = Speech.speak(`${this.word.word}! ${PRAISE[this.word.lang]}`, this.word.lang);
-    await Promise.all([praise, delay(CONFIG.SUCCESS_SHOW_MS)]);
+    // 맞춘 뒤에는 아무 곳이나 누르면(아무 키나) 칭찬 말을 끊고 바로 게임으로
+    const skip = new Promise(resolve => {
+      const since = performance.now();
+      const onInput = e => {
+        if (performance.now() - since < 250) return;
+        e.preventDefault();
+        e.stopPropagation();
+        resolve();
+      };
+      addEventListener('pointerdown', onInput, true);
+      addEventListener('keydown', onInput, true);
+      this.stopSkip = () => {
+        removeEventListener('pointerdown', onInput, true);
+        removeEventListener('keydown', onInput, true);
+      };
+    });
+    const skipped = await Promise.race([Promise.all([praise, delay(CONFIG.SUCCESS_SHOW_MS)]), skip.then(() => true)]);
+    this.stopSkip();
+    if (skipped && 'speechSynthesis' in window) speechSynthesis.cancel();
     this.close({ method, tries: this.tries });
   },
 
