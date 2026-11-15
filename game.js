@@ -977,7 +977,7 @@ const Craft = {
     if (!r || !this.canMake(r)) return;
     for (const [type, n] of Object.entries(r.needs)) Game.inventory[type] -= n;
     Game.weapons.add(r.result);
-    Game.picked = r.result;  // 새로 만든 무기를 바로 든다
+    Game.picked = Game.lastWeapon = r.result;  // 새로 만든 무기를 바로 든다
     const w = WEAPONS[r.result], { main } = itemNames(w);
     console.log(`[Craft] ${w.ko} 제작 (power ${w.power})`);
     Sfx.success();
@@ -1946,8 +1946,9 @@ const Input = {
   init() {
     // e.code 를 써서 한글 입력 상태에서도 WASD 가 동작하게 한다
     addEventListener('keydown', e => {
+      if (Game.pickerOpen) { e.preventDefault(); if (!e.repeat || e.code.startsWith('Arrow')) Game.pickerKey(e.code); return; }
       if (KEYMAP[e.code]) { this.keys.add(e.code); e.preventDefault(); }
-      if (e.code === 'KeyQ' && !e.repeat) Game.nextWeapon();
+      if (e.code === 'KeyQ' && !e.repeat) { Game.toggleWeaponPicker(); Sfx.click(); }
       if (e.code === 'Space' || e.code === 'Enter') {
         e.preventDefault();
         if (!e.repeat) Game.onAction();
@@ -2495,7 +2496,9 @@ const Game = {
   tapReason: '',
   inventory: {},
   weapons: new Set(),
-  picked: null, // 고른 것 (무기 또는 블록). 블록이 다 떨어지면 무기로 돌아간다
+  picked: null, // 고른 것 (무기 또는 블록). 블록을 다 놓으면 lastWeapon 으로 돌아간다
+  lastWeapon: null, // 마지막으로 고른 무기 (없으면 가진 무기 중 제일 센 것)
+  pickIndex: 0, // 고르는 칸에서 키보드로 가리키는 칸
   dig: { i: -1, n: 0 }, // 캐는 중인 칸과 친 횟수
   busy: false, // 칸 바꾸기 답을 기다리는 중
   hearts: CONFIG.MAX_HEARTS,
@@ -2853,6 +2856,7 @@ const Game = {
     this.busy = false;
     if (!ok) this.inventory[block]++;
     else {
+      if (!this.inventory[block]) this.picked = this.lastWeapon;
       Sfx.pickup();
       Floaters.add(t.x * T + T / 2, t.y * T, '✨', 14);
       if (BLOCKING.has(next) && !World.canStand(Player.x, Player.y)) {
@@ -3046,19 +3050,25 @@ const Game = {
 
   setWeapon(id) {
     this.picked = id;
+    if (WEAPONS[id]) this.lastWeapon = id;
     this.closeWeaponPicker(false);
     this.renderInventory();
     const def = WEAPONS[id] || ITEMS[id];
     toast(`${def.emoji} ${itemNames(def).main}`);
   },
 
+  get pickerOpen() { return !$('#weapon-picker').classList.contains('hidden'); },
+
   // 무기 고르는 칸: 오른쪽 아래 작은 동그라미(또는 위 무기 칸, Q 키)를 누르면 열린다
   toggleWeaponPicker() {
     const picker = $('#weapon-picker');
-    if (!picker.classList.contains('hidden')) return this.closeWeaponPicker(false);
+    if (this.pickerOpen) return this.closeWeaponPicker(false);
     if (this.state !== 'play') return;
+    Input.reset();
     picker.innerHTML = '';
-    for (const id of this.ownedWeapons()) {
+    const list = this.ownedWeapons();
+    this.pickIndex = Math.max(0, list.indexOf(this.held));
+    for (const id of list) {
       const btn = document.createElement('button');
       const def = WEAPONS[id] || ITEMS[id];
       btn.className = `big-btn weapon-choice${id === this.held ? ' on' : ''}`;
@@ -3068,6 +3078,28 @@ const Game = {
       picker.appendChild(btn);
     }
     picker.classList.remove('hidden');
+    this.markPick();
+  },
+
+  // 키보드로 가리키는 칸 표시 (굵은 파란 테두리)
+  markPick() {
+    [...$('#weapon-picker').children].forEach((b, i) => b.classList.toggle('sel', i === this.pickIndex));
+  },
+
+  // 고르는 칸이 열려 있을 때 키: ←→(A/D) 옮기기, Enter/Space 들기, Q/Esc 닫기
+  pickerKey(code) {
+    const list = this.ownedWeapons();
+    if (code === 'ArrowLeft' || code === 'KeyA' || code === 'ArrowRight' || code === 'KeyD') {
+      const d = code === 'ArrowLeft' || code === 'KeyA' ? -1 : 1;
+      this.pickIndex = (this.pickIndex + d + list.length) % list.length;
+      this.markPick();
+      Sfx.click();
+    } else if (code === 'Enter' || code === 'Space') {
+      Sfx.click();
+      this.setWeapon(list[this.pickIndex]);
+    } else if (code === 'KeyQ' || code === 'Escape') {
+      this.closeWeaponPicker();
+    }
   },
 
   // 버튼으로 닫을 때는 버튼 소리가 이미 나니까 sound=false
@@ -3076,13 +3108,6 @@ const Game = {
     if (picker.classList.contains('hidden')) return;
     picker.classList.add('hidden');
     if (sound) Sfx.click();
-  },
-
-  // 다음 무기로 바로 바꾸기 (Q 키)
-  nextWeapon() {
-    const list = this.ownedWeapons();
-    if (list.length < 2) return;
-    this.setWeapon(list[(list.indexOf(this.held) + 1) % list.length]);
   },
 
   addItem(type) {

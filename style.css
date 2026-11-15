@@ -160,6 +160,7 @@ body:not(.touch) #btn-weapon::after { content: 'Q'; }
 .weapon-choice { width: 96px; height: 96px; border-radius: 50%; font-size: 52px; }
 .weapon-choice.on { border-color: #f9a825; background: #fff59d; }
 .weapon-choice { position: relative; }
+.weapon-choice.sel { outline: 5px solid #1e88e5; outline-offset: 3px; }
 .weapon-choice b {
   position: absolute; right: -4px; bottom: -4px;
   min-width: 30px; padding: 2px 6px; border-radius: 14px;
