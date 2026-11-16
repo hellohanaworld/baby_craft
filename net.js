@@ -5,11 +5,12 @@
 // 데이터 보호는 Firebase 콘솔의 보안 규칙(README 참고)과 무료 플랜 한도로 한다.
 //
 // rooms/{방 번호}/
-//   host   방 정보 (시드). 방장이 나가면 방 전체가 지워진다
+//   host   방 정보 (시드). 방장이 나가면 지워진다 (모두 한 방이 아닐 때는 방 전체가 지워진다)
 //   p/{id} 사람마다 자기 캐릭터 (각자 쓴다)
 //   w      몬스터 (방장이 쓴다)
 //   items  아이템 (방장이 쓴다)
 //   t/{칸} 캐거나 놓아서 바뀐 맵 칸 (누구나 쓴다. 같은 칸을 동시에 바꾸면 한 사람만 된다)
+//   world  이 방의 세상 { seed, w, s: 보스 진행 } (모두 한 방: 방장이 나가도 t 와 같이 남아서, 다음 방장이 이어서 연다)
 // bags/{캐릭터 이름}  가방 (같은 이름으로 들어오면 어느 기기에서든 이어서 한다)
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import { getAuth, signInAnonymously } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
@@ -49,10 +50,12 @@ export async function host(seed, sid, want, key, strict = false) {
     const res = await runTransaction(path(want, 'host'), cur => (!cur || cur.key === key ? { seed, key, t: Date.now() } : undefined));
     if (!res.committed) throw new Error('taken');
     code = want;
-    onDisconnect(ref(db, `rooms/${code}`)).remove();
+    // 방장이 나가면 방장 / 몬스터 / 아이템만 지운다. 세상(world, t)은 남는다
+    const bye = () => { for (const k of ['host', 'w', 'items']) onDisconnect(path(code, k)).remove(); };
+    bye();
     const reopen = async () => {
       await set(path(code, 'host'), { seed, key, t: serverTimestamp() });
-      onDisconnect(ref(db, `rooms/${code}`)).remove();
+      bye();
     };
     return { ...room(code, seed, sid), reopen };
   }
@@ -93,6 +96,13 @@ export async function peek(code) {
   return (await get(path(code, 'host'))).val();
 }
 
+// 방에 남아 있는 세상: { world: { seed, w, s }, tiles: { 칸: 값 } } (없으면 world 가 null)
+export async function loadWorld(code) {
+  await connect();
+  const [w, t] = await Promise.all([get(path(code, 'world')), get(path(code, 't'))]);
+  return { world: w.val(), tiles: t.val() || {} };
+}
+
 // 방 번호로 들어가기
 export async function join(code, sid) {
   await connect();
@@ -116,6 +126,7 @@ function room(code, seed, sid) {
     sendItems: list => set(path(code, 'items'), list),
     onItems: cb => onValue(path(code, 'items'), s => cb(s.val())),
     putTiles: edits => set(path(code, 't'), edits),
+    saveWorld: world => set(path(code, 'world'), world),
     // 방 정보가 바뀔 때마다 (방장이 나가면 null, 같은 번호로 다시 열면 다시 온다)
     onRoom: cb => onValue(path(code, 'host'), s => cb(s.val())),
     // 맵 칸: 처음 붙을 때 지금까지 바뀐 칸이 모두 오고, 그 뒤로는 바뀔 때마다 온다

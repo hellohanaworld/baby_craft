@@ -269,7 +269,7 @@ function itemNames(def) {
 // Store — localStorage 래퍼 (기기 안에만 저장)
 // ============================================================
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
-const NET_URL = './net.js?v=22';
+const NET_URL = './net.js?v=23';
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -2623,26 +2623,70 @@ const Multi = {
   },
 
   // want/strict: 그 번호로만 연다 (모두 한 방)
+  // strict (모두 한 방): 방에 세상이 남아 있으면 그 세상을 이어서 열고, 없으면 내 세상을 방의 세상으로 올린다
   async startHost(want, strict = false) {
     const Net = await import(NET_URL);
     const last = Store.get(KEYS.room, {}) || {};
+    this.shared = strict;
+    const kept = strict ? await Net.loadWorld(want) : null;
+    if (kept && kept.world && Number.isInteger(kept.world.seed)) this.useRoomWorld(kept.world, kept.tiles);
     this.net = await Net.host(Game.seed, this.sid, want || last.host, this.roomKey(), strict);
     Store.set(KEYS.room, { ...last, host: this.net.code });
     Session.set({ mode: 'host', code: this.net.code });
-    const edits = World.edits();
-    if (Object.keys(edits).length) await this.net.putTiles(edits);
     this.mode = 'host';
+    if (!(kept && kept.world)) await this.uploadWorld(strict);
     this.listen();
     // 옛 연결이 늦게 방을 지웠으면 다시 연다 (바뀐 칸, 아이템도 다시 올린다)
     this.net.onRoom(async h => {
       if (h || this.mode !== 'host') return;
       console.log('[Multi] 방이 지워져서 다시 연다', this.net.code);
       await this.net.reopen();
-      await this.net.putTiles(World.edits());
+      await this.uploadWorld(strict);
       this.itemsVersion = -1;
     });
     this.showBadge(this.net.code);
     console.log('[Multi] 방 만들기', this.net.code);
+  },
+
+  // 내 세상(바뀐 칸 + 보스 진행)을 방에 올린다
+  async uploadWorld(strict) {
+    const edits = World.edits();
+    if (Object.keys(edits).length) await this.net.putTiles(edits);
+    if (strict) this.saveRoomWorld();
+  },
+
+  // 방장: 보스 진행이 바뀌었으면 방에 적어 둔다 (다음 방장이 이어서)
+  saveRoomWorld() {
+    if (!this.isHost || !this.shared) return;
+    const s = { luck: Monsters.luck, nextEagleAt: Monsters.nextEagleAt, kills: Monsters.kills, nextBossAt: Monsters.nextBossAt };
+    const world = { seed: Game.seed, w: World.w, s };
+    const json = JSON.stringify(world);
+    if (json === this.worldJson) return;
+    this.worldJson = json;
+    this.net.saveWorld(world).catch(err => { this.worldJson = ''; console.warn('[Multi] 세상 저장 실패', err); });
+  },
+
+  // 방에 남아 있던 세상으로 바꾼다 (내 기기의 맵 대신). 동물과 아이템은 새로, 캐릭터는 집 앞에서
+  useRoomWorld(world, tiles) {
+    Game.seed = world.seed;
+    World.generate(world.seed);
+    World.applyEdits(World.remapEdits(tiles, world.w || World.w));
+    const s = world.s || {};
+    Monsters.luck = s.luck || 0;
+    Monsters.nextEagleAt = s.nextEagleAt || CONFIG.LUCK_FOR_BOSS;
+    Monsters.kills = s.kills || 0;
+    Monsters.nextBossAt = s.nextBossAt || CONFIG.BOSS_AFTER_KILLS;
+    Monsters.bossSpawned = false;
+    Player.reset();
+    Items.computeSpots();
+    Items.list = [];
+    Items.respawnQueue = [];
+    Items.fill();
+    Monsters.list = [];
+    Monsters.respawnQueue = [];
+    Monsters.fill();
+    this.worldJson = JSON.stringify(world);
+    console.log(`[Multi] 방에 남아 있던 세상으로 (바뀐 칸 ${Object.keys(tiles).length}개)`);
   },
 
   async startGuest(code) {
@@ -2693,14 +2737,15 @@ const Multi = {
     if (!this.roomGone) toast('📴');
     this.roomGone = true;
     for (const sid of [...this.peers.keys()]) this.leave(sid);
-    // 모두 한 방: 방장이 아주 나갔으면 (10초 안에 다시 안 열리면) 새로 불러와서 내가 방을 연다 (가방은 저장)
+    // 모두 한 방: 방장이 아주 나갔으면 (몇 초 안에 다시 안 열리면) 새로 불러와서 내가 방을 연다 (가방은 저장).
+    // 세상은 방에 남아 있어서 그대로 이어진다
     if (ONE_ROOM && this.isGuest) {
       clearTimeout(this.goneTimer);
       this.goneTimer = setTimeout(() => {
         if (!this.roomGone) return;
         Game.writeSave();
         location.reload();
-      }, 10000 + Math.random() * 3000);
+      }, 4000 + Math.random() * 3000);
     }
   },
 
@@ -3913,6 +3958,7 @@ const Game = {
     const bag = this.bagData();
     Cloud.save(bag);
     if (Multi.isGuest) { Store.set(KEYS.world, { ...old, bag }); return; }
+    if (Multi.isHost) Multi.saveRoomWorld();
     Store.set(KEYS.world, {
       gen: WORLD_GEN, seed: this.seed, edits: World.edits(), bag, pets: Monsters.myPets(),
       monsterKills: Monsters.kills, nextBossAt: Monsters.nextBossAt, w: World.w,
