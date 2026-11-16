@@ -8,7 +8,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <link rel="manifest" href="manifest.json">
   <title>Baby Craft</title>
-  <link rel="stylesheet" href="style.css?v=36">
+  <link rel="stylesheet" href="style.css?v=38">
 </head>
 <body>
   <canvas id="game"></canvas>
@@ -27,6 +27,7 @@
     <button id="btn-home" class="home-btn" aria-label="home">🏠</button>
     <div id="room-badge" class="room-badge hidden"></div>
     <button id="btn-buddy" class="home-btn buddy-btn" aria-label="play buddy">🤝<span>놀아주기</span></button>
+    <button id="btn-voice" class="home-btn voice-btn on" aria-label="read chat aloud">🔊<span>음성 ON</span></button>
   </div>
 
   <!-- 🏠 를 눌렀을 때 한 번 묻기 -->
@@ -37,6 +38,18 @@
       <div class="confirm-btns">
         <button id="btn-home-yes" class="big-btn" aria-label="yes">✅</button>
         <button id="btn-home-no" class="big-btn" aria-label="no">❌</button>
+      </div>
+    </div>
+  </div>
+  <!-- 🤝 놀아주기: 누구랑 놀아줄까요? -->
+  <div id="buddy-pick" class="overlay hidden">
+    <div class="confirm-box">
+      <div class="confirm-q">🤝</div>
+      <div id="buddy-pick-text" class="confirm-text"></div>
+      <div id="buddy-pick-names" class="buddy-names"></div>
+      <div class="confirm-btns">
+        <button id="btn-buddy-yes" class="big-btn" aria-label="ok">✅</button>
+        <button id="btn-buddy-no" class="big-btn" aria-label="cancel">❌</button>
       </div>
     </div>
   </div>
@@ -119,6 +132,6 @@
     <p id="title-msg" class="msg"></p>
   </div>
 
-  <script src="game.js?v=49"></script>
+  <script src="game.js?v=51"></script>
 </body>
 </html>

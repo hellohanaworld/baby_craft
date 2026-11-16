@@ -258,7 +258,8 @@ const NET_URL = './net.js?v=22';
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
-const ONE_ROOM = '1111';
+// 주소에 ?room=1234 를 붙이면 그 방으로 (테스트할 때 노는 사람들 방에 섞이지 않게)
+const ONE_ROOM = (new URLSearchParams(location.search).get('room') || '').match(/^\d{4}$/)?.[0] || '1111';
 
 // 이 탭에서 하던 여럿이 하기 { mode: 'host'|'guest', code }. 새로고침하면 시작 화면 없이 그 방으로 저절로 다시 간다.
 // sessionStorage 라 창을 닫았다 새로 열면 지워져서 시작 화면이 나온다
@@ -2615,7 +2616,7 @@ const Multi = {
       p.saySeq = d.say[0];
       p.sayText = String(d.say[1] || '').slice(0, SAY_MAX);
       p.sayT = SAY_SEC;
-      if (p.sayText && Game.state === 'play' && Math.hypot(p.x - Player.x, p.y - Player.y) < 12 * T) Speech.speak(p.sayText, sayLang(p.sayText));
+      if (p.sayText && Game.state === 'play' && Social.voiceOn) Speech.speak(p.sayText, sayLang(p.sayText));
     }
     p.arrows = (d.a || []).filter(Boolean).map(([x, y, fx, fy, food]) => ({ x, y, fx, fy, food: ITEMS[food] ? food : null }));
     for (const ev of evs.sort((a, b) => a[0] - b[0])) {
@@ -3484,6 +3485,7 @@ const Game = {
     this.initClickSound();
     this.initHome();
     this.initBuddy();
+    Social.initVoice();
     this.autoResume();
   },
 
@@ -3744,8 +3746,55 @@ const Game = {
     await this.begin();
   },
 
+  // 🤝: 켤 때 "누구랑 놀아줄까요?" (처음엔 지율이 골라져 있어서 ✅/Enter 한 번이면 된다). 끌 때는 바로
   initBuddy() {
-    $('#btn-buddy').addEventListener('click', () => { if (this.state === 'play' || Buddy.on) Buddy.toggle(); });
+    const box = $('#buddy-pick'), list = $('#buddy-pick-names');
+    let names = [], sel = 0, back = null;
+    const mark = () => list.querySelectorAll('button').forEach((b, i) => b.classList.toggle('sel', i === sel));
+    const close = () => {
+      box.classList.add('hidden');
+      if (this.state === 'menu') this.state = back;
+    };
+    const ok = () => {
+      close();
+      Buddy.toggle(names[sel]);
+    };
+    $('#btn-buddy').addEventListener('click', () => {
+      if (Buddy.on) { Buddy.toggle(); return; }
+      if (this.state !== 'play') return;
+      back = this.state;
+      this.state = 'menu';
+      Input.reset();
+      this.closeWeaponPicker(false);
+      this.closeTalk(false);
+      // 지율 먼저, 그다음 지금 방에 있는 사람들
+      names = [...new Set([BUDDY_DEFAULT, ...Multi.visiblePeers().map(p => p.name).filter(Boolean)])];
+      sel = 0;
+      $('#buddy-pick-text').textContent = tr('누구랑 놀아줄까요?', 'Who should I play with?');
+      list.innerHTML = '';
+      names.forEach((name, i) => {
+        const b = document.createElement('button');
+        b.className = 'buddy-name';
+        const here = Multi.visiblePeers().some(p => p.name === name);
+        b.textContent = here ? name : `${name} 💤`; // 💤: 아직 안 들어옴 (들어오면 그때부터 같이 논다)
+        b.addEventListener('click', () => { sel = i; mark(); Sfx.click(); });
+        list.appendChild(b);
+      });
+      mark();
+      box.classList.remove('hidden');
+    });
+    $('#btn-buddy-yes').addEventListener('click', ok);
+    $('#btn-buddy-no').addEventListener('click', close);
+    // 키보드: ←→ 사람 고르기, Enter/스페이스 = ✅, Esc = ❌
+    addEventListener('keydown', e => {
+      if (box.classList.contains('hidden')) return;
+      e.stopImmediatePropagation();
+      e.preventDefault();
+      if (['ArrowLeft', 'KeyA', 'ArrowUp', 'KeyW'].includes(e.code)) { sel = (sel - 1 + names.length) % names.length; mark(); Sfx.click(); }
+      else if (['ArrowRight', 'KeyD', 'ArrowDown', 'KeyS'].includes(e.code)) { sel = (sel + 1) % names.length; mark(); Sfx.click(); }
+      else if ((e.code === 'Space' || e.code === 'Enter') && !e.repeat) { Sfx.click(); ok(); }
+      else if (e.code === 'Escape' || e.code === 'KeyQ') { Sfx.click(); close(); }
+    }, true);
   },
 
   // 왼쪽 위 🏠: 한 번 묻고 처음 화면(이름 입력)으로. 저장하고 방에서 나간 다음 새로 불러온다
@@ -4512,18 +4561,37 @@ const SAY_WORDS = [
 ];
 const SAY_EMOJI = ['😊', '😆', '👍', '💕', '👋', '🎉', '😮', '😢'];
 const SAY_SEC = 3;
+const BUDDY_DEFAULT = '지율'; // 🤝 놀아주기를 켜면 처음 골라져 있는 사람
 const SAY_MAX = 20; // 글자 수 (직접 쓰는 말도 20글자까지)
 const JUMP_SEC = 0.45;
 const tr = (ko, en) => (Store.settings.lang === 'en' ? en : ko);
 const sayLang = text => (/[가-힣]/.test(text) ? 'ko' : 'en');
 
 const Social = {
+  // 🔊 음성 ON/OFF: 모든 사람의 말풍선을 소리로 읽어 줄지 (이 기기에만 저장, 처음엔 ON)
+  voiceOn: Store.get('bc.sayVoice', true) !== false,
+
+  initVoice() {
+    const btn = $('#btn-voice');
+    const show = () => {
+      btn.classList.toggle('on', this.voiceOn);
+      btn.innerHTML = `${this.voiceOn ? '🔊' : '🔇'}<span>${tr('음성', 'Voice')} ${this.voiceOn ? 'ON' : 'OFF'}</span>`;
+    };
+    btn.addEventListener('click', () => {
+      this.voiceOn = !this.voiceOn;
+      Store.set('bc.sayVoice', this.voiceOn);
+      if (!this.voiceOn) window.speechSynthesis?.cancel(); // 읽던 것도 멈춘다
+      show();
+      toast(this.voiceOn ? '🔊 ON' : '🔇 OFF');
+    });
+    show();
+  },
   // voice: 내 기기에서도 읽어 줄지 (🤝 놀아주기가 저절로 하는 말은 내 기기에서는 읽지 않는다)
   say(text, voice = true) {
     Player.sayText = String(text).slice(0, SAY_MAX);
     Player.sayT = SAY_SEC;
     Player.saySeq = (Date.now() % 1e8) + Math.random(); // 다른 사람이 새 말인지 알아보게
-    if (voice && Game.state === 'play') Speech.speak(Player.sayText, sayLang(Player.sayText));
+    if (voice && Game.state === 'play' && this.voiceOn) Speech.speak(Player.sayText, sayLang(Player.sayText));
   },
 
   emote(icon) {
@@ -4645,8 +4713,11 @@ const Buddy = {
   projectN: 0, // 다음에 지을 것 (집 → 하트숲 → 미로 차례로)
   projectT: 0, // 다 지은 뒤 다음 것을 시작하기까지 쉬는 시간
 
-  toggle() {
+  // who: 놀아줄 사람 이름 (그 이름의 사람만 따라다닌다)
+  toggle(who) {
     this.on = !this.on;
+    this.target = this.on ? who || null : null;
+    $('#btn-buddy span').textContent = this.on && this.target ? this.target : tr('놀아주기', 'Play buddy');
     this.task = null;
     this.path = [];
     this.home = { x: Player.x, y: Player.y };
@@ -4656,7 +4727,7 @@ const Buddy = {
     this.said = {};
     this.reactAt = {};
     $('#btn-buddy').classList.toggle('on', this.on);
-    toast(this.on ? '🤝 ON' : '🤝 OFF');
+    toast(this.on ? `🤝 ${this.target || 'ON'}` : '🤝 OFF');
     if (this.on) this.emote('👋');
     else Game.picked = Game.lastWeapon;
     Game.renderInventory();
@@ -4671,6 +4742,7 @@ const Buddy = {
   friend() {
     let best = null, bd = Infinity;
     for (const p of Multi.visiblePeers()) {
+      if (this.target && p.name !== this.target) continue; // 고른 사람만 (없으면 켠 곳 둘레에서 논다)
       const d = Math.hypot(p.x - Player.x, p.y - Player.y);
       if (d < bd) { bd = d; best = p; }
     }
