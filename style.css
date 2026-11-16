@@ -567,3 +567,8 @@ body.playing .top-left { display: flex; }
 .confirm-btns .big-btn.sel { outline: 6px solid #ff3d00; outline-offset: 3px; }
 #btn-home-yes { background: #e8f5e9; }
 #btn-home-no { background: #ffebee; }
+
+/* 🤝 놀아주기 (켜면 주황, 살짝 반짝) */
+.buddy-btn { width: auto; padding: 0 10px; display: flex; align-items: center; gap: 4px; }
+.buddy-btn span { font: 900 16px/1 var(--font-ui); color: var(--ink); }
+.buddy-btn.on { background: #ffcc80; border-color: #e65100; animation: glow 1.4s infinite; }
