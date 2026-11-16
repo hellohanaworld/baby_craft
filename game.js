@@ -2719,8 +2719,9 @@ const Input = {
     addEventListener('keydown', e => {
       if (Game.pickerOpen) { e.preventDefault(); if (!e.repeat || e.code.startsWith('Arrow')) Game.pickerKey(e.code); return; }
       if (Game.talkOpen) { e.preventDefault(); if (!e.repeat || e.code.startsWith('Arrow')) Game.talkKey(e.code); return; }
-      if (e.code === 'KeyE' && !e.repeat) Social.jump();
-      if (e.code === 'KeyR' && !e.repeat) { Game.toggleTalk(); Sfx.click(); }
+      if (e.code === 'KeyJ' && !e.repeat) Social.jump();
+      if (e.code === 'KeyC' && !e.repeat) { Game.toggleTalk(); Sfx.click(); }
+      if (e.code === 'KeyB' && !e.repeat && Game.state === 'play') { Game.setBag($('#inventory').classList.contains('hidden')); Sfx.click(); }
       if (KEYMAP[e.code]) { this.keys.add(e.code); e.preventDefault(); }
       if (e.code === 'KeyQ' && !e.repeat) { Game.toggleWeaponPicker(); Sfx.click(); }
       if (e.code === 'Space' || e.code === 'Enter') {
@@ -4098,11 +4099,12 @@ const Game = {
   // 체력이 1 남으면 가방의 하트나 음식을 자동으로 먹는다
   autoEat() { this.eatOne(); },
 
-  // ---------- 💬 말풍선 칸 (R 키 / 💬 버튼): 말 / 표정 / 하기(먹기, 주기) ----------
+  // ---------- 💬 말풍선 칸 (C 키 / 💬 버튼): 말 / 표정 / 하기(먹기, 주기) ----------
   get talkOpen() { return !$('#talk-panel').classList.contains('hidden'); },
 
   talkRows() {
     const rows = [
+      { icon: '✏️', ko: '쓰기', en: 'Write', items: [{ write: true }] },
       { icon: '💬', ko: '말', en: 'Say', items: SAY_WORDS.map(([ko, en]) => ({ html: tr(ko, en), cls: 'say-choice', act: () => Social.say(tr(ko, en)) })) },
       { icon: '😊', ko: '표정', en: 'Face', items: SAY_EMOJI.map(e => ({ html: e, act: () => Social.emote(e) })) },
     ];
@@ -4131,6 +4133,7 @@ const Game = {
       const box = document.createElement('div');
       box.className = 'pick-items';
       g.items.forEach((it, c) => {
+        if (it.write) { box.appendChild(this.talkWriter(`${r},${c}`)); return; }
         const btn = document.createElement('button');
         btn.className = `big-btn weapon-choice ${it.cls || ''}`;
         btn.dataset.pick = `${r},${c}`;
@@ -4145,7 +4148,37 @@ const Game = {
     this.markTalk();
   },
 
+  // ✏️ 직접 쓰기: 20글자까지 쓰고 Enter 또는 💬 를 누르면 말풍선으로
+  talkWriter(pick) {
+    const wrap = document.createElement('div');
+    wrap.className = 'talk-write';
+    wrap.dataset.pick = pick;
+    wrap.innerHTML = `<input class="talk-input" maxlength="${SAY_MAX}" enterkeyhint="send" autocomplete="off"
+      placeholder="${tr(`${SAY_MAX}글자까지 쓰기`, `Up to ${SAY_MAX} letters`)}"><span class="talk-count">0/${SAY_MAX}</span>
+      <button class="big-btn talk-send" aria-label="send">💬</button>`;
+    const input = wrap.querySelector('input'), count = wrap.querySelector('.talk-count');
+    const send = () => {
+      const text = Array.from(input.value.trim()).slice(0, SAY_MAX).join('').trim();
+      if (!text) { input.focus(); return; }
+      Sfx.click();
+      this.closeTalk(false);
+      Social.say(text);
+    };
+    input.addEventListener('input', () => { count.textContent = `${Array.from(input.value).length}/${SAY_MAX}`; });
+    // 쓰는 동안에는 게임 키(이동, C, J 등)가 먹지 않게
+    input.addEventListener('keydown', e => {
+      e.stopPropagation();
+      if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); send(); }
+      if (e.key === 'Escape') this.closeTalk();
+    });
+    input.addEventListener('keyup', e => e.stopPropagation());
+    input.addEventListener('pointerdown', e => e.stopPropagation());
+    wrap.querySelector('.talk-send').addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); send(); });
+    return wrap;
+  },
+
   chooseTalk(it) {
+    if (it.write) { $('#talk-panel .talk-input').focus(); return; } // 키보드로 ✏️ 를 고르면 쓰기 칸으로
     Sfx.click();
     this.closeTalk(false);
     it.act();
@@ -4153,10 +4186,10 @@ const Game = {
 
   markTalk() {
     const at = `${this.talk.r},${this.talk.c}`;
-    $('#talk-panel').querySelectorAll('.weapon-choice').forEach(b => b.classList.toggle('sel', b.dataset.pick === at));
+    $('#talk-panel').querySelectorAll('[data-pick]').forEach(b => b.classList.toggle('sel', b.dataset.pick === at));
   },
 
-  // ←→ 줄 안에서, ↑↓ 다른 줄로, Enter/Space 고르기, R/Esc 닫기
+  // ←→ 줄 안에서, ↑↓ 다른 줄로, Enter/Space 고르기, C/Esc 닫기
   talkKey(code) {
     const t = this.talk, rows = t.rows;
     const dx = { ArrowLeft: -1, KeyA: -1, ArrowRight: 1, KeyD: 1 }[code];
@@ -4170,7 +4203,7 @@ const Game = {
     } else if (code === 'Enter' || code === 'Space') {
       this.chooseTalk(rows[t.r].items[t.c]);
       return;
-    } else if (code === 'KeyR' || code === 'Escape') {
+    } else if (code === 'KeyC' || code === 'Escape') {
       this.closeTalk();
       return;
     } else return;
@@ -4181,6 +4214,7 @@ const Game = {
   closeTalk(sound = true) {
     const panel = $('#talk-panel');
     if (panel.classList.contains('hidden')) return;
+    if (panel.contains(document.activeElement)) document.activeElement.blur(); // 태블릿 자판 닫기
     panel.classList.add('hidden');
     if (sound) Sfx.click();
   },
@@ -4440,7 +4474,7 @@ const SAY_WORDS = [
 ];
 const SAY_EMOJI = ['😊', '😆', '👍', '💕', '👋', '🎉', '😮', '😢'];
 const SAY_SEC = 3;
-const SAY_MAX = 24; // 글자 수
+const SAY_MAX = 20; // 글자 수 (직접 쓰는 말도 20글자까지)
 const JUMP_SEC = 0.45;
 const tr = (ko, en) => (Store.settings.lang === 'en' ? en : ko);
 const sayLang = text => (/[가-힣]/.test(text) ? 'ko' : 'en');
