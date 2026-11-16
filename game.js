@@ -615,6 +615,7 @@ const Sfx = {
   success() { [523, 659, 784, 1047].forEach((f, i) => this.tone(f, 0.22, { type: 'triangle', delay: i * 0.09 })); },
   soft() { this.tone(330, 0.25, { to: 260, vol: 0.1 }); },
   swing() { this.tone(240, 0.12, { type: 'triangle', to: 120, vol: 0.06 }); },
+  jump() { this.tone(330, 0.16, { type: 'triangle', to: 660, vol: 0.07 }); },
   door() { this.tone(392, 0.12, { type: 'triangle' }); this.tone(523, 0.18, { type: 'triangle', delay: 0.1 }); },
   hit() { this.tone(180, 0.1, { type: 'square', to: 90, vol: 0.08 }); },
   hurt() { this.tone(440, 0.2, { type: 'triangle', to: 220, vol: 0.1 }); },
@@ -1255,6 +1256,8 @@ function iconHtml(def) {
 }
 
 const World = {
+  recent: [], // 최근에 바뀐 칸 { i, from, to, at, mine } (🤝 놀아주기가 본다)
+  mine: new Map(), // 내가 바꾸려고 한 칸 → 시각
   w: 0,
   h: 0,
   tiles: null,
@@ -1395,6 +1398,9 @@ const World = {
   // 맵 한 칸이 바뀜 (캐기/놓기, 다른 사람이 바꾼 것 포함): 그 칸의 그림, 작은 지도, 갈 수 있는 곳을 새로
   setTile(i, v) {
     if (!(i >= 0 && i < this.tiles.length) || !Number.isInteger(v) || this.tiles[i] === v) return;
+    const now = performance.now();
+    this.recent.push({ i, from: this.tiles[i], to: v, at: now, mine: now - (this.mine.get(i) || -1e9) < 5000 });
+    if (this.recent.length > 40) this.recent.shift();
     this.tiles[i] = v;
     const x = i % this.w, y = Math.floor(i / this.w);
     this.chunks.delete(`${Math.floor(x / CHUNK)},${Math.floor(y / CHUNK)}`);
@@ -1652,11 +1658,11 @@ const Items = {
 
   // 내 캐릭터가 아이템 위에 서면 줍는다. 손님 기기는 방장에게 알리고 답을 기다린다
   pickup() {
-    if (Buddy.on && Buddy.friend()) return; // 🤝 놀아주기: 떨어진 것은 아이에게 양보한다
     const r = CONFIG.PICKUP_RADIUS * T, now = performance.now();
     for (const [id, at] of this.pending) if (now - at > 2000) this.pending.delete(id);
     for (const it of [...this.list]) {
       if (this.pending.has(it.id) || Math.hypot(it.x - Player.x, it.y - Player.y) >= r) continue;
+      if (Buddy.on && Buddy.friend() && !Buddy.mayTake(it)) continue; // 🤝 놀아주기: 아이에게 양보
       if (Multi.isGuest) {
         this.pending.set(it.id, now);
         Multi.send('pick', 'H', it.id);
@@ -1913,6 +1919,17 @@ const Monsters = {
     if (m.emoteT > 0.4 && m.emote === icon) return;
     m.emote = icon;
     m.emoteT = sec;
+  },
+
+  // 따라오는 동물을 다른 사람에게 준다 (방장/혼자 기기). 받은 사람 기기에 알린다
+  give(m, from, to) {
+    if (!m || m.owner !== from || !to || to === from) return false;
+    m.owner = to;
+    m.spot = null;
+    this.emote(m, '💕', 1.6);
+    if (to === Multi.sid) Game.onPetGift(m.def);
+    else Multi.send('gift', to, m.type);
+    return true;
   },
 
   // 내 동물에게 먹이를 또 줌: 체력이 차고 신나서 콩콩 뛴다 (방장/혼자 기기)
@@ -2200,11 +2217,17 @@ const Player = {
 
   emote: '',
   emoteT: 0,
+  jumpT: 0,
+  sayText: '',
+  sayT: 0,
+  saySeq: 0,
 
   update(dt) {
     this.invulnT = Math.max(0, this.invulnT - dt);
     this.hitT = Math.max(0, this.hitT - dt);
     this.emoteT = Math.max(0, this.emoteT - dt);
+    this.jumpT = Math.max(0, this.jumpT - dt);
+    this.sayT = Math.max(0, this.sayT - dt);
     // 설 수 없는 곳에 갇혔으면 (다른 사람이 발밑 다리를 캔 경우 등) 가장 가까운 땅으로
     if (!this.canStand(this.x, this.y)) this.unstuck();
     if (this.knock.t > 0) {
@@ -2397,6 +2420,7 @@ const Multi = {
   // 맵 한 칸 바꾸기 (캐기/놓기). 여럿이 할 때는 방에 먼저 기록하고, 다른 사람이 먼저 바꿨으면 false
   async editTile(i, expect, next) {
     if (World.tiles[i] !== expect) return false;
+    World.mine.set(i, performance.now());
     if (!this.online) { World.setTile(i, next); return true; }
     try {
       const ok = await this.net.editTile(i, World.base[i], expect, next);
@@ -2434,6 +2458,8 @@ const Multi = {
     for (const p of this.peers.values()) {
       followRemote(p, dt);
       p.emoteT = Math.max(0, (p.emoteT || 0) - dt);
+      p.jumpT = Math.max(0, (p.jumpT || 0) - dt);
+      p.sayT = Math.max(0, (p.sayT || 0) - dt);
       if (p.seen && now - p.lastSeen > CONFIG.NET_TIMEOUT_MS) this.timeout(p);
     }
     if (this.isGuest) {
@@ -2478,10 +2504,11 @@ const Multi = {
       lk: Game.lookIndex,
       st: Game.state,
       p: [r(Player.x), r(Player.y), DIRS.indexOf(Player.dir), Player.moving ? 1 : 0,
-        Player.swingT > 0 ? 1 : 0, Player.invulnT > 0 ? 1 : 0, Player.hitT > 0 ? 1 : 0],
+        Player.swingT > 0 ? 1 : 0, Player.invulnT > 0 ? 1 : 0, Player.hitT > 0 ? 1 : 0, Player.jumpT > 0 ? 1 : 0],
       hp: Game.hearts,
       w: Game.held,
       em: Player.emoteT > 0 ? Player.emote : 0,
+      say: Player.sayT > 0 ? [Player.saySeq, Player.sayText] : 0,
       a: Monsters.arrows.map(a => [r(a.x), r(a.y), a.fx, a.fy, a.food || 0]),
       ev: this.events.map(([seq, , kind, ...args]) => [seq, kind, ...args]),
     };
@@ -2520,6 +2547,7 @@ const Multi = {
       // 새로 들어옴: 위치를 바로 맞추고, 그 전 이벤트는 무시
       p = { ...makeRemote(), isPlayer: true, sid, x: pos[0], y: pos[1], arrows: [] };
       p.lastSeq = evs.reduce((max, ev) => Math.max(max, ev[0]), 0);
+      p.saySeq = d.say ? d.say[0] : 0; // 들어오기 전에 한 말은 읽지 않는다
       this.peers.set(sid, p);
       toast(`👋 ${d.n || ''}`);
     }
@@ -2540,6 +2568,15 @@ const Multi = {
     p.held = holdable(d.w) ? d.w : 'hand';
     if (d.em && d.em !== p.emote) { p.emote = String(d.em).slice(0, 4); p.emoteT = 1.6; }
     if (!d.em) p.emote = '';
+    if (pos[7] && !p.wasJump) p.jumpT = JUMP_SEC;
+    p.wasJump = !!pos[7];
+    // 말풍선: 새 말이면 띄우고, 가까이 있으면 읽어 준다
+    if (Array.isArray(d.say) && d.say[0] !== p.saySeq) {
+      p.saySeq = d.say[0];
+      p.sayText = String(d.say[1] || '').slice(0, SAY_MAX);
+      p.sayT = SAY_SEC;
+      if (p.sayText && Game.state === 'play' && Math.hypot(p.x - Player.x, p.y - Player.y) < 12 * T) Speech.speak(p.sayText, sayLang(p.sayText));
+    }
     p.arrows = (d.a || []).filter(Boolean).map(([x, y, fx, fy, food]) => ({ x, y, fx, fy, food: ITEMS[food] ? food : null }));
     for (const ev of evs.sort((a, b) => a[0] - b[0])) {
       if (ev[0] <= p.lastSeq) continue;
@@ -2576,8 +2613,13 @@ const Multi = {
     } else if (kind === 'petGone') {
       if (MONSTERS[args[0]]) Game.onPetLost(MONSTERS[args[0]]);
     } else if (kind === 'drop' && this.isHost) {
+      // 못 맞힌 먹이, 다른 사람에게 준 선물 (블록/먹이)
       const [type, x, y] = args;
-      if (ITEMS[type] && ITEMS[type].kind === 'food') Items.add(type, x, y, { dropped: true });
+      if (ITEMS[type] && (ITEMS[type].kind === 'food' || ITEMS[type].kind === 'block')) Items.add(type, x, y, { dropped: true });
+    } else if (kind === 'givePet' && this.isHost) {
+      Monsters.give(Monsters.list.find(mm => mm.id === args[0]), from.sid, String(args[1] || ''));
+    } else if (kind === 'gift') {
+      if (MONSTERS[args[0]]) Game.onPetGift(MONSTERS[args[0]]);
     } else if (kind === 'hitP') {
       Game.hurt(from);
     } else if (kind === 'ko') {
@@ -2636,6 +2678,9 @@ const Input = {
     // e.code 를 써서 한글 입력 상태에서도 WASD 가 동작하게 한다
     addEventListener('keydown', e => {
       if (Game.pickerOpen) { e.preventDefault(); if (!e.repeat || e.code.startsWith('Arrow')) Game.pickerKey(e.code); return; }
+      if (Game.talkOpen) { e.preventDefault(); if (!e.repeat || e.code.startsWith('Arrow')) Game.talkKey(e.code); return; }
+      if (e.code === 'KeyE' && !e.repeat) Social.jump();
+      if (e.code === 'KeyR' && !e.repeat) { Game.toggleTalk(); Sfx.click(); }
       if (KEYMAP[e.code]) { this.keys.add(e.code); e.preventDefault(); }
       if (e.code === 'KeyQ' && !e.repeat) { Game.toggleWeaponPicker(); Sfx.click(); }
       if (e.code === 'Space' || e.code === 'Enter') {
@@ -2678,8 +2723,13 @@ const Input = {
 
     $('#btn-action').addEventListener('pointerdown', e => { e.preventDefault(); Game.onAction(); });
     $('#btn-weapon').addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); Game.toggleWeaponPicker(); });
+    $('#btn-jump').addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); Social.jump(); });
+    $('#btn-talk').addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); Game.toggleTalk(); });
     // 고르는 칸 바깥을 누르면 닫는다
-    addEventListener('pointerdown', e => { if (!e.target.closest('#weapon-picker')) Game.closeWeaponPicker(!e.target.closest('button')); });
+    addEventListener('pointerdown', e => {
+      if (!e.target.closest('#weapon-picker')) Game.closeWeaponPicker(!e.target.closest('button'));
+      if (!e.target.closest('#talk-panel')) Game.closeTalk(!e.target.closest('button'));
+    });
     addEventListener('contextmenu', e => e.preventDefault());
   },
 
@@ -3068,7 +3118,9 @@ const Render = {
   // 8칸 x 13칸 픽셀 캐릭터. e: 위치/방향/걷기/휘두르기 상태, look: 옷 색, held: 손에 든 것 (무기/블록),
   // label: 머리 위 이름, mine: 내 캐릭터면 이름을 파란색으로
   drawCharacter(e, look, held, label, mine, hearts) {
-    const ctx = this.ctx, { y, dir } = e;
+    // 점프: 몸만 위로 (그림자는 땅에)
+    const jumpH = e.jumpT > 0 ? Math.sin(Math.PI * (1 - e.jumpT / JUMP_SEC)) * 14 : 0;
+    const ctx = this.ctx, { dir } = e, y = e.y - jumpH;
     const u = 2.5;
     // 맞은 순간: 좌우로 흔들리며 빨갛게 번쩍인다
     const hitT = e.hitT || 0;
@@ -3083,7 +3135,7 @@ const Render = {
 
     ctx.fillStyle = 'rgba(0,0,0,.25)';
     ctx.beginPath();
-    ctx.ellipse(x, y + 6, 9, 3, 0, 0, Math.PI * 2);
+    ctx.ellipse(x, e.y + 6, 9 - jumpH * 0.2, 3, 0, 0, Math.PI * 2);
     ctx.fill();
 
     const SKIN = '#f1c27d', SHOE = '#555', { hair: HAIR, shirt: SHIRT, pants: PANTS } = look;
@@ -3177,7 +3229,33 @@ const Render = {
         ctx.font = `13px ${FONT_EMOJI}`;
         ctx.fillText(e.emote, x, by + 1);
       }
+      // 💬 말풍선 (맨 위)
+      if (e.sayT > 0 && e.sayText) this.drawSay(x, ly - (hearts != null ? 30 : 22) - (e.emoteT > 0 && e.emote ? 26 : 0), e.sayText, e.sayT);
     }
+    ctx.restore();
+  },
+
+  // 말풍선: 흰 둥근 칸 + 아래 꼬리. 사라질 때 흐려진다
+  drawSay(x, by, text, t) {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.globalAlpha *= Math.min(1, t / 0.3);
+    ctx.font = `900 13px ${FONT_UI}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const w = ctx.measureText(text).width + 16, h = 22, top = by - h;
+    ctx.fillStyle = 'rgba(255,255,255,.97)';
+    ctx.strokeStyle = '#5d4037';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(x - w / 2, top, w, h, 10); else ctx.rect(x - w / 2, top, w, h);
+    ctx.moveTo(x - 5, top + h);
+    ctx.lineTo(x, top + h + 6);
+    ctx.lineTo(x + 5, top + h);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#3e2723';
+    ctx.fillText(text, x, top + h / 2 + 1);
     ctx.restore();
   },
 
@@ -3902,7 +3980,7 @@ const Game = {
   onMonsterDefeated(m) {
     if (Buddy.on) {
       if (!m.def.boss) this.kills++;
-      Buddy.emote('👍');
+      Buddy.onKill();
       return;
     }
     if (!m.def.boss) this.kills++;
@@ -3946,14 +4024,112 @@ const Game = {
     if (this.hearts <= 0) {
       if (m.isPlayer) Multi.send('ko', m.sid); // 쓰러뜨린 사람 기기에 단어 카드
       this.faint();
-    } else if (this.hearts === 1) this.autoEat();
+    } else {
+      if (this.hearts === 1) this.autoEat();
+      if (m.isPlayer && Buddy.on) Buddy.onHit(m);
+    }
   },
 
   // 체력이 1 남으면 가방의 하트나 음식을 자동으로 먹는다
-  autoEat() {
-    const food = this.inventory.heart > 0 ? 'heart'
-      : Object.keys(ITEMS).find(type => ITEMS[type].kind === 'food' && this.inventory[type] > 0);
-    if (!food) return;
+  autoEat() { this.eatOne(); },
+
+  // ---------- 💬 말풍선 칸 (R 키 / 💬 버튼): 말 / 표정 / 하기(먹기, 주기) ----------
+  get talkOpen() { return !$('#talk-panel').classList.contains('hidden'); },
+
+  talkRows() {
+    const rows = [
+      { icon: '💬', ko: '말', en: 'Say', items: SAY_WORDS.map(([ko, en]) => ({ html: tr(ko, en), cls: 'say-choice', act: () => Social.say(tr(ko, en)) })) },
+      { icon: '😊', ko: '표정', en: 'Face', items: SAY_EMOJI.map(e => ({ html: e, act: () => Social.emote(e) })) },
+    ];
+    const peer = Social.nearPeer(4), held = this.heldBlock || this.heldFood, items = [];
+    if (this.hearts < CONFIG.MAX_HEARTS && this.edible()) items.push({ html: '😋', label: tr('먹기', 'Eat'), act: () => this.eatOne() });
+    if (peer && held) items.push({ html: `🎁${iconHtml(ITEMS[held])}`, label: tr('주기', 'Give'), act: () => { if (Social.give(peer)) Social.say(tr('선물이야!', 'For you!')); } });
+    if (peer && Monsters.list.some(m => m.owner === Multi.sid)) {
+      items.push({ html: '🎁🐾', label: tr('동물 주기', 'Give pet'), act: () => { if (Social.givePet(peer)) Social.say(tr('선물이야!', 'For you!')); } });
+    }
+    if (items.length) rows.push({ icon: '🎁', ko: '하기', en: 'Do', items });
+    return rows;
+  },
+
+  toggleTalk() {
+    const panel = $('#talk-panel');
+    if (this.talkOpen) return this.closeTalk(false);
+    if (this.state !== 'play') return;
+    this.closeWeaponPicker(false);
+    Input.reset();
+    this.talk = { rows: this.talkRows(), r: 0, c: 0 };
+    panel.innerHTML = '';
+    this.talk.rows.forEach((g, r) => {
+      const row = document.createElement('div');
+      row.className = 'pick-row';
+      row.innerHTML = `<div class="pick-label"><span>${g.icon}</span>${tr(g.ko, g.en)}</div>`;
+      const box = document.createElement('div');
+      box.className = 'pick-items';
+      g.items.forEach((it, c) => {
+        const btn = document.createElement('button');
+        btn.className = `big-btn weapon-choice ${it.cls || ''}`;
+        btn.dataset.pick = `${r},${c}`;
+        btn.innerHTML = it.label ? `${it.html}<i>${it.label}</i>` : it.html;
+        btn.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); this.chooseTalk(it); });
+        box.appendChild(btn);
+      });
+      row.appendChild(box);
+      panel.appendChild(row);
+    });
+    panel.classList.remove('hidden');
+    this.markTalk();
+  },
+
+  chooseTalk(it) {
+    Sfx.click();
+    this.closeTalk(false);
+    it.act();
+  },
+
+  markTalk() {
+    const at = `${this.talk.r},${this.talk.c}`;
+    $('#talk-panel').querySelectorAll('.weapon-choice').forEach(b => b.classList.toggle('sel', b.dataset.pick === at));
+  },
+
+  // ←→ 줄 안에서, ↑↓ 다른 줄로, Enter/Space 고르기, R/Esc 닫기
+  talkKey(code) {
+    const t = this.talk, rows = t.rows;
+    const dx = { ArrowLeft: -1, KeyA: -1, ArrowRight: 1, KeyD: 1 }[code];
+    const dy = { ArrowUp: -1, KeyW: -1, ArrowDown: 1, KeyS: 1 }[code];
+    if (dx) {
+      const n = rows[t.r].items.length;
+      t.c = (t.c + dx + n) % n;
+    } else if (dy) {
+      t.r = (t.r + dy + rows.length) % rows.length;
+      t.c = Math.min(t.c, rows[t.r].items.length - 1);
+    } else if (code === 'Enter' || code === 'Space') {
+      this.chooseTalk(rows[t.r].items[t.c]);
+      return;
+    } else if (code === 'KeyR' || code === 'Escape') {
+      this.closeTalk();
+      return;
+    } else return;
+    this.markTalk();
+    Sfx.click();
+  },
+
+  closeTalk(sound = true) {
+    const panel = $('#talk-panel');
+    if (panel.classList.contains('hidden')) return;
+    panel.classList.add('hidden');
+    if (sound) Sfx.click();
+  },
+
+  // 가방에서 먹을 것 (하트 먼저)
+  edible() {
+    return this.inventory.heart > 0 ? 'heart'
+      : Object.keys(ITEMS).find(type => ITEMS[type].kind === 'food' && this.inventory[type] > 0) || null;
+  },
+
+  // 하나 먹기 (💬 칸의 😋, 하트가 1 남았을 때 저절로, 🤝 놀아주기). 먹었으면 true
+  eatOne() {
+    const food = this.edible();
+    if (!food || this.hearts >= CONFIG.MAX_HEARTS) return false;
     this.inventory[food]--;
     const heal = food === 'heart' ? CONFIG.HEART_HEAL : 2;
     this.hearts = Math.min(CONFIG.MAX_HEARTS, this.hearts + heal);
@@ -3962,7 +4138,16 @@ const Game = {
     Sfx.pickup();
     this.renderInventory();
     this.renderHearts();
+    return true;
   },
+
+  onPetGift(def) {
+    Sfx.success();
+    toast(`🎁 ${def.emoji} ${itemNames(def).main}`);
+    if (Store.settings.lang === 'en') Speech.speak(`You got a ${def.en}!`, 'en');
+    else Speech.speak(`${josa(def.ko, '을', '를')} 선물 받았어요!`, 'ko');
+  },
+
 
   // 기절해도 아이템은 그대로. 집에서 다시 시작 + 단어 카드
   async faint() {
@@ -4179,6 +4364,82 @@ const Game = {
   },
 };
 
+// ============================================================
+// Social — 💬 말풍선 / 🦘 점프 / 🎁 주기 / 😋 먹기: 모든 캐릭터가 쓸 수 있다 (🤝 놀아주기도 같은 것을 쓴다).
+//          말풍선은 다른 사람 화면에도 뜨고, 가까이 있으면 소리로 읽어 준다 (글자 읽기 연습)
+// ============================================================
+const SAY_WORDS = [
+  ['안녕!', 'Hi!'], ['같이 가자!', "Let's go!"], ['이리 와!', 'Come here!'], ['고마워!', 'Thank you!'],
+  ['최고야!', 'Awesome!'], ['도와줘!', 'Help me!'], ['사랑해!', 'I love you!'], ['내가 지켜줄게!', "I'll protect you!"],
+  ['잡아 봐라~', 'Catch me!'], ['선물이야!', 'For you!'],
+];
+const SAY_EMOJI = ['😊', '😆', '👍', '💕', '👋', '🎉', '😮', '😢'];
+const SAY_SEC = 3;
+const SAY_MAX = 24; // 글자 수
+const JUMP_SEC = 0.45;
+const tr = (ko, en) => (Store.settings.lang === 'en' ? en : ko);
+const sayLang = text => (/[가-힣]/.test(text) ? 'ko' : 'en');
+
+const Social = {
+  // voice: 내 기기에서도 읽어 줄지 (🤝 놀아주기가 저절로 하는 말은 내 기기에서는 읽지 않는다)
+  say(text, voice = true) {
+    Player.sayText = String(text).slice(0, SAY_MAX);
+    Player.sayT = SAY_SEC;
+    Player.saySeq = (Date.now() % 1e8) + Math.random(); // 다른 사람이 새 말인지 알아보게
+    if (voice && Game.state === 'play') Speech.speak(Player.sayText, sayLang(Player.sayText));
+  },
+
+  emote(icon) {
+    Player.emote = icon;
+    Player.emoteT = 1.6;
+  },
+
+  jump() {
+    if (Player.jumpT > 0 || Game.state !== 'play') return false;
+    Player.jumpT = JUMP_SEC;
+    Sfx.jump();
+    return true;
+  },
+
+  // 가까이 있는 사람 (r 칸 안, 가장 가까운)
+  nearPeer(r) {
+    let best = null, bd = r * T;
+    for (const p of Multi.activePeers()) {
+      const d = Math.hypot(p.x - Player.x, p.y - Player.y);
+      if (d < bd) { bd = d; best = p; }
+    }
+    return best;
+  },
+
+  // 손에 든 블록/먹이 하나를 그 사람 발밑에 놓아 준다 (그 사람이 줍는다)
+  give(to) {
+    const id = Game.heldBlock || Game.heldFood;
+    if (!id || !to) return false;
+    const dx = Player.x - to.x, dy = Player.y - to.y, d = Math.hypot(dx, dy) || 1;
+    let x = to.x + dx / d * 0.3 * T, y = to.y + dy / d * 0.3 * T;
+    if (!World.canStand(x, y, 6)) { x = to.x; y = to.y; }
+    Game.inventory[id]--;
+    if (!Game.inventory[id]) Game.picked = Game.lastWeapon;
+    if (Multi.isGuest) Multi.send('drop', 'H', id, Math.round(x), Math.round(y));
+    else Items.add(id, x, y, { dropped: true });
+    Floaters.add(to.x, to.y - 36, '🎁', 18);
+    Sfx.pickup();
+    Game.renderInventory();
+    return true;
+  },
+
+  // 나를 따라오는 동물 하나를 그 사람에게 (그 사람을 따라간다). 준 동물을 돌려준다
+  givePet(to) {
+    const m = to && Monsters.list.find(mm => mm.owner === Multi.sid);
+    if (!m) return null;
+    if (Multi.isGuest) Multi.send('givePet', 'H', m.id, to.sid);
+    else Monsters.give(m, Multi.sid, to.sid);
+    Floaters.add(m.x, m.y - 30, '🎁', 18);
+    Sfx.pickup();
+    return m;
+  },
+};
+
 // 🤝 놀아주기가 아이 곁에 짓는 것. 한 줄이 맵 한 줄 (W: 벽 - 바위/벽돌/나무, T: 나무, f: 꽃, D: 문(있으면), .: 빈칸)
 const BUDDY_PROJECTS = {
   house: { emoji: '🏠', plan: [
@@ -4224,6 +4485,18 @@ const Buddy = {
   chatT: 3,
   restT: 0, // 일 하나를 끝내고 잠깐 따라다니기만 하는 시간
   backT: 0, // 맞거나 때린 뒤 잠깐 물러서는 시간
+  eatT: 0,
+  said: {}, // 말 → 다시 해도 되는 시각
+  reactAt: {}, // 반응 → 다시 해도 되는 시각
+  watchFrom: 0, // 이 시각 뒤에 바뀐 것만 반응한다 (켜자마자 옛것에 반응하지 않게)
+  kidPets: null,
+  nearIds: null,
+  killCheck: 0,
+  lastKill: 0,
+  lastSt: '',
+  kidPlaced: null,
+  gifted: new Set(), // 내가 아이에게 준 동물 (꼬셨다고 반응하지 않게)
+  mazes: [], // 다 지은 미로 (숨바꼭질)
   friendHit: false,
   meHit: false,
   path: [],
@@ -4242,6 +4515,9 @@ const Buddy = {
     this.home = { x: Player.x, y: Player.y };
     this.project = null;
     this.projectT = 5;
+    this.watchFrom = performance.now() + 2000;
+    this.said = {};
+    this.reactAt = {};
     $('#btn-buddy').classList.toggle('on', this.on);
     toast(this.on ? '🤝 ON' : '🤝 OFF');
     if (this.on) this.emote('👋');
@@ -4282,15 +4558,35 @@ const Buddy = {
     this.thinkT -= dt;
     this.restT -= dt;
     this.projectT -= dt;
+    if (f) this.watch(f);
+    // 하트가 아이보다 적으면 하나씩 먹는다 (가방에 있으면 바로, 없으면 떨어진 하트/먹이를 주우러)
+    this.eatT -= dt;
+    if (f && Game.hearts < f.hearts && this.eatT <= 0 && (!this.task || this.task.kind !== 'hunt')) {
+      this.eatT = 6;
+      if (Game.eatOne()) { this.emote('😋'); this.talk('yum', [['냠냠!', 'Yum!']], 5); }
+      else {
+        const it = Items.list.filter(i => ['heart', 'food'].includes(ITEMS[i.type].kind) && this.dist(i, Player) < 8 * T)
+          .sort((p, q) => this.dist(p, Player) - this.dist(q, Player))[0];
+        if (it && (!this.task || !['tag', 'hide'].includes(this.task.kind))) this.start('eat', { it }, 8);
+      }
+    }
     if (this.thinkT <= 0) { this.thinkT = 0.4; this.think(); }
-    if (this.task && performance.now() > this.task.until) this.done();
+    if (this.task && performance.now() > this.task.until) {
+      const t = this.task;
+      if (t.kind === 'tag') Social.say(t.phase === 'chase' ? tr('헥헥, 못 잡겠다~', "Phew, you're fast!") : tr('나 잡아 봐~', 'Catch me~'), false);
+      if (t.kind === 'hide' && t.hidden) Social.say(tr('여기 있지롱!', "I'm here!"), false);
+      this.done();
+    }
     if (this.task) this[this.task.kind](this.task, dt);
     this.checkStuck(dt);
     // 가끔 아이를 보며 😊
     this.chatT -= dt;
     if (this.chatT <= 0) {
       this.chatT = randFloat(5, 9);
-      if (f && this.dist(f, Player) < 4 * T && !(this.task && this.task.kind === 'hunt')) this.emote(['😊', '👋', '🎵', '😆', '👍'][Math.floor(Math.random() * 5)]);
+      if (f && this.dist(f, Player) < 4 * T && !(this.task && this.task.kind === 'hunt')) {
+        if (Math.random() < 0.3) this.talk('chat', [['같이 놀자!', "Let's play!"], ['재밌다!', 'This is fun!'], ['뭐 하고 놀까?', 'What should we do?'], ['사랑해!', 'I love you!']], 25);
+        else this.emote(['😊', '👋', '🎵', '😆', '👍'][Math.floor(Math.random() * 5)]);
+      }
     }
   },
 
@@ -4322,6 +4618,7 @@ const Buddy = {
         const guard = a !== this.home && this.dist(threat, a) < this.dist(threat, me);
         this.start('hunt', { m: threat }, 20);
         this.emote(guard ? '🛡️' : Math.random() < 0.5 ? '💪' : '⚔️');
+        if (guard) this.talk('guard', [['내가 지켜줄게!', "I'll protect you!"], ['내 뒤에 있어!', 'Stay behind me!']], 15);
       }
       return;
     }
@@ -4349,10 +4646,23 @@ const Buddy = {
     const item = f && Items.list.filter(it => this.dist(it, f) < 6 * T && this.dist(it, f) > 1.5 * T)
       .sort((x, y) => this.dist(x, f) - this.dist(y, f))[0];
     if (item) choices.push(['show', { it: item }, 6]);
+    // 선물: 따라오는 동물 (아이 동물이 3마리보다 적으면), 꽃/먹이가 넉넉하면 하나
+    if (f) {
+      const kidPets = Monsters.list.filter(m => m.owner === f.sid).length;
+      if (myPets > 0 && kidPets < 3) choices.push(['gift', { pet: true }, 10]);
+      const extra = Object.keys(ITEMS).find(id => (ITEMS[id].kind === 'food' && Game.inventory[id] >= 3) || (id === 'flower' && Game.inventory[id] >= 6));
+      if (extra && Math.random() < 0.5) choices.push(['gift', { item: extra }, 10]);
+      // 숨바꼭질: 아이 가까이 지어 둔 미로가 있으면
+      const mz = this.mazes.find(z => Math.hypot((z.ox + z.w / 2) * T - f.x, (z.oy + z.h / 2) * T - f.y) < 10 * T);
+      if (mz && (this.reactAt.hide || 0) < performance.now()) { choices.push(['hide', { maze: mz }, 45]); }
+    }
     if (choices.length && Math.random() < 0.7) {
       const [kind, data, sec] = choices[Math.floor(Math.random() * choices.length)];
       this.start(kind, data, sec);
-      this.emote({ tame: '🍎', gather: '🌷', build: '🌷', show: '👀' }[kind]);
+      this.emote({ tame: '🍎', gather: '🌷', build: '🌷', show: '👀', gift: '🎁', hide: '🙈' }[kind]);
+      if (kind === 'hide') this.reactAt.hide = performance.now() + 90000;
+      if (kind === 'tame') this.talk('tame', [['친구 데려올게!', "I'll bring a friend!"]], 20);
+      if (kind === 'show') this.talk('show', [['여기 있어! 주워 봐!', 'Look! Pick it up!']], 15);
     } else if (!t) this.start('follow', {}, randFloat(3, 6));
   },
 
@@ -4391,6 +4701,7 @@ const Buddy = {
     this.project = { kind, cells, ox: best.ox, oy: best.oy, w, h };
     this.projectN++;
     this.emote(BUDDY_PROJECTS[kind].emoji);
+    this.talk('build', [{ house: ['집 지어 줄게!', "I'll build a house!"], heart: ['하트숲 만들자!', "Let's make a heart forest!"], maze: ['미로 만들어 줄게!', "I'll make a maze!"] }[kind]], 5);
     console.log('[Buddy] 짓기 시작', kind, best);
   },
 
@@ -4434,7 +4745,9 @@ const Buddy = {
   },
 
   finishProject() {
-    const kind = this.project.kind;
+    const { kind, ox, oy, w, h } = this.project;
+    if (kind === 'maze') this.mazes.push({ ox, oy, w, h });
+    this.talk('built', [{ house: ['집 다 지었다! 들어가 봐!', 'House done! Go inside!'], heart: ['하트숲 완성!', 'Heart forest done!'], maze: ['미로 완성! 들어가 봐!', 'Maze done! Go in!'] }[kind]], 5);
     this.project = null;
     this.projectT = randFloat(20, 40);
     this.emote('🎉');
@@ -4564,7 +4877,13 @@ const Buddy = {
     }
     if (this.goTo(a.x + t.spot.x, a.y + t.spot.y, 10)) {
       this.vec = { x: 0, y: 0 };
-      this.face(a.x, a.y);
+      // 사람처럼: 대개 아이를 보다가 가끔 두리번, 가끔 콩
+      if (!t.lookAt || performance.now() > t.lookAt) {
+        t.lookAt = performance.now() + randFloat(1200, 3000);
+        t.look = Math.random() < 0.35 ? DIRS[Math.floor(Math.random() * 4)] : null;
+        if (Math.random() < 0.12) Social.jump();
+      }
+      if (t.look) Player.dir = t.look; else this.face(a.x, a.y);
     }
   },
 
@@ -4587,7 +4906,11 @@ const Buddy = {
     // 몬스터가 가까우면 반대쪽 (가능하면 아이 쪽)으로 도망치고, 떨어지면 아이 곁에서 몬스터를 지켜본다
     if (Game.hearts <= (m.def.boss ? 3 : 2) && !kidDanger) {
       if (dMe < (t.fleeing ? 5 : 3.5) * T) {
-        if (!t.fleeing) { t.fleeing = true; if (!t.fled) this.emote(Math.random() < 0.5 ? '😱' : '💦'); t.fled = true; }
+        if (!t.fleeing) {
+          t.fleeing = true;
+          if (!t.fled) { this.emote(Math.random() < 0.5 ? '😱' : '💦'); this.talk('flee', [['으악! 도망가자!', 'Yikes! Run!']], 15); }
+          t.fled = true;
+        }
         const ax = Player.x - m.x, ay = Player.y - m.y, l = Math.hypot(ax, ay) || 1;
         let gx = Player.x + ax / l * 4 * T, gy = Player.y + ay / l * 4 * T;
         if (kid) { gx = (gx * 2 + kid.x) / 3; gy = (gy * 2 + kid.y) / 3; }
@@ -4631,7 +4954,7 @@ const Buddy = {
       Player.swingT = 0.25;
       t.nextSwing = performance.now() + randFloat(350, 650); // 사람처럼 휘두르는 틈
       Sfx.swing();
-      Monsters.attack();
+      if (Math.random() > 0.15) Monsters.attack(); // 가끔 헛손질
       // 센 몬스터는 치고 빠지기
       if (strong && Math.random() < 0.5) this.backT = randFloat(0.3, 0.5);
     }
@@ -4713,6 +5036,214 @@ const Buddy = {
     return list[Math.floor(Math.random() * list.length)] || null;
   },
 
+  // ---------- 아이 따라 하기 / 반응 ----------
+  // 말하기 (같은 말은 cool 초 동안 다시 하지 않는다). 내 기기에서는 읽지 않고, 아이 기기에서 읽어 준다
+  talk(key, lines, cool = 12) {
+    const now = performance.now();
+    if ((this.said[key] || 0) > now) return;
+    this.said[key] = now + cool * 1000;
+    const [ko, en] = lines[Math.floor(Math.random() * lines.length)];
+    Social.say(tr(ko, en), false);
+  },
+
+  // 아이가 한 일을 알아보고 반응한다: 카드를 끝냄, 동물을 꼬심, 몬스터를 잡음, 캐기, 놓기
+  watch(f) {
+    const now = performance.now();
+    if (now < this.watchFrom) {
+      this.kidPets = null;
+      this.nearIds = null;
+      this.lastSt = f.st;
+      return;
+    }
+    if (this.lastSt === 'card' && f.st === 'play') this.react('card', f);
+    this.lastSt = f.st;
+    // 아이를 따라가는 동물이 새로 생김 (내가 준 것은 빼고)
+    const pets = Monsters.list.filter(m => m.owner === f.sid);
+    if (this.kidPets) for (const m of pets) if (!this.kidPets.has(m.id) && !this.gifted.has(m.id)) this.react('tame', f);
+    this.kidPets = new Set(pets.map(m => m.id));
+    // 아이 곁 몬스터가 없어짐 → 아이가 잡았다 (내가 잡은 것이 아니면)
+    const near = Monsters.list.filter(m => !m.def.calm && !m.owner && this.dist(m, f) < 3 * T);
+    if (this.nearIds) for (const id of this.nearIds) if (!Monsters.list.some(m => m.id === id)) this.killCheck = now + 1200;
+    this.nearIds = new Set(near.map(m => m.id));
+    if (this.killCheck && now > this.killCheck) {
+      this.killCheck = 0;
+      if (now - this.lastKill > 2500) this.react('kill', f);
+    }
+    // 아이 곁에서 칸이 바뀜 (내가 바꾼 것은 빼고)
+    for (const ch of World.recent) {
+      if (ch.seen) continue;
+      ch.seen = true;
+      if (ch.mine || ch.at < this.watchFrom || now - ch.at > 3000) continue;
+      const x = ch.i % World.w, y = Math.floor(ch.i / World.w);
+      if (Math.hypot(x * T + T / 2 - f.x, y * T + T / 2 - f.y) > 2.5 * T) continue;
+      const placed = Object.keys(ITEMS).find(id => ITEMS[id].tile && TILE[ITEMS[id].tile] === ch.to);
+      if (placed && (ch.from === TILE.GRASS || ch.from === TILE.SAND || ch.from === TILE.WATER)) this.react('place', f, { x, y, block: placed });
+      else if (ch.from === TILE.TREE || ch.from === TILE.ROCK) this.react('dig', f, { x, y, tile: ch.from });
+      else if (ch.from === TILE.FLOWER) this.react('flower', f);
+    }
+  },
+
+  react(kind, f, at) {
+    const t = this.task;
+    if (t && ['hunt', 'tag', 'hide', 'eat'].includes(t.kind)) return;
+    const now = performance.now();
+    if ((this.reactAt[kind] || 0) > now) return;
+    this.reactAt[kind] = now + { card: 3, tame: 5, kill: 5, dig: 20, place: 12, flower: 25 }[kind] * 1000;
+    const lines = {
+      card: [['잘했어!', 'Great job!'], ['우와! 잘 읽네!', 'Great reading!']],
+      tame: [['우와! 귀엽다!', 'So cute!'], ['친구 생겼네!', 'A new friend!']],
+      kill: [['최고야!', 'Awesome!'], ['멋지다!', 'Cool!']],
+      dig: [['같이 캐자!', "Let's dig!"], ['나도 도와줄게!', "I'll help!"]],
+      place: [['멋지다!', 'Nice!'], ['나도 놓을래!', 'Me too!']],
+      flower: [['꽃 예쁘다!', 'Pretty flower!']],
+    }[kind];
+    this.talk(kind, lines, 4);
+    this.emote({ card: '👏', tame: '🎉', kill: '👍', dig: '💪', place: '👏', flower: '🌷' }[kind]);
+    Social.jump();
+    if (kind === 'dig') {
+      // 같은 것을 아이 곁에서 하나 캐 준다
+      const spot = this.findTile(f, [at.tile], 4, true);
+      if (spot) { this.start('gather', { tx: spot.x, ty: spot.y, tile: at.tile }, 12); return; }
+    }
+    if (kind === 'place' && Game.inventory[at.block] > 0) {
+      // 아이가 놓은 것 옆에 이어서 놓는다 (방금 놓은 두 칸이 이어지는 쪽으로)
+      const last = this.kidPlaced;
+      this.kidPlaced = { x: at.x, y: at.y };
+      const dirs = last && Math.abs(last.x - at.x) + Math.abs(last.y - at.y) === 1 ? [[at.x - last.x, at.y - last.y]] : [];
+      dirs.push(...[[1, 0], [-1, 0], [0, 1], [0, -1]].sort(() => Math.random() - 0.5));
+      for (const [dx, dy] of dirs) {
+        const x = at.x + dx, y = at.y + dy;
+        if (Math.floor(f.x / T) === x && Math.floor(f.y / T) === y) continue;
+        if (!this.canPlaceAt(at.block, x, y)) continue;
+        const stand = this.standNear(x, y);
+        if (stand) { this.start('build', { block: at.block, left: 1, target: { x, y }, stand, project: true, cell: { tries: 0 } }, 10); return; }
+      }
+    }
+    if (kind !== 'flower') this.start('cheer', {}, 2.5);
+  },
+
+  // 아이 곁으로 가서 콩콩 (박수)
+  cheer(t) {
+    const f = this.friend();
+    if (!f) { this.done(); return; }
+    if (this.dist(f, Player) < 1.8 * T || this.goTo(f.x, f.y, 1.4 * T)) {
+      this.vec = { x: 0, y: 0 };
+      this.face(f.x, f.y);
+      if (Player.jumpT <= 0 && !t.again) { t.again = true; Social.jump(); }
+    }
+  },
+
+  onKill() {
+    this.lastKill = performance.now();
+    this.emote('👍');
+    this.talk('win', [['물리쳤다!', 'Got it!'], ['이제 괜찮아!', "You're safe!"]], 10);
+  },
+
+  // ---------- 술래잡기: 아이가 때리면 "아야!" 하고 도망, 또 맞으면 이번엔 내가 잡으러 간다 ----------
+  onHit(from) {
+    const f = this.friend();
+    if (!f || from.sid !== f.sid) return;
+    const t = this.task;
+    if (t && t.kind === 'hunt') return;
+    if (t && t.kind === 'tag' && t.phase === 'run') {
+      this.emote('😵');
+      Social.say(tr('잡혔다! 이번엔 내가 잡는다!', 'You got me! My turn!'), false);
+      t.phase = 'chase';
+      t.until = performance.now() + 8000;
+      return;
+    }
+    if (t && t.kind === 'tag') return;
+    this.emote('😆');
+    Social.say(tr('아야! 잡아 봐라~', 'Ouch! Catch me~'), false);
+    Social.jump();
+    this.start('tag', { phase: 'run', ang: Math.random() < 0.5 ? 0.7 : -0.7 }, 10);
+  },
+
+  tag(t) {
+    const f = this.friend();
+    if (!f) { this.done(); return; }
+    const d = this.dist(f, Player);
+    if (t.phase === 'run') {
+      // 아이에게서 3~5칸을 두고 둘레를 돌며 도망 (너무 멀리는 안 간다)
+      if (d < 3.5 * T) {
+        const a = Math.atan2(Player.y - f.y, Player.x - f.x) + t.ang;
+        this.goTo(f.x + Math.cos(a) * 4.5 * T, f.y + Math.sin(a) * 4.5 * T, 8);
+      } else {
+        this.vec = { x: 0, y: 0 };
+        this.face(f.x, f.y);
+        if (Player.emoteT <= 0) this.emote(Math.random() < 0.5 ? '😝' : '😆');
+      }
+      return;
+    }
+    // 내가 술래: 따라가서 닿으면 잡았다 (때리지 않는다)
+    if (this.goTo(f.x, f.y, 0.9 * T)) {
+      Social.say(tr('잡았다!', 'Got you!'), false);
+      Social.jump();
+      this.done('🙌');
+    }
+  },
+
+  // ---------- 숨바꼭질: 지어 둔 미로 안쪽에 숨어서 기다린다 ----------
+  hide(t) {
+    const f = this.friend();
+    if (!f) { this.done(); return; }
+    if (!t.spot) {
+      const plan = BUDDY_PROJECTS.maze.plan, mz = t.maze;
+      let best = null;
+      for (let y = 1; y < plan.length - 1; y++) {
+        for (let x = 1; x < plan[0].length - 1; x++) {
+          if (plan[y][x] !== '.' || !this.walkable(mz.ox + x, mz.oy + y)) continue;
+          const far = Math.abs(x - 1) + y; // 입구(위 왼쪽)에서 먼 곳
+          if (!best || far > best.far) best = { x: mz.ox + x, y: mz.oy + y, far };
+        }
+      }
+      if (!best) { this.done(); return; }
+      t.spot = best;
+      Social.say(tr('숨바꼭질 하자! 미로에서 찾아봐~', 'Hide and seek! Find me in the maze~'), false);
+    }
+    if (!t.hidden) {
+      if (this.goTo(t.spot.x * T + T / 2, t.spot.y * T + T / 2, 4)) { t.hidden = true; this.emote('🤫'); }
+      return;
+    }
+    this.vec = { x: 0, y: 0 };
+    if (this.dist(f, Player) < 1.4 * T) {
+      Social.say(tr('찾았다! 잘 찾네!', 'You found me!'), false);
+      Social.jump();
+      this.done('🎉');
+    }
+  },
+
+  // ---------- 선물: 따라오는 동물이나 꽃/먹이를 아이에게 ----------
+  gift(t) {
+    const f = this.friend();
+    if (!f) { this.done(); return; }
+    if (this.dist(f, Player) > 2 * T) { this.goTo(f.x, f.y, 1.5 * T); return; } // 2칸 안이면 준다
+    this.vec = { x: 0, y: 0 };
+    this.face(f.x, f.y);
+    if (t.pet) {
+      const m = Social.givePet(f);
+      if (m) this.gifted.add(m.id);
+    } else if (Game.inventory[t.item] > 0) {
+      this.hold(t.item);
+      Social.give(f);
+    }
+    Social.say(tr('선물이야!', 'For you!'), false);
+    Social.jump();
+    this.done('🎁');
+  },
+
+  // 하트가 아이보다 적을 때: 떨어진 하트/먹이를 하나 주우러 간다
+  eat(t) {
+    const it = t.it;
+    if (!Items.list.includes(it)) { this.done('😋'); this.talk('yum', [['냠냠!', 'Yum!']], 5); return; }
+    this.goTo(it.x, it.y, 3);
+  },
+
+  // 내가 주워도 되는 것: 하트가 아이보다 적고, 지금 그걸 주우러 가는 중일 때만
+  mayTake(it) {
+    return !!(this.task && this.task.kind === 'eat' && this.task.it === it);
+  },
+
   // 떨어진 것 옆에 가서 아이를 보며 👉 (아이가 주우면 😄)
   show(t) {
     const it = t.it, f = this.friend();
@@ -4726,6 +5257,6 @@ const Buddy = {
 };
 
 // 콘솔 디버깅용: BC.Judge.judge('나무', ['나모']), BC.Game.enterHome() 등
-window.BC = { CONFIG, Store, Words, Judge, Speech, Card, Craft, World, Items, Monsters, Player, Multi, Game, Buddy };
+window.BC = { CONFIG, Store, Words, Judge, Speech, Card, Craft, World, Items, Monsters, Player, Multi, Game, Buddy, Social };
 
 Game.init();

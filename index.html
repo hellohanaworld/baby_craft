@@ -8,7 +8,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <link rel="manifest" href="manifest.json">
   <title>Baby Craft</title>
-  <link rel="stylesheet" href="style.css?v=31">
+  <link rel="stylesheet" href="style.css?v=32">
 </head>
 <body>
   <canvas id="game"></canvas>
@@ -51,8 +51,11 @@
     </div>
     <button id="btn-action" class="big-btn" aria-label="action">✋</button>
     <button id="btn-weapon" class="big-btn hidden" aria-label="choose weapon">✋</button>
+    <button id="btn-jump" class="big-btn side-btn" aria-label="jump">🦘</button>
+    <button id="btn-talk" class="big-btn side-btn" aria-label="talk">💬</button>
   </div>
   <div id="weapon-picker" class="weapon-picker hidden"></div>
+  <div id="talk-panel" class="weapon-picker talk-panel hidden"></div>
 
   <div id="toast-layer"></div>
 
@@ -112,6 +115,6 @@
     <p id="title-msg" class="msg"></p>
   </div>
 
-  <script src="game.js?v=44"></script>
+  <script src="game.js?v=46"></script>
 </body>
 </html>
