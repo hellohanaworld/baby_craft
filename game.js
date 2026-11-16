@@ -62,6 +62,7 @@ const CONFIG = {
   NET_SEND_MS: 100,       // 상태를 보내는 간격
   NET_EVENT_KEEP_MS: 3000, // 줍기/때리기 같은 이벤트를 이 시간 동안 계속 실어 보낸다
   NET_TIMEOUT_MS: 8000,   // 이 시간 동안 소식이 없으면 그 사람이 나간 것으로 본다
+  HOST_STALE_MS: 15000,   // 모두 한 방: 방장 소식(몬스터)이 이만큼 멈추면 (잠든 폰 등) 손님이 방장을 넘겨받는다
   NAME_MAX: 8,
 
   // 읽기 판정
@@ -269,7 +270,7 @@ function itemNames(def) {
 // Store — localStorage 래퍼 (기기 안에만 저장)
 // ============================================================
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
-const NET_URL = './net.js?v=23';
+const NET_URL = './net.js?v=25';
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -2629,16 +2630,32 @@ const Multi = {
     const last = Store.get(KEYS.room, {}) || {};
     this.shared = strict;
     const kept = strict ? await Net.loadWorld(want) : null;
+    if (kept && !kept.world && Object.keys(kept.tiles).length) {
+      // 세상은 안 적혀 있지만 방에 맵이 있다 (예전 버전 방장에게서 넘겨받음): 그 방장의 시드와 바뀐 칸으로
+      const h = await Net.peek(want);
+      if (h && Number.isInteger(h.seed)) kept.world = { seed: h.seed, w: World.w };
+    }
     if (kept && kept.world && Number.isInteger(kept.world.seed)) this.useRoomWorld(kept.world, kept.tiles);
     this.net = await Net.host(Game.seed, this.sid, want || last.host, this.roomKey(), strict);
     Store.set(KEYS.room, { ...last, host: this.net.code });
     Session.set({ mode: 'host', code: this.net.code });
     this.mode = 'host';
     if (!(kept && kept.world)) await this.uploadWorld(strict);
+    else this.saveRoomWorld();
     this.listen();
     // 옛 연결이 늦게 방을 지웠으면 다시 연다 (바뀐 칸, 아이템도 다시 올린다)
     this.net.onRoom(async h => {
-      if (h || this.mode !== 'host') return;
+      if (this.mode !== 'host') return;
+      if (h && strict && h.key !== this.roomKey()) {
+        // 내가 멈춘 사이에 다른 사람이 방장을 넘겨받았다: 다시 불러와서 손님으로 들어간다
+        console.log('[Multi] 다른 사람이 방장이 됨 → 손님으로');
+        this.mode = 'guest'; // 더 이상 몬스터를 보내지 않는다
+        await this.net.release().catch(() => {});
+        Game.writeSave();
+        location.reload();
+        return;
+      }
+      if (h) return;
       console.log('[Multi] 방이 지워져서 다시 연다', this.net.code);
       await this.net.reopen();
       await this.uploadWorld(strict);
@@ -2704,7 +2721,10 @@ const Multi = {
     this.listen();
     this.net.onWorld(w => this.onWorld(w));
     this.net.onItems(list => this.onItems(list));
-    this.net.onRoom(h => (h ? this.onRoomBack(h) : this.onRoomGone()));
+    this.net.onRoom(h => {
+      if (h) { this.hostKey = h.key; this.worldAt = performance.now(); }
+      return h ? this.onRoomBack(h) : this.onRoomGone();
+    });
     Store.set(KEYS.room, { ...(Store.get(KEYS.room, {}) || {}), join: code });
     Session.set({ mode: 'guest', code });
     this.showBadge(code);
@@ -2719,6 +2739,7 @@ const Multi = {
   // 모두 한 방: 열려 있으면 들어가고, 없으면 (또는 내가 새로고침하기 전에 열었던 방이면) 내가 연다
   async startShared() {
     const Net = await import(NET_URL);
+    this.shared = true;
     for (let i = 0; i < 4; i++) {
       const h = await Net.peek(ONE_ROOM);
       try {
@@ -2814,6 +2835,7 @@ const Multi = {
       p.sayT = Math.max(0, (p.sayT || 0) - dt);
       if (p.seen && now - p.lastSeen > CONFIG.NET_TIMEOUT_MS) this.timeout(p);
     }
+    if (this.isGuest && this.shared) this.watchHost(now);
     if (this.isGuest) {
       for (const m of Monsters.list) {
         followRemote(m, dt);
@@ -2828,6 +2850,24 @@ const Multi = {
     const fail = err => console.warn('[Multi] 전송 실패', err);
     this.net.sendMe(this.myPacket()).catch(fail);
     if (this.isHost) this.sendWorld().catch(fail);
+  },
+
+  // 손님: 방장 소식이 HOST_STALE_MS 동안 없으면 (방장 폰이 잠들었는데 연결만 남은 경우) 내가 방장을 넘겨받는다.
+  // 내 기기가 잠들었다 깬 거면 (틱 사이가 길면) 처음부터 다시 잰다
+  watchHost(now) {
+    if (now - (this.lastTickAt || now) > 3000 || !this.worldAt) this.worldAt = now;
+    this.lastTickAt = now;
+    if (this.roomGone || this.takingOver || !this.hostKey || now - this.worldAt < CONFIG.HOST_STALE_MS) return;
+    this.takingOver = true;
+    console.log('[Multi] 방장이 멈춤 → 넘겨받기');
+    import(NET_URL)
+      .then(Net => Net.takeOver(this.net.code, this.hostKey, this.roomKey()))
+      .then(ok => {
+        if (!ok) { this.takingOver = false; this.worldAt = performance.now(); return; }
+        Game.writeSave();
+        location.reload(); // 새로 불러오면 내 방(같은 key)이라 방장으로 연다
+      })
+      .catch(err => { this.takingOver = false; this.worldAt = performance.now(); console.warn('[Multi] 넘겨받기 실패', err); });
   },
 
   leave(sid) {
@@ -2991,6 +3031,7 @@ const Multi = {
   // ---------- guest: 몬스터 + 아이템 받기 ----------
   onWorld(w) {
     if (!w) return;
+    this.worldAt = performance.now();
     const seen = new Set();
     const hadBoss = !!Monsters.boss;
     for (const [id, type, x, y, hp, face, hit, owner, hop, emote] of (w.m || []).filter(Boolean)) {

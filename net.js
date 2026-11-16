@@ -57,7 +57,9 @@ export async function host(seed, sid, want, key, strict = false) {
       await set(path(code, 'host'), { seed, key, t: serverTimestamp() });
       bye();
     };
-    return { ...room(code, seed, sid), reopen };
+    // 다른 사람이 방장을 넘겨받았다: 내가 나갈 때 그 사람의 방장 자리를 지우지 않게
+    const release = () => Promise.all(['host', 'w', 'items'].map(k => onDisconnect(path(code, k)).cancel()));
+    return { ...room(code, seed, sid), reopen, release };
   }
   if (/^[0-9]{4}$/.test(want || '')) {
     for (let i = 0; i < 6 && !code; i++) {
@@ -94,6 +96,13 @@ export async function saveBag(name, bag) {
 export async function peek(code) {
   await connect();
   return (await get(path(code, 'host'))).val();
+}
+
+// 방장이 멈췄다 (잠든 폰 등): 방장이 아직 oldKey 이면 내가 방장 자리를 차지한다. 됐으면 true
+export async function takeOver(code, oldKey, key) {
+  await connect();
+  const res = await runTransaction(path(code, 'host'), cur => (cur && cur.key === oldKey ? { ...cur, key, t: Date.now() } : undefined));
+  return res.committed;
 }
 
 // 방에 남아 있는 세상: { world: { seed, w, s }, tiles: { 칸: 값 } } (없으면 world 가 null)
