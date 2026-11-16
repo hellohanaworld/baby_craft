@@ -254,7 +254,7 @@ function itemNames(def) {
 // Store — localStorage 래퍼 (기기 안에만 저장)
 // ============================================================
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
-const NET_URL = './net.js?v=20';
+const NET_URL = './net.js?v=21';
 
 // 이 탭에서 하던 여럿이 하기 { mode: 'host'|'guest', code }. 새로고침하면 시작 화면 없이 그 방으로 저절로 다시 간다.
 // sessionStorage 라 창을 닫았다 새로 열면 지워져서 시작 화면이 나온다
@@ -2255,13 +2255,23 @@ const Multi = {
   async startHost() {
     const Net = await import(NET_URL);
     const last = Store.get(KEYS.room, {}) || {};
-    this.net = await Net.host(Game.seed, this.sid, last.host);
-    Store.set(KEYS.room, { ...last, host: this.net.code });
+    // key: 이 기기 표시 (새로고침해도 내 방 번호를 다시 쓸 수 있게)
+    const key = last.key || Math.random().toString(36).slice(2, 10);
+    this.net = await Net.host(Game.seed, this.sid, last.host, key);
+    Store.set(KEYS.room, { ...last, key, host: this.net.code });
     Session.set({ mode: 'host', code: this.net.code });
     const edits = World.edits();
     if (Object.keys(edits).length) await this.net.putTiles(edits);
     this.mode = 'host';
     this.listen();
+    // 옛 연결이 늦게 방을 지웠으면 다시 연다 (바뀐 칸, 아이템도 다시 올린다)
+    this.net.onRoom(async h => {
+      if (h || this.mode !== 'host') return;
+      console.log('[Multi] 방이 지워져서 다시 연다', this.net.code);
+      await this.net.reopen();
+      await this.net.putTiles(World.edits());
+      this.itemsVersion = -1;
+    });
     this.showBadge(this.net.code);
     console.log('[Multi] 방 만들기', this.net.code);
   },
@@ -4117,6 +4127,9 @@ const Buddy = {
   thinkT: 0,
   chatT: 3,
   restT: 0, // 일 하나를 끝내고 잠깐 따라다니기만 하는 시간
+  backT: 0, // 맞거나 때린 뒤 잠깐 물러서는 시간
+  friendHit: false,
+  meHit: false,
   path: [],
   pathKey: '',
   pathT: 0,
@@ -4159,7 +4172,12 @@ const Buddy = {
     this.vec = { x: 0, y: 0 };
     if (Game.state !== 'play') return;
     const f = this.friend();
-    if (f && f.hitT > 0 && this.dist(f, Player) < 8 * T && (!this.task || this.task.kind !== 'hunt')) { this.emote('😮'); this.thinkT = 0; }
+    if (f && f.hitT > 0 && !this.friendHit && this.dist(f, Player) < 10 * T) { this.emote('😠'); this.thinkT = 0; }
+    this.friendHit = !!(f && f.hitT > 0);
+    // 내가 맞았다: 잠깐 물러선다 (사람처럼)
+    if (Player.hitT > 0 && !this.meHit) this.backT = randFloat(0.4, 0.8);
+    this.meHit = Player.hitT > 0;
+    this.backT -= dt;
     this.thinkT -= dt;
     this.restT -= dt;
     if (this.thinkT <= 0) { this.thinkT = 0.4; this.think(); }
@@ -4170,7 +4188,7 @@ const Buddy = {
     this.chatT -= dt;
     if (this.chatT <= 0) {
       this.chatT = randFloat(5, 9);
-      if (f && this.dist(f, Player) < 4 * T) this.emote(['😊', '👋', '🎵', '😆', '👍'][Math.floor(Math.random() * 5)]);
+      if (f && this.dist(f, Player) < 4 * T && !(this.task && this.task.kind === 'hunt')) this.emote(['😊', '👋', '🎵', '😆', '👍'][Math.floor(Math.random() * 5)]);
     }
   },
 
@@ -4191,11 +4209,17 @@ const Buddy = {
   think() {
     const a = this.anchor(), me = Player;
     const t = this.task;
-    const threat = Monsters.list
-      .filter(m => !m.def.calm && !m.owner && (this.dist(m, a) < 6 * T || this.dist(m, me) < 4 * T))
-      .sort((x, y) => this.dist(x, me) - this.dist(y, me))[0];
+    // 위험: 아이 둘레 몬스터가 먼저 (아이에게 가까운 순), 그다음 나를 쫓는 몬스터
+    // (아이에게 가는 길에는 바로 붙은 것만 상대한다)
+    const near = this.dist(a, me) < 8 * T ? 4 : 2;
+    const threats = Monsters.list.filter(m => !m.def.calm && !m.owner && (this.dist(m, a) < 6 * T || this.dist(m, me) < near * T));
+    const threat = threats.sort((x, y) => this.dist(x, a) - this.dist(y, a))[0];
     if (threat) {
-      if (!t || t.kind !== 'hunt') { this.start('hunt', { m: threat }, 15); this.emote(Math.random() < 0.5 ? '💪' : '⚔️'); }
+      if (!t || t.kind !== 'hunt' || (t.m !== threat && this.dist(threat, a) < this.dist(t.m, a) - T)) {
+        const guard = a !== this.home && this.dist(threat, a) < this.dist(threat, me);
+        this.start('hunt', { m: threat }, 20);
+        this.emote(guard ? '🛡️' : Math.random() < 0.5 ? '💪' : '⚔️');
+      }
       return;
     }
     if (t && t.kind !== 'follow') return;
@@ -4280,13 +4304,13 @@ const Buddy = {
     return false;
   },
 
-  // 너비 우선 길 찾기 (최대 2000칸). 못 찾으면 [] → 곧장 간다
+  // 너비 우선 길 찾기 (맵 전체). 못 찾으면 [] → 곧장 간다
   findPath(sx, sy, gx, gy) {
     if (sx === gx && sy === gy) return [];
     const W = World.w, prev = new Map(), q = [[sx, sy]];
     prev.set(sy * W + sx, -1);
     const goalOk = !BLOCKING.has(World.tile(gx, gy));
-    for (let qi = 0; qi < q.length && qi < 2000; qi++) {
+    for (let qi = 0; qi < q.length; qi++) {
       const [x, y] = q[qi];
       for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
         const nx = x + dx, ny = y + dy, k = ny * W + nx;
@@ -4339,18 +4363,72 @@ const Buddy = {
     }
   },
 
+  // 싸우기: 아이를 노리는 몬스터는 아이와 몬스터 사이로 끼어들어 막는다 (🛡️).
+  // 사람처럼: 휘두르는 틈을 두고, 맞으면 잠깐 물러서고, 하트가 적으면 도망친다 (아이가 바로 위험하면 그래도 싸운다)
   hunt(t) {
-    const m = t.m;
-    if (!Monsters.list.includes(m) || this.dist(m, this.anchor()) > 10 * T) { this.done(Monsters.list.includes(m) ? '' : '👍'); return; }
+    const m = t.m, a = this.anchor(), kid = a !== this.home ? a : null;
+    if (!Monsters.list.includes(m) || (this.dist(m, a) > 10 * T && this.dist(m, Player) > 5 * T)) {
+      if (Monsters.list.includes(m)) { this.done(); return; }
+      this.done(kid && this.dist(kid, Player) < 6 * T ? (Math.random() < 0.5 ? '👍' : '😎') : '👍');
+      if (kid) this.start('follow', { spot: null }, 3); // 이겼으면 아이 곁으로 돌아가 뽐내기
+      return;
+    }
     this.hold(Game.lastWeapon);
+    const dMe = this.dist(m, Player), dKid = kid ? this.dist(m, kid) : Infinity;
+    const kidDanger = dKid < 2.2 * T;
+    const strong = m.def.boss || Game.hearts <= 2;
+
+    // 하트가 적으면 (용은 3개 이하): 아이가 당장 위험할 때만 싸운다.
+    // 몬스터가 가까우면 반대쪽 (가능하면 아이 쪽)으로 도망치고, 떨어지면 아이 곁에서 몬스터를 지켜본다
+    if (Game.hearts <= (m.def.boss ? 3 : 2) && !kidDanger) {
+      if (dMe < (t.fleeing ? 5 : 3.5) * T) {
+        if (!t.fleeing) { t.fleeing = true; if (!t.fled) this.emote(Math.random() < 0.5 ? '😱' : '💦'); t.fled = true; }
+        const ax = Player.x - m.x, ay = Player.y - m.y, l = Math.hypot(ax, ay) || 1;
+        let gx = Player.x + ax / l * 4 * T, gy = Player.y + ay / l * 4 * T;
+        if (kid) { gx = (gx * 2 + kid.x) / 3; gy = (gy * 2 + kid.y) / 3; }
+        this.goTo(gx, gy, 6);
+        return;
+      }
+      t.fleeing = false;
+      const c = kid || this.home, ax = c.x - m.x, ay = c.y - m.y, l = Math.hypot(ax, ay) || 1;
+      if (this.goTo(c.x + ax / l * 0.9 * T, c.y + ay / l * 0.9 * T, 8)) this.vec = { x: 0, y: 0 };
+      this.face(m.x, m.y);
+      return;
+    }
+    t.fleeing = false;
+
+    // 맞았거나 방금 때렸으면 잠깐 물러섰다가 다시
+    if (this.backT > 0 && !kidDanger) {
+      const ax = Player.x - m.x, ay = Player.y - m.y, l = Math.hypot(ax, ay) || 1;
+      this.vec = { x: ax / l, y: ay / l };
+      this.face(m.x, m.y);
+      return;
+    }
+
+    // 닿으면 먼저 친다
     this.face(m.x, m.y);
     const [fx, fy] = FACING[Player.dir];
     const reach = Math.hypot(m.x - (Player.x + fx * 0.5 * T), m.y - (Player.y + fy * 0.5 * T)) < CONFIG.ATTACK_RANGE * T + Monsters.radius(m) - 2;
-    if (!reach) { this.goTo(m.x, m.y, 4); return; }
-    if (Player.swingT <= 0.1) {
+    if (!reach) {
+      // 아이를 노리는데 아직 아이와 거리가 있고 내가 더 멀다: 아이 앞(몬스터 쪽)에 막아선다. 가까우면 곧장 달려든다
+      if (kid && dKid < dMe && dKid > 2.5 * T) {
+        if (!t.guarded) { t.guarded = true; this.emote('🛡️'); }
+        const gx = kid.x - m.x, gy = kid.y - m.y, l = Math.hypot(gx, gy) || 1;
+        const k = Math.min(1.6 * T, l * 0.6);
+        if (this.goTo(kid.x - gx / l * k, kid.y - gy / l * k, 6)) this.vec = { x: 0, y: 0 }; // 자리 잡고 기다린다
+        return;
+      }
+      if (kid && kidDanger && !t.guarded) { t.guarded = true; this.emote('🛡️'); }
+      this.goTo(m.x, m.y, 4);
+      return;
+    }
+    if (Player.swingT <= 0 && performance.now() > (t.nextSwing || 0)) {
       Player.swingT = 0.25;
+      t.nextSwing = performance.now() + randFloat(350, 650); // 사람처럼 휘두르는 틈
       Sfx.swing();
       Monsters.attack();
+      // 센 몬스터는 치고 빠지기
+      if (strong && Math.random() < 0.5) this.backT = randFloat(0.3, 0.5);
     }
   },
 

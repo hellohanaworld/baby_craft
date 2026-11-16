@@ -39,18 +39,29 @@ async function connect() {
 
 const path = (code, key) => ref(db, `rooms/${code}/${key}`);
 
-// 방 만들기: 빈 번호를 골라 방을 만든다 (want: 지난번 번호. 비어 있으면 그 번호로). 방장 창이 닫히면 방 전체를 지운다
-export async function host(seed, sid, want) {
+// 방 만들기: 빈 번호를 골라 방을 만든다 (want: 지난번 번호. 비어 있으면 그 번호로). 방장 창이 닫히면 방 전체를 지운다.
+// key: 이 기기 표시. 새로고침 직후 옛 방이 아직 안 지워졌으면 (내 방이면) 지워질 때까지 잠깐 기다렸다가 같은 번호를 다시 쓴다
+export async function host(seed, sid, want, key) {
   await connect();
   let code = null;
-  if (/^[0-9]{4}$/.test(want || '') && !(await get(path(want, 'host'))).exists()) code = want;
+  if (/^[0-9]{4}$/.test(want || '')) {
+    for (let i = 0; i < 6 && !code; i++) {
+      const h = (await get(path(want, 'host'))).val();
+      if (!h || i === 5) code = want; // 3초가 지나도 남아 있으면 (갑자기 꺼진 옛 연결) 그냥 다시 쓴다
+      else if (h.key !== key) break; // 다른 사람 방
+      else await new Promise(res => setTimeout(res, 500));
+    }
+  }
   for (let i = 0; !code && i < 10; i++) {
     const c = String(1000 + Math.floor(Math.random() * 9000));
     if (!(await get(path(c, 'host'))).exists() || i === 9) code = c;
   }
-  await set(path(code, 'host'), { seed, t: serverTimestamp() });
-  onDisconnect(ref(db, `rooms/${code}`)).remove();
-  return room(code, seed, sid);
+  const open = async () => {
+    await set(path(code, 'host'), { seed, key, t: serverTimestamp() });
+    onDisconnect(ref(db, `rooms/${code}`)).remove();
+  };
+  await open();
+  return { ...room(code, seed, sid), reopen: open };
 }
 
 // 캐릭터 이름별 가방: 없으면 null
