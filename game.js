@@ -102,10 +102,6 @@ const ITEMS = {
   tree:   { emoji: '🌳', ko: '나무', en: 'tree',    kind: 'block', tile: 'TREE',   weight: 0 },
   flower: { emoji: '🌷', ko: '꽃',   en: 'flower',  kind: 'block', tile: 'FLOWER', weight: 0 },
   rock:   { emoji: '🪨', ko: '바위', en: 'boulder', kind: 'block', tile: 'ROCK',   weight: 0 },
-  // 땅: 캐면 흙이 남는다. 흙/풀밭/모래 위에 놓는다 (물은 길을 막는다)
-  grass:  { emoji: '🌱', ko: '풀',   en: 'grass',   kind: 'block', tile: 'GRASS',  weight: 0 },
-  sand:   { emoji: '🏖️', ko: '모래', en: 'sand',    kind: 'block', tile: 'SAND',   weight: 0 },
-  water:  { emoji: '💧', ko: '물',   en: 'water',   kind: 'block', tile: 'WATER',  weight: 0 },
   // 제작대에서 만드는 블록
   brick:  { emoji: '🧱', ko: '벽돌', en: 'brick',   kind: 'block', tile: 'BRICK',  weight: 0 },
   gate:   { emoji: '🚪', ko: '문',   en: 'door',    kind: 'block', tile: 'GATE',   weight: 0 }, // 사람은 지나가고 몬스터는 못 지나간다
@@ -1241,13 +1237,17 @@ const DIG = {
   [TILE.GATE]: { gives: ['gate'], hand: 'TREE_HITS', tool: 1, tools: ['axe'] },
   [TILE.BRIDGE]: { gives: ['bridge'], hand: 1, after: TILE.WATER },
   [TILE.TORCH]: { gives: ['torch'], hand: 1 },
-  // 땅 (풀밭, 모래, 물): 캐면 흙(PATH)이 남는다. 흙은 캐지 않는다
-  [TILE.GRASS]: { gives: ['grass'], hand: 3, tool: 1, tools: ['axe', 'sword'], after: TILE.PATH, ground: true },
-  [TILE.SAND]: { gives: ['sand'], hand: 2, tool: 1, tools: ['axe', 'sword'], after: TILE.PATH, ground: true },
-  [TILE.WATER]: { gives: ['water'], hand: 2, tool: 1, tools: ['axe', 'sword'], after: TILE.PATH, ground: true },
 };
-// 땅 블록: 이 위에 다른 블록을 놓을 수 있다
-const PLACE_ON = new Set([TILE.GRASS, TILE.SAND, TILE.PATH]);
+// 땅 (풀밭, 모래, 물, 흙 길): 움직일 수 없다. 캐지도 못하고 아이템도 안 나온다. 블록은 풀밭/모래 위에만 놓는다
+const PLACE_ON = new Set([TILE.GRASS, TILE.SAND]);
+const LAND = new Set([TILE.GRASS, TILE.SAND, TILE.WATER, TILE.PATH]);
+// 땅이 바뀐 칸은 원래 맵대로 되돌린다 (땅을 캐고 놓던 때 바뀐 칸: 흙 자국, 옮긴 물/모래/풀)
+function fixLand(i, v) {
+  const base = World.base[i];
+  if (v === base || !LAND.has(v)) return v;
+  if (v === TILE.GRASS && !LAND.has(base)) return v; // 나무/바위/꽃을 캔 자리 (원래대로 풀밭)
+  return LAND.has(base) ? base : TILE.GRASS;
+}
 // 손에 들 수 있는 것: 무기 또는 놓을 수 있는 블록
 const holdable = id => !!WEAPONS[id] || !!(ITEMS[id] && (ITEMS[id].tile || ITEMS[id].kind === 'food'));
 const holdEmoji = id => (WEAPONS[id] || ITEMS[id] || WEAPONS.hand).emoji;
@@ -1390,7 +1390,7 @@ const World = {
   applyEdits(edits) {
     for (const [k, v] of Object.entries(edits || {})) {
       const i = Number(k);
-      if (i >= 0 && i < this.tiles.length && Number.isInteger(v) && MINI_COLORS[v]) this.tiles[i] = v;
+      if (i >= 0 && i < this.tiles.length && Number.isInteger(v) && MINI_COLORS[v]) this.tiles[i] = fixLand(i, v);
     }
     this.edited();
   },
@@ -2413,7 +2413,7 @@ const Multi = {
 
   listen() {
     this.net.onPlayers(all => this.onPlayers(all));
-    this.net.onTiles((i, v) => World.setTile(i, v));
+    this.net.onTiles((i, v) => World.setTile(i, fixLand(i, v)));
   },
 
   // 모두 한 방: 열려 있으면 들어가고, 없으면 (또는 내가 새로고침하기 전에 열었던 방이면) 내가 연다
@@ -3993,18 +3993,18 @@ const Game = {
     if (this.dig.n < need || this.busy) return;
     this.dig = { i: -1, n: 0 };
     this.busy = true;
-    // 놓았던 블록을 캐면 그 아래 원래 땅 (모래 위에 놓았으면 모래), 땅을 캐면 흙
+    // 놓았던 블록을 캐면 그 아래 원래 땅 (모래 위에 놓았으면 모래)
     const ok = await Multi.editTile(i, tt, dig.after ?? (World.base[i] === TILE.SAND ? TILE.SAND : TILE.GRASS));
     this.busy = false;
     if (ok) dig.gives.forEach(type => this.addItem(type));
   },
 
-  // 놓을 수 있는 칸: 풀밭/모래/흙이고 (땅 블록은 같은 땅 위에는 안 놓는다), 사람/몬스터/아이템이 없고, 집 문 앞이 아닌 곳
+  // 놓을 수 있는 칸: 풀밭/모래이고, 사람/몬스터/아이템이 없고, 집 문 앞이 아닌 곳
   canPlace(tx, ty) {
     if (tx <= 0 || ty <= 0 || tx >= World.w - 1 || ty >= World.h - 1) return false;
     const tt = World.tile(tx, ty), def = ITEMS[this.heldBlock], next = def && TILE[def.tile];
-    // 다리는 물 위에만, 나머지는 풀밭/모래/흙에만
-    if (next === TILE.BRIDGE ? tt !== TILE.WATER : !PLACE_ON.has(tt) || tt === next) return false;
+    // 다리는 물 위에만, 나머지는 풀밭/모래에만
+    if (next === TILE.BRIDGE ? tt !== TILE.WATER : !PLACE_ON.has(tt)) return false;
     if (tx === World.door.x && ty > World.door.y && ty <= World.door.y + 4) return false;
     const x0 = tx * T, y0 = ty * T;
     const overlaps = (x, y, r) => x + r > x0 && x - r < x0 + T && y + r > y0 && y - r < y0 + T;
@@ -5298,7 +5298,7 @@ const Buddy = {
       const x = ch.i % World.w, y = Math.floor(ch.i / World.w);
       if (Math.hypot(x * T + T / 2 - f.x, y * T + T / 2 - f.y) > 2.5 * T) continue;
       const placed = Object.keys(ITEMS).find(id => ITEMS[id].tile && TILE[ITEMS[id].tile] === ch.to);
-      if (placed && ch.to !== TILE.PATH && (PLACE_ON.has(ch.from) || ch.from === TILE.WATER)) this.react('place', f, { x, y, block: placed });
+      if (placed && (PLACE_ON.has(ch.from) || ch.from === TILE.WATER)) this.react('place', f, { x, y, block: placed });
       else if (ch.from === TILE.TREE || ch.from === TILE.ROCK) this.react('dig', f, { x, y, tile: ch.from });
       else if (ch.from === TILE.FLOWER) this.react('flower', f);
     }
