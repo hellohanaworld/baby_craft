@@ -41,9 +41,21 @@ const path = (code, key) => ref(db, `rooms/${code}/${key}`);
 
 // 방 만들기: 빈 번호를 골라 방을 만든다 (want: 지난번 번호. 비어 있으면 그 번호로). 방장 창이 닫히면 방 전체를 지운다.
 // key: 이 기기 표시. 새로고침 직후 옛 방이 아직 안 지워졌으면 (내 방이면) 지워질 때까지 잠깐 기다렸다가 같은 번호를 다시 쓴다
-export async function host(seed, sid, want, key) {
+// strict: want 번호만 쓴다. 비어 있거나 내 방(같은 key)이면 차지하고, 다른 사람이 먼저 열었으면 'taken' (동시에 열어도 한 사람만)
+export async function host(seed, sid, want, key, strict = false) {
   await connect();
   let code = null;
+  if (strict) {
+    const res = await runTransaction(path(want, 'host'), cur => (!cur || cur.key === key ? { seed, key, t: Date.now() } : undefined));
+    if (!res.committed) throw new Error('taken');
+    code = want;
+    onDisconnect(ref(db, `rooms/${code}`)).remove();
+    const reopen = async () => {
+      await set(path(code, 'host'), { seed, key, t: serverTimestamp() });
+      onDisconnect(ref(db, `rooms/${code}`)).remove();
+    };
+    return { ...room(code, seed, sid), reopen };
+  }
   if (/^[0-9]{4}$/.test(want || '')) {
     for (let i = 0; i < 6 && !code; i++) {
       const h = (await get(path(want, 'host'))).val();
@@ -73,6 +85,12 @@ export async function loadBag(name) {
 export async function saveBag(name, bag) {
   await connect();
   await set(ref(db, `bags/${name}`), bag);
+}
+
+// 방이 열려 있는지 (열려 있으면 { seed, key, t }, 없으면 null)
+export async function peek(code) {
+  await connect();
+  return (await get(path(code, 'host'))).val();
 }
 
 // 방 번호로 들어가기

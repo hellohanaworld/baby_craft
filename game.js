@@ -254,7 +254,11 @@ function itemNames(def) {
 // Store — localStorage 래퍼 (기기 안에만 저장)
 // ============================================================
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
-const NET_URL = './net.js?v=21';
+const NET_URL = './net.js?v=22';
+
+// 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
+// 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
+const ONE_ROOM = '1111';
 
 // 이 탭에서 하던 여럿이 하기 { mode: 'host'|'guest', code }. 새로고침하면 시작 화면 없이 그 방으로 저절로 다시 간다.
 // sessionStorage 라 창을 닫았다 새로 열면 지워져서 시작 화면이 나온다
@@ -2340,13 +2344,23 @@ const Multi = {
     b.classList.remove('hidden');
   },
 
-  async startHost() {
+  // key: 이 창 표시 (새로고침해도 같아서 내 방을 다시 열 수 있다. 다른 창/기기는 다르다)
+  roomKey() {
+    let key = null;
+    try { key = sessionStorage.getItem('bc.roomKey'); } catch { /* 저장 불가 */ }
+    if (!key) {
+      key = Math.random().toString(36).slice(2, 10);
+      try { sessionStorage.setItem('bc.roomKey', key); } catch { /* 저장 불가 */ }
+    }
+    return key;
+  },
+
+  // want/strict: 그 번호로만 연다 (모두 한 방)
+  async startHost(want, strict = false) {
     const Net = await import(NET_URL);
     const last = Store.get(KEYS.room, {}) || {};
-    // key: 이 기기 표시 (새로고침해도 내 방 번호를 다시 쓸 수 있게)
-    const key = last.key || Math.random().toString(36).slice(2, 10);
-    this.net = await Net.host(Game.seed, this.sid, last.host, key);
-    Store.set(KEYS.room, { ...last, key, host: this.net.code });
+    this.net = await Net.host(Game.seed, this.sid, want || last.host, this.roomKey(), strict);
+    Store.set(KEYS.room, { ...last, host: this.net.code });
     Session.set({ mode: 'host', code: this.net.code });
     const edits = World.edits();
     if (Object.keys(edits).length) await this.net.putTiles(edits);
@@ -2391,10 +2405,36 @@ const Multi = {
     this.net.onTiles((i, v) => World.setTile(i, v));
   },
 
+  // 모두 한 방: 열려 있으면 들어가고, 없으면 (또는 내가 새로고침하기 전에 열었던 방이면) 내가 연다
+  async startShared() {
+    const Net = await import(NET_URL);
+    for (let i = 0; i < 4; i++) {
+      const h = await Net.peek(ONE_ROOM);
+      try {
+        if (!h || h.key === this.roomKey()) await this.startHost(ONE_ROOM, true);
+        else await this.startGuest(ONE_ROOM);
+        Session.set({ mode: 'shared', code: ONE_ROOM });
+        return;
+      } catch (err) {
+        if (err.message !== 'taken' && err.message !== 'no-room') throw err; // 그 사이에 누가 열었거나 닫았다: 다시
+      }
+    }
+    throw new Error('busy');
+  },
+
   onRoomGone() {
     if (!this.roomGone) toast('📴');
     this.roomGone = true;
     for (const sid of [...this.peers.keys()]) this.leave(sid);
+    // 모두 한 방: 방장이 아주 나갔으면 (10초 안에 다시 안 열리면) 새로 불러와서 내가 방을 연다 (가방은 저장)
+    if (ONE_ROOM && this.isGuest) {
+      clearTimeout(this.goneTimer);
+      this.goneTimer = setTimeout(() => {
+        if (!this.roomGone) return;
+        Game.writeSave();
+        location.reload();
+      }, 10000 + Math.random() * 3000);
+    }
   },
 
   // 방장이 같은 번호로 방을 다시 열었다 (새로고침, 새 버전): 그 방장의 맵으로 다시 맞추고 이어서 논다.
@@ -3432,7 +3472,7 @@ const Game = {
     this.state = 'title';
     const btn = $('#btn-start');
     btn.disabled = false;
-    btn.addEventListener('click', () => this.start());
+    btn.addEventListener('click', () => (ONE_ROOM ? this.startShared() : this.start()));
     requestAnimationFrame(t => this.loop(t));
     this.keepAliveInBackground();
     this.initFullscreen();
@@ -3644,6 +3684,16 @@ const Game = {
     const code = new URLSearchParams(location.search).get('join') || (Store.get(KEYS.room, {}) || {}).join;
     if (/^\d{4}$/.test(code || '')) { input.value = code; panel.classList.remove('hidden'); }
     this.mpMsg = text => { msg.textContent = text; };
+    if (ONE_ROOM) {
+      // 지금은 모두 한 방: 버튼은 보이되 회색으로 누를 수 없게, ▶ 만 누르면 된다고 적어 둔다
+      for (const el of [$('#btn-multi'), $('#btn-host'), $('#btn-join'), input]) { el.disabled = true; el.classList.add('off'); }
+      input.value = ONE_ROOM;
+      panel.classList.remove('hidden');
+      panel.classList.add('one-room');
+      $('#mp-note').textContent = Store.settings.lang === 'en'
+        ? `Everyone plays together in room ${ONE_ROOM}. Just press ▶ above.`
+        : `모두 ${ONE_ROOM} 방에서 같이 놀아요. 위의 ▶ 만 누르면 돼요.`;
+    }
   },
 
   async startHost() {
@@ -3656,6 +3706,20 @@ const Game = {
       this.mpMsg('⚠️ 연결 실패');
       this.state = 'title';
       return;
+    }
+    await this.begin();
+  },
+
+  // ▶: 모두 한 방으로. 연결이 안 되면 혼자 논다
+  async startShared() {
+    if (!this.prepare()) return;
+    this.mpMsg('⏳');
+    try {
+      await Multi.startShared();
+    } catch (err) {
+      console.warn('[Multi] 한 방 연결 실패 → 혼자 하기', err);
+      Session.clear();
+      toast('📴');
     }
     await this.begin();
   },
@@ -3726,6 +3790,7 @@ const Game = {
     addEventListener('pointerdown', () => { Sfx.unlock(); Speech.unlock(); }, { once: true, capture: true });
     addEventListener('keydown', () => { Sfx.unlock(); Speech.unlock(); }, { once: true, capture: true });
     $('#mp-panel').classList.remove('hidden');
+    if (ONE_ROOM) { await this.startShared(); return; }
     if (s.mode === 'host') { await this.startHost(); return; }
     $('#mp-code').value = s.code;
     for (let i = 0; i < 40 && this.state === 'title'; i++) {
