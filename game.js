@@ -1588,6 +1588,7 @@ const Items = {
 
   // 내 캐릭터가 아이템 위에 서면 줍는다. 손님 기기는 방장에게 알리고 답을 기다린다
   pickup() {
+    if (Buddy.on && Buddy.friend()) return; // 🤝 놀아주기: 떨어진 것은 아이에게 양보한다
     const r = CONFIG.PICKUP_RADIUS * T, now = performance.now();
     for (const [id, at] of this.pending) if (now - at > 2000) this.pending.delete(id);
     for (const it of [...this.list]) {
@@ -4114,6 +4115,37 @@ const Game = {
   },
 };
 
+// 🤝 놀아주기가 아이 곁에 짓는 것. 한 줄이 맵 한 줄 (W: 벽 - 바위/벽돌/나무, T: 나무, f: 꽃, D: 문(있으면), .: 빈칸)
+const BUDDY_PROJECTS = {
+  house: { emoji: '🏠', plan: [
+    'WWWWWW',
+    'W.f..W',
+    'W..f.W',
+    'W....W',
+    'WWD.WW',
+  ] },
+  heart: { emoji: '💚', plan: [ // 하트숲: 아래 끝이 열려 있어서 안으로 들어갈 수 있다
+    '.TT.TT.',
+    'T..T..T',
+    'T.f.f.T',
+    '.T.f.T.',
+    '..T.T..',
+  ] },
+  maze: { emoji: '🌀', plan: [ // 위 왼쪽으로 들어가서 아래 오른쪽으로 나온다
+    'W.WWWWW',
+    'W...W.W',
+    'WWW.W.W',
+    'W...W.W',
+    'W.WWW.W',
+    'W.....W',
+    'WWWWW.W',
+  ] },
+};
+// 칸 글자 → 놓을 수 있는 블록 (앞에 있는 것부터)
+const BUDDY_CELL = { W: ['rock', 'brick', 'tree'], T: ['tree'], f: ['flower'], D: ['gate'] };
+// 캐서 얻는 블록 → 맵 칸
+const BUDDY_DIG = { tree: TILE.TREE, rock: TILE.ROCK, flower: TILE.FLOWER };
+
 // ============================================================
 // Buddy — 🤝 놀아주기: 내 캐릭터가 저절로 아이(가장 가까운 다른 사람) 곁에서 논다.
 //         아이 둘레 몬스터 사냥, 초식동물 꼬시기, 꽃/나무 캐서 둘레에 심기, 떨어진 것 줍기, 따라다니며 😊👋.
@@ -4135,12 +4167,17 @@ const Buddy = {
   pathT: 0,
   stuck: { x: 0, y: 0, t: 0 },
   home: null, // 혼자일 때 머무는 곳
+  project: null, // 짓는 중 { kind, cells: [{ x, y, ch, tries }] }
+  projectN: 0, // 다음에 지을 것 (집 → 하트숲 → 미로 차례로)
+  projectT: 0, // 다 지은 뒤 다음 것을 시작하기까지 쉬는 시간
 
   toggle() {
     this.on = !this.on;
     this.task = null;
     this.path = [];
     this.home = { x: Player.x, y: Player.y };
+    this.project = null;
+    this.projectT = 5;
     $('#btn-buddy').classList.toggle('on', this.on);
     toast(this.on ? '🤝 ON' : '🤝 OFF');
     if (this.on) this.emote('👋');
@@ -4180,6 +4217,7 @@ const Buddy = {
     this.backT -= dt;
     this.thinkT -= dt;
     this.restT -= dt;
+    this.projectT -= dt;
     if (this.thinkT <= 0) { this.thinkT = 0.4; this.think(); }
     if (this.task && performance.now() > this.task.until) this.done();
     if (this.task) this[this.task.kind](this.task, dt);
@@ -4194,9 +4232,10 @@ const Buddy = {
 
   done(icon) {
     if (icon) this.emote(icon);
+    // 짓는 중에는 쉬지 않고 이어서 (가끔만 아이 곁으로)
+    this.restT = this.task && this.task.project ? (Math.random() < 0.15 ? randFloat(2, 4) : 0) : randFloat(2, 5);
     this.task = null;
     this.path = [];
-    this.restT = randFloat(2, 5);
     if (Game.heldBlock || Game.heldFood) { Game.picked = Game.lastWeapon; Game.renderInventory(); }
   },
 
@@ -4223,7 +4262,12 @@ const Buddy = {
       return;
     }
     if (t && t.kind !== 'follow') return;
-    if (this.dist(a, me) > 7 * T || this.restT > 0) { if (!t) this.start('follow', {}, 4); return; }
+    // 짓는 중에는 재료를 캐러 조금 더 멀리까지 간다
+    if (this.dist(a, me) > (this.project ? 14 : 7) * T || this.restT > 0) { if (!t) this.start('follow', {}, 4); return; }
+
+    // 짓는 중이면 대부분 그걸 이어서 한다
+    if (!this.project && this.projectT <= 0) this.startProject(a);
+    if (this.project && Math.random() < 0.85 && this.projectStep(a)) return;
 
     const choices = [];
     const myPets = Monsters.list.filter(m => m.owner === Multi.sid).length;
@@ -4231,19 +4275,114 @@ const Buddy = {
     const wild = Monsters.list.filter(m => Monsters.tameable(m) && !m.owner && this.dist(m, a) < 9 * T)
       .sort((x, y) => this.dist(x, me) - this.dist(y, me))[0];
     if (food && wild && myPets < 3) choices.push(['tame', { m: wild, food }, 12]);
-    const blocks = ['flower', 'tree'].reduce((n, id) => n + (Game.inventory[id] || 0), 0);
-    const dig = blocks < 6 && this.findTile(a, [TILE.FLOWER, TILE.TREE], 6);
-    if (dig) choices.push(['gather', { tx: dig.x, ty: dig.y }, 10]);
-    const block = this.pickBlock();
-    if (block) choices.push(['build', { block, left: randInt(2, 4) }, 14]);
-    const item = Items.list.filter(it => !Items.pending.has(it.id) && this.dist(it, a) < 6 * T)
-      .sort((x, y) => this.dist(x, me) - this.dist(y, me))[0];
-    if (item) choices.push(['collect', { it: item }, 6]);
+    const dig = (Game.inventory.flower || 0) < 4 && this.findTile(a, [TILE.FLOWER], 6);
+    if (dig) choices.push(['gather', { tx: dig.x, ty: dig.y, tile: TILE.FLOWER }, 10]);
+    if (Game.inventory.flower > 0 || (Game.inventory.torch > 0 && World.regionAtPx(Player.x, Player.y) === REGION.SWAMP)) {
+      choices.push(['build', { block: this.pickBlock(), left: randInt(2, 3) }, 14]);
+    }
+    // 아이 곁에 떨어진 것: 줍지 않고 옆에 가서 👉 (아이가 줍게)
+    const f = this.friend();
+    const item = f && Items.list.filter(it => this.dist(it, f) < 6 * T && this.dist(it, f) > 1.5 * T)
+      .sort((x, y) => this.dist(x, f) - this.dist(y, f))[0];
+    if (item) choices.push(['show', { it: item }, 6]);
     if (choices.length && Math.random() < 0.7) {
       const [kind, data, sec] = choices[Math.floor(Math.random() * choices.length)];
       this.start(kind, data, sec);
-      this.emote({ tame: '🍎', gather: '🪓', build: '🌷', collect: '👀' }[kind]);
+      this.emote({ tame: '🍎', gather: '🌷', build: '🌷', show: '👀' }[kind]);
     } else if (!t) this.start('follow', {}, randFloat(3, 6));
+  },
+
+  // ---------- 짓기: 집 / 하트숲 / 미로 ----------
+  // 아이에게서 3~8칸 떨어진, 거의 다 비어 있는 풀밭을 골라 시작한다 (아이가 서 있는 칸은 넣지 않는다)
+  startProject(a) {
+    const kinds = Object.keys(BUDDY_PROJECTS), kind = kinds[this.projectN % kinds.length];
+    const plan = BUDDY_PROJECTS[kind].plan, w = plan[0].length, h = plan.length;
+    const ax = Math.floor(a.x / T), ay = Math.floor(a.y / T);
+    let best = null;
+    for (let n = 0; n < 60; n++) {
+      const ang = Math.random() * Math.PI * 2, r = randFloat(3, 8);
+      const ox = Math.round(ax + Math.cos(ang) * r - w / 2), oy = Math.round(ay + Math.sin(ang) * r - h / 2);
+      if (ax >= ox - 1 && ax <= ox + w && ay >= oy - 1 && ay <= oy + h) continue; // 아이 자리와 겹친다
+      let ok = 0, bad = 0;
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const tt = World.tile(ox + x, oy + y);
+          const free = (tt === TILE.GRASS || tt === TILE.SAND) && !(ox + x === World.door.x && oy + y > World.door.y && oy + y <= World.door.y + 4);
+          if (plan[y][x] === '.') {
+            if (BLOCKING.has(tt) || tt === TILE.DOOR) bad++;
+            // 테두리의 빈칸은 드나드는 곳: 바깥쪽 칸이 막혀 있으면 안 된다
+            const out = [[x === 0, -1, 0], [x === w - 1, 1, 0], [y === 0, 0, -1], [y === h - 1, 0, 1]].filter(o => o[0]);
+            if (out.some(([, dx, dy]) => BLOCKING.has(World.tile(ox + x + dx, oy + y + dy)))) bad += 3;
+          } else if (free) ok++; else bad++;
+        }
+      }
+      if (bad <= 2 && (!best || bad < best.bad)) best = { ox, oy, bad };
+      if (best && best.bad === 0) break;
+    }
+    if (!best) { this.projectT = 10; return; } // 자리가 없다: 잠깐 뒤 다시
+    const cells = [];
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (plan[y][x] !== '.') cells.push({ x: best.ox + x, y: best.oy + y, ch: plan[y][x], tries: 0 });
+    // 벽/나무 먼저, 꽃/문은 나중에. 가까운 것부터 차례로 이어지게
+    cells.sort((p, q) => ('fD'.includes(p.ch) - 'fD'.includes(q.ch)) || (p.y - q.y) || (p.x - q.x));
+    this.project = { kind, cells, ox: best.ox, oy: best.oy, w, h };
+    this.projectN++;
+    this.emote(BUDDY_PROJECTS[kind].emoji);
+    console.log('[Buddy] 짓기 시작', kind, best);
+  },
+
+  // 다음 칸 하나: 블록이 있으면 놓으러, 없으면 캐러 간다. 할 게 있으면 true
+  projectStep(a) {
+    const pr = this.project;
+    const done = c => {
+      const tt = World.tile(c.x, c.y), want = BUDDY_CELL[c.ch].map(id => TILE[ITEMS[id].tile]);
+      return want.includes(tt) || c.tries >= 5;
+    };
+    const left = pr.cells.filter(c => !done(c));
+    if (!left.length) { this.finishProject(); return false; }
+    const now = performance.now();
+    const fail = c => { c.tries++; c.wait = now + 3000; }; // 아이가 서 있는 등 막혔다: 3초 뒤 다시 (5번까지)
+    for (const c of left) {
+      if (c.wait > now) continue;
+      const ids = BUDDY_CELL[c.ch];
+      const block = ids.find(id => Game.inventory[id] > 0);
+      // 재료는 몇 개씩 모아 와서 한꺼번에 놓는다 (하나씩 왔다 갔다 하지 않게)
+      const need = left.filter(o => BUDDY_CELL[o.ch] === ids).length;
+      const have = ids.reduce((n, id) => n + (Game.inventory[id] || 0), 0);
+      const canDig = ids.some(id => BUDDY_DIG[id] !== undefined);
+      pr.gathering = canDig && (have === 0 || (pr.gathering && have < Math.min(4, need)));
+      if (block && !pr.gathering) {
+        if (!this.canPlaceAt(block, c.x, c.y)) { fail(c); continue; }
+        this.start('build', { block, left: 1, target: { x: c.x, y: c.y }, stand: this.standNear(c.x, c.y), cell: c, project: true }, 12);
+        if (!this.task.stand) { fail(c); this.task = null; continue; }
+        return true;
+      }
+      // 재료 캐기 (문은 캘 수 없으니 그냥 빈칸으로 둔다, 꽃은 둘레에 없으면 건너뛴다)
+      const tiles = ids.map(id => BUDDY_DIG[id]).filter(v => v !== undefined);
+      const spot = tiles.length && this.findTile(a, tiles, 12, true);
+      if (!spot && block) { pr.gathering = false; return this.projectStep(a); } // 더 캘 게 없다: 있는 것부터 놓는다
+      if (spot) {
+        this.start('gather', { tx: spot.x, ty: spot.y, tile: World.tile(spot.x, spot.y), project: true }, 15);
+        return true;
+      }
+      c.tries = 5;
+    }
+    return false;
+  },
+
+  finishProject() {
+    const kind = this.project.kind;
+    this.project = null;
+    this.projectT = randFloat(20, 40);
+    this.emote('🎉');
+    Floaters.add(Player.x, Player.y - 40, BUDDY_PROJECTS[kind].emoji, 26);
+    Sfx.success();
+    console.log('[Buddy] 다 지었다', kind);
+  },
+
+  // 내가 지은 칸 (캐지 않는다)
+  inProject(x, y) {
+    const pr = this.project;
+    return pr && x >= pr.ox && x < pr.ox + pr.w && y >= pr.oy && y < pr.oy + pr.h;
   },
 
   // 심을 블록: 꽃 > 나무 > (늪이면) 횃불 > 벽돌
@@ -4254,12 +4393,14 @@ const Buddy = {
   },
 
   // a 둘레 r 칸 안에서 types 인 칸 (갈 수 있는 곳 옆에 있는 것) 중 가까운 것
-  findTile(a, types, r) {
+  // natural: 처음부터 맵에 있던 것만 (사람이 놓은 것, 짓고 있는 곳은 건드리지 않는다)
+  findTile(a, types, r, natural = false) {
     const cx = Math.floor(a.x / T), cy = Math.floor(a.y / T);
     let best = null, bd = Infinity;
     for (let y = cy - r; y <= cy + r; y++) {
       for (let x = cx - r; x <= cx + r; x++) {
         if (!types.includes(World.tile(x, y)) || !World.diggable(x, y)) continue;
+        if (natural && (World.tiles[y * World.w + x] !== World.base[y * World.w + x] || this.inProject(x, y))) continue;
         if (!this.standNear(x, y)) continue;
         const d = Math.hypot(x - cx, y - cy) + Math.random();
         if (d < bd) { bd = d; best = { x, y }; }
@@ -4451,7 +4592,7 @@ const Buddy = {
   },
 
   gather(t) {
-    if (!World.diggable(t.tx, t.ty) || ![TILE.FLOWER, TILE.TREE].includes(World.tile(t.tx, t.ty))) { this.done('😄'); return; }
+    if (!World.diggable(t.tx, t.ty) || World.tile(t.tx, t.ty) !== t.tile) { this.done(t.project ? '' : '😄'); return; }
     const s = t.stand || (t.stand = this.standNear(t.tx, t.ty));
     if (!s) { this.done(); return; }
     if (!this.goTo(s.x * T + T / 2, s.y * T + T / 2, 5)) return;
@@ -4467,7 +4608,8 @@ const Buddy = {
 
   // 아이 둘레 2칸쯤에 하나씩 심는다
   build(t) {
-    if (!Game.inventory[t.block] || t.left <= 0) { this.done('🌷'); return; }
+    if (!Game.inventory[t.block] || t.left <= 0) { this.done(t.project ? '' : '🌷'); return; }
+    if (t.project && !this.canPlaceAt(t.block, t.target.x, t.target.y)) { t.cell.tries++; t.cell.wait = performance.now() + 3000; this.done(); return; }
     const a = this.anchor();
     if (!t.target || !this.canPlaceAt(t.block, t.target.x, t.target.y)) {
       t.target = this.buildSpot(a, t.block);
@@ -4507,10 +4649,15 @@ const Buddy = {
     return list[Math.floor(Math.random() * list.length)] || null;
   },
 
-  collect(t) {
-    const it = t.it;
-    if (!Items.list.includes(it)) { this.done('😄'); return; }
-    this.goTo(it.x, it.y, 3);
+  // 떨어진 것 옆에 가서 아이를 보며 👉 (아이가 주우면 😄)
+  show(t) {
+    const it = t.it, f = this.friend();
+    if (!Items.list.includes(it) || !f) { this.done('😄'); return; }
+    if (this.goTo(it.x + (f.x > it.x ? 0.8 : -0.8) * T, it.y, 8)) {
+      this.vec = { x: 0, y: 0 };
+      this.face(f.x, f.y);
+      if (Player.emoteT <= 0) this.emote('👉');
+    }
   },
 };
 
