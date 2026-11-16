@@ -437,19 +437,81 @@ const Judge = (() => {
     return (s || '').normalize('NFC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
   }
 
-  // 소리가 같은 모음은 하나로 (ㅐ/ㅔ 를 구분해 말하지 않아서 "게"를 "개"로 알아듣는다)
-  const SAME_SOUND = { 'ㅐ': 'ㅔ', 'ㅒ': 'ㅖ', 'ㅗㅐ': 'ㅜㅔ', 'ㅗㅣ': 'ㅜㅔ' };
+  // ---------- 소리 나는 대로 (글자는 달라도 소리가 같으면 같게) ----------
+  // 받침 대표음 (닭 → 닥, 꽃 → 꼳, 잎 → 입)
+  const REP = {
+    'ㄱ': 'ㄱ', 'ㄲ': 'ㄱ', 'ㅋ': 'ㄱ', 'ㄱㅅ': 'ㄱ', 'ㄹㄱ': 'ㄱ', 'ㄴ': 'ㄴ', 'ㄴㅈ': 'ㄴ', 'ㄴㅎ': 'ㄴ',
+    'ㄷ': 'ㄷ', 'ㅅ': 'ㄷ', 'ㅆ': 'ㄷ', 'ㅈ': 'ㄷ', 'ㅊ': 'ㄷ', 'ㅌ': 'ㄷ', 'ㅎ': 'ㄷ',
+    'ㄹ': 'ㄹ', 'ㄹㅂ': 'ㄹ', 'ㄹㅅ': 'ㄹ', 'ㄹㅌ': 'ㄹ', 'ㄹㅎ': 'ㄹ', 'ㅁ': 'ㅁ', 'ㄹㅁ': 'ㅁ',
+    'ㅂ': 'ㅂ', 'ㅍ': 'ㅂ', 'ㅂㅅ': 'ㅂ', 'ㄹㅍ': 'ㅂ', 'ㅇ': 'ㅇ',
+  };
+  const TENSE = { 'ㄱ': 'ㄲ', 'ㄷ': 'ㄸ', 'ㅂ': 'ㅃ', 'ㅅ': 'ㅆ', 'ㅈ': 'ㅉ' };
+  const ASPIRATE = { 'ㄱ': 'ㅋ', 'ㄷ': 'ㅌ', 'ㅂ': 'ㅍ', 'ㅈ': 'ㅊ', 'ㅅ': 'ㅆ' };
+  const NASAL = { 'ㄱ': 'ㅇ', 'ㄷ': 'ㄴ', 'ㅂ': 'ㅁ' };
+  // 한 글자 단어는 예사소리/된소리/거센소리를 하나로 본다 (아이가 "게"를 "께"처럼 말해도)
+  const PLAIN = { 'ㄲ': 'ㄱ', 'ㅋ': 'ㄱ', 'ㄸ': 'ㄷ', 'ㅌ': 'ㄷ', 'ㅃ': 'ㅂ', 'ㅍ': 'ㅂ', 'ㅉ': 'ㅈ', 'ㅊ': 'ㅈ', 'ㅆ': 'ㅅ' };
 
-  // "나무" → "ㄴㅏㅁㅜ", 겹받침/이중모음도 쪼갠다
-  function toJamo(s) {
-    let out = '';
-    for (const ch of s) {
-      if (!isHangul(ch)) { out += ch; continue; }
-      const idx = ch.charCodeAt(0) - 0xAC00, jung = JUNG[Math.floor((idx % 588) / 28)];
-      out += CHO[Math.floor(idx / 588)] + (SAME_SOUND[jung] || jung) + JONG[idx % 28];
+  function syllable(ch) {
+    const idx = ch.charCodeAt(0) - 0xAC00;
+    return { c: CHO[Math.floor(idx / 588)], v: JUNG[Math.floor((idx % 588) / 28)], f: JONG[idx % 28] };
+  }
+
+  // 모음: ㅐ/ㅔ, ㅒ/ㅖ, ㅚ/ㅙ/ㅞ 는 소리가 같고, 자음 뒤 ㅖ 는 ㅔ (계 → 게), 자음 뒤 ㅢ 는 ㅣ (희 → 히)
+  function vowel(c, v) {
+    if (v === 'ㅐ') v = 'ㅔ';
+    if (v === 'ㅒ') v = 'ㅖ';
+    if (v === 'ㅗㅣ' || v === 'ㅗㅐ') v = 'ㅜㅔ';
+    if (v === 'ㅖ' && c !== 'ㅇ' && c !== 'ㄹ') v = 'ㅔ';
+    if (v === 'ㅡㅣ' && c !== 'ㅇ') v = 'ㅣ';
+    return v;
+  }
+
+  // 한 덩어리(띄어 쓰지 않은 글자들)를 소리 나는 대로: 연음, ㅎ 탈락/거센소리, 비음화, 유음화, 된소리, 구개음화
+  function pronounce(chars) {
+    const syl = chars.map(syllable);
+    for (let i = 0; i < syl.length; i++) {
+      const s = syl[i], n = syl[i + 1];
+      if (!s.f) continue;
+      if (!n) { s.f = REP[s.f] || ''; continue; }
+      if (n.c === 'ㅇ') {
+        // 받침이 다음 글자 첫소리로 넘어간다 (복어 → 보거, 옷이 → 오시). ㅎ 은 없어진다 (좋아 → 조아)
+        if (s.f === 'ㅎ') s.f = '';
+        else if (s.f.length === 2) {
+          const [first, second] = s.f;
+          if (second === 'ㅎ') s.f = first;
+          else { s.f = first; n.c = second; }
+        } else if (s.f !== 'ㅇ') { n.c = s.f; s.f = ''; }
+        if (n.v === 'ㅣ' && (n.c === 'ㄷ' || n.c === 'ㅌ')) n.c = n.c === 'ㄷ' ? 'ㅈ' : 'ㅊ'; // 굳이 → 구지
+        continue;
+      }
+      // ㅎ 이 만나면 거센소리 (좋다 → 조타, 입학 → 이팍)
+      if (s.f.endsWith('ㅎ') && ASPIRATE[n.c] && n.c !== 'ㅅ') { n.c = ASPIRATE[n.c]; s.f = s.f.length === 2 ? s.f[0] : ''; continue; }
+      if (n.c === 'ㅎ' && (NASAL[REP[s.f]] || s.f === 'ㅈ')) { n.c = ASPIRATE[s.f === 'ㅈ' ? 'ㅈ' : REP[s.f]]; s.f = ''; continue; }
+      s.f = REP[s.f] || '';
+      if (NASAL[s.f] && (n.c === 'ㄴ' || n.c === 'ㅁ')) s.f = NASAL[s.f]; // 국물 → 궁물
+      if (n.c === 'ㄹ') {
+        if (s.f === 'ㄴ') s.f = 'ㄹ'; // 신라 → 실라
+        else if (s.f !== 'ㄹ') { n.c = 'ㄴ'; if (NASAL[s.f]) s.f = NASAL[s.f]; } // 종로 → 종노
+      }
+      if (s.f === 'ㄹ' && n.c === 'ㄴ') n.c = 'ㄹ'; // 설날 → 설랄
+      if (NASAL[s.f] && TENSE[n.c]) n.c = TENSE[n.c]; // 늑대 → 늑때
     }
+    return syl.map(x => x.c + vowel(x.c, x.v) + x.f).join('');
+  }
+
+  // "나무" → "ㄴㅏㅁㅜ" (소리 나는 대로, 겹받침/이중모음도 쪼갠다)
+  function toJamo(s) {
+    let out = '', run = [];
+    const flush = () => { if (run.length) out += pronounce(run); run = []; };
+    for (const ch of s) {
+      if (isHangul(ch)) run.push(ch);
+      else { flush(); out += ch; }
+    }
+    flush();
     return out;
   }
+
+  const plain = j => Array.from(j).map(ch => PLAIN[ch] || ch).join('');
 
   function levenshtein(a, b) {
     const m = a.length, n = b.length;
@@ -486,9 +548,11 @@ const Judge = (() => {
 
   function scoreOne(t, c) {
     if (c === t) return { score: 1, how: 'exact' };
+    // 글자는 달라도 소리가 같다 (닥 → 닭, 계 → 게)
+    if (toJamo(c) === toJamo(t)) return { score: 1, how: 'same-sound' };
     const single = Array.from(t).length === 1 && isHangul(t);
     // 한 글자 단어: 인식 결과 안에 소리가 같은 글자가 있으면 통과 ("게" → "개야")
-    if (single && Array.from(c).some(ch => toJamo(ch) === toJamo(t))) return { score: 1, how: 'single-char' };
+    if (single && Array.from(c).some(ch => plain(toJamo(ch)) === plain(toJamo(t)))) return { score: 1, how: 'single-char' };
     if (c.includes(t)) return { score: CONFIG.CONTAINS_SCORE, how: 'contains' };
     return { score: windowSimilarity(t, c), how: 'similar' };
   }
@@ -513,7 +577,7 @@ const Judge = (() => {
     return { pass, score: best.score, best: best.cand, how: best.how, threshold };
   }
 
-  return { judge, normalize, toJamo, similarity };
+  return { judge, normalize, toJamo, similarity, pronounce: s => toJamo(normalize(s)) };
 })();
 
 // ============================================================
