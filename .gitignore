@@ -4,3 +4,7 @@ desktop.ini
 .vscode/
 .idea/
 .claude/settings.local.json
+
+# Baby Craft 서버 (server/start-server.ps1) 의 크롬 프로필과 기록
+server/.profile-*/
+server/logs/

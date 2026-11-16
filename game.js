@@ -62,7 +62,6 @@ const CONFIG = {
   NET_SEND_MS: 100,       // 상태를 보내는 간격
   NET_EVENT_KEEP_MS: 3000, // 줍기/때리기 같은 이벤트를 이 시간 동안 계속 실어 보낸다
   NET_TIMEOUT_MS: 8000,   // 이 시간 동안 소식이 없으면 그 사람이 나간 것으로 본다
-  HOST_STALE_MS: 15000,   // 모두 한 방: 방장 소식(몬스터)이 이만큼 멈추면 (잠든 폰 등) 손님이 방장을 넘겨받는다
   NAME_MAX: 8,
 
   // 읽기 판정
@@ -270,12 +269,23 @@ function itemNames(def) {
 // Store — localStorage 래퍼 (기기 안에만 저장)
 // ============================================================
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
-const NET_URL = './net.js?v=25';
+const NET_URL = './net.js?v=26';
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
 // 주소에 ?room=1234 를 붙이면 그 방으로 (테스트할 때 노는 사람들 방에 섞이지 않게)
 const ONE_ROOM = (new URLSearchParams(location.search).get('room') || '').match(/^\d{4}$/)?.[0] || '1111';
+
+// 서버로 켜기: index.html?server=1111 (server/ 폴더의 실행 스크립트가 화면 없는 크롬으로 연다).
+// 캐릭터 없이 그 채널의 세상(동물, 아이템, 보스, 바뀐 칸)을 돌리고, 사람 기기는 모두 손님으로 들어온다
+const SERVER_CH = (new URLSearchParams(location.search).get('server') || '').match(/^\d{4}$/)?.[0] || null;
+
+// 채널 기본 맵의 시드: 채널 번호마다 늘 같은 맵 (방에 세상이 없을 때만 쓴다)
+function channelSeed(code) {
+  let h = 2166136261;
+  for (const c of `baby-craft-${code}`) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0;
+  return h % 1e9;
+}
 
 // 이 탭에서 하던 여럿이 하기 { mode: 'host'|'guest', code }. 새로고침하면 시작 화면 없이 그 방으로 저절로 다시 간다.
 // sessionStorage 라 창을 닫았다 새로 열면 지워져서 시작 화면이 나온다
@@ -2623,67 +2633,83 @@ const Multi = {
     return key;
   },
 
-  // want/strict: 그 번호로만 연다 (모두 한 방)
-  // strict (모두 한 방): 방에 세상이 남아 있으면 그 세상을 이어서 열고, 없으면 내 세상을 방의 세상으로 올린다
-  async startHost(want, strict = false) {
+  // 👥 방 만들기 (모두 한 방이 아닐 때): 내 세상으로 방을 연다
+  async startHost(want) {
     const Net = await import(NET_URL);
     const last = Store.get(KEYS.room, {}) || {};
-    this.shared = strict;
-    const kept = strict ? await Net.loadWorld(want) : null;
-    if (kept && !kept.world && Object.keys(kept.tiles).length) {
-      // 세상은 안 적혀 있지만 방에 맵이 있다 (예전 버전 방장에게서 넘겨받음): 그 방장의 시드와 바뀐 칸으로
-      const h = await Net.peek(want);
-      if (h && Number.isInteger(h.seed)) kept.world = { seed: h.seed, w: World.w };
-    }
-    if (kept && kept.world && Number.isInteger(kept.world.seed)) this.useRoomWorld(kept.world, kept.tiles);
-    this.net = await Net.host(Game.seed, this.sid, want || last.host, this.roomKey(), strict);
+    this.net = await Net.host(Game.seed, this.sid, want || last.host, this.roomKey());
     Store.set(KEYS.room, { ...last, host: this.net.code });
     Session.set({ mode: 'host', code: this.net.code });
     this.mode = 'host';
-    if (!(kept && kept.world)) await this.uploadWorld(strict);
-    else this.saveRoomWorld();
+    await this.uploadWorld();
     this.listen();
     // 옛 연결이 늦게 방을 지웠으면 다시 연다 (바뀐 칸, 아이템도 다시 올린다)
     this.net.onRoom(async h => {
-      if (this.mode !== 'host') return;
-      if (h && strict && h.key !== this.roomKey()) {
-        // 내가 멈춘 사이에 다른 사람이 방장을 넘겨받았다: 다시 불러와서 손님으로 들어간다
-        console.log('[Multi] 다른 사람이 방장이 됨 → 손님으로');
-        this.mode = 'guest'; // 더 이상 몬스터를 보내지 않는다
-        await this.net.release().catch(() => {});
-        Game.writeSave();
-        location.reload();
-        return;
-      }
-      if (h) return;
+      if (h || this.mode !== 'host') return;
       console.log('[Multi] 방이 지워져서 다시 연다', this.net.code);
       await this.net.reopen();
-      await this.uploadWorld(strict);
+      await this.uploadWorld();
       this.itemsVersion = -1;
     });
     this.showBadge(this.net.code);
     console.log('[Multi] 방 만들기', this.net.code);
   },
 
-  // 내 세상(바뀐 칸 + 보스 진행)을 방에 올린다
-  async uploadWorld(strict) {
-    const edits = World.edits();
-    if (Object.keys(edits).length) await this.net.putTiles(edits);
-    if (strict) this.saveRoomWorld();
+  // ---------- 서버 (index.html?server=1111): 채널의 세상을 돌린다. 방장 없이, 사람 기기는 모두 손님 ----------
+  // 채널마다 세상이 하나: 방(rooms/{채널}/world, t)에 남아 있으면 이어서, 없으면 채널 기본 맵으로 새로
+  async startServer(code) {
+    const Net = await import(NET_URL);
+    this.isServer = true;
+    const kept = await Net.loadWorld(code);
+    if (!kept.world && Object.keys(kept.tiles).length) {
+      // 세상은 안 적혀 있지만 방에 맵이 있다 (예전 방장 방식): 그 방장의 시드와 바뀐 칸으로
+      const h = await Net.peek(code);
+      if (h && Number.isInteger(h.seed)) kept.world = { seed: h.seed, w: World.w };
+    }
+    const world = kept.world && Number.isInteger(kept.world.seed) ? kept.world : { seed: channelSeed(code), w: World.w };
+    this.useRoomWorld(world, kept.world ? kept.tiles : {});
+    this.net = await Net.serve(code, Game.seed, this.sid, this.roomKey());
+    this.mode = 'host';
+    await this.uploadWorld();
+    this.listen();
+    // 서버가 채널 주인: 방 정보가 지워지거나 (예전 버전 기기가 나가며 방을 통째로 지움) 다른 기기가 차지하면 되찾는다
+    this.net.onRoom(async h => {
+      if (h && h.key === this.roomKey()) return;
+      if (h && h.srv && h.srv === h.key) {
+        // 다른 서버가 이 채널을 맡았다 (서버를 두 군데서 켬): 서로 뺏지 않게 이쪽이 물러난다
+        console.warn('[Server] 다른 서버가 채널을 맡아서 멈춤', code);
+        this.mode = 'solo';
+        await this.net.release().catch(() => {});
+        return;
+      }
+      console.log('[Server] 방 정보 되찾기', code);
+      await this.net.reopen();
+      await this.uploadWorld();
+      this.itemsVersion = -1;
+    });
+    console.log(`[Server] 채널 ${code} 시작 (시드 ${Game.seed})`);
   },
 
-  // 방장: 보스 진행이 바뀌었으면 방에 적어 둔다 (다음 방장이 이어서)
+  // 내 세상(바뀐 칸 + 보스 진행)을 방에 올린다
+  async uploadWorld() {
+    const edits = World.edits();
+    if (Object.keys(edits).length) await this.net.putTiles(edits);
+    this.worldJson = '';
+    this.saveRoomWorld();
+  },
+
+  // 서버: 보스 진행이 바뀌었으면 방에 적어 둔다 (서버를 다시 켜도 이어서)
   saveRoomWorld() {
-    if (!this.isHost || !this.shared) return;
+    if (!this.isServer || !this.net) return;
     const s = { luck: Monsters.luck, nextEagleAt: Monsters.nextEagleAt, kills: Monsters.kills, nextBossAt: Monsters.nextBossAt };
     const world = { seed: Game.seed, w: World.w, s };
     const json = JSON.stringify(world);
     if (json === this.worldJson) return;
     this.worldJson = json;
-    this.net.saveWorld(world).catch(err => { this.worldJson = ''; console.warn('[Multi] 세상 저장 실패', err); });
+    this.net.saveWorld(world).catch(err => { this.worldJson = ''; console.warn('[Server] 세상 저장 실패', err); });
   },
 
-  // 방에 남아 있던 세상으로 바꾼다 (내 기기의 맵 대신). 동물과 아이템은 새로, 캐릭터는 집 앞에서
+  // 방에 남아 있던 세상으로 바꾼다. 동물과 아이템은 새로
   useRoomWorld(world, tiles) {
     Game.seed = world.seed;
     World.generate(world.seed);
@@ -2694,7 +2720,6 @@ const Multi = {
     Monsters.kills = s.kills || 0;
     Monsters.nextBossAt = s.nextBossAt || CONFIG.BOSS_AFTER_KILLS;
     Monsters.bossSpawned = false;
-    Player.reset();
     Items.computeSpots();
     Items.list = [];
     Items.respawnQueue = [];
@@ -2702,8 +2727,7 @@ const Multi = {
     Monsters.list = [];
     Monsters.respawnQueue = [];
     Monsters.fill();
-    this.worldJson = JSON.stringify(world);
-    console.log(`[Multi] 방에 남아 있던 세상으로 (바뀐 칸 ${Object.keys(tiles).length}개)`);
+    console.log(`[Server] 세상 불러옴 (바뀐 칸 ${Object.keys(tiles).length}개)`);
   },
 
   async startGuest(code) {
@@ -2721,10 +2745,7 @@ const Multi = {
     this.listen();
     this.net.onWorld(w => this.onWorld(w));
     this.net.onItems(list => this.onItems(list));
-    this.net.onRoom(h => {
-      if (h) { this.hostKey = h.key; this.worldAt = performance.now(); }
-      return h ? this.onRoomBack(h) : this.onRoomGone();
-    });
+    this.net.onRoom(h => (h ? this.onRoomBack(h) : this.onRoomGone()));
     Store.set(KEYS.room, { ...(Store.get(KEYS.room, {}) || {}), join: code });
     Session.set({ mode: 'guest', code });
     this.showBadge(code);
@@ -2736,51 +2757,47 @@ const Multi = {
     this.net.onTiles((i, v) => World.setTile(i, fixLand(i, v)));
   },
 
-  // 모두 한 방: 열려 있으면 들어가고, 없으면 (또는 내가 새로고침하기 전에 열었던 방이면) 내가 연다
+  // 모두 한 방: 서버가 연 채널에 손님으로 들어간다. 서버가 아직 안 켜져 있으면 켜질 때까지 기다린다
   async startShared() {
     const Net = await import(NET_URL);
-    this.shared = true;
-    for (let i = 0; i < 4; i++) {
-      const h = await Net.peek(ONE_ROOM);
-      try {
-        if (!h || h.key === this.roomKey()) await this.startHost(ONE_ROOM, true);
-        else await this.startGuest(ONE_ROOM);
-        Session.set({ mode: 'shared', code: ONE_ROOM });
-        return;
-      } catch (err) {
-        if (err.message !== 'taken' && err.message !== 'no-room') throw err; // 그 사이에 누가 열었거나 닫았다: 다시
+    for (let i = 0; ; i++) {
+      if (await Net.peek(ONE_ROOM)) {
+        try {
+          await this.startGuest(ONE_ROOM);
+          Session.set({ mode: 'shared', code: ONE_ROOM });
+          return;
+        } catch (err) {
+          if (err.message !== 'no-room') throw err; // 그 사이에 서버가 꺼졌다: 다시 기다린다
+        }
       }
+      if (i === 0) {
+        console.log('[Multi] 서버를 기다리는 중', ONE_ROOM);
+        Game.mpMsg(Store.settings.lang === 'en' ? '🖥️ Waiting for the server…' : '🖥️ 서버가 켜지길 기다리는 중…');
+      }
+      await delay(3000);
     }
-    throw new Error('busy');
   },
 
+  // 서버(또는 방장)가 꺼졌다: 다시 켜지면 onRoomBack 으로 이어서 논다
   onRoomGone() {
     if (!this.roomGone) toast('📴');
     this.roomGone = true;
     for (const sid of [...this.peers.keys()]) this.leave(sid);
-    // 모두 한 방: 방장이 아주 나갔으면 (몇 초 안에 다시 안 열리면) 새로 불러와서 내가 방을 연다 (가방은 저장).
-    // 세상은 방에 남아 있어서 그대로 이어진다
-    if (ONE_ROOM && this.isGuest) {
-      clearTimeout(this.goneTimer);
-      this.goneTimer = setTimeout(() => {
-        if (!this.roomGone) return;
-        Game.writeSave();
-        location.reload();
-      }, 4000 + Math.random() * 3000);
-    }
   },
 
-  // 방장이 같은 번호로 방을 다시 열었다 (새로고침, 새 버전): 그 방장의 맵으로 다시 맞추고 이어서 논다.
-  // 바뀐 칸은 방장이 다시 올려서 onTiles 로 온다
+  // 서버가 다시 켜졌다 (같은 채널): 같은 맵이면 그대로 이어서, 다른 맵이면 새로 불러온다 (바뀐 칸은 방에 남아 있다)
   onRoomBack(h) {
-    if (!this.roomGone) return; // 처음 들어갈 때
+    if (!this.roomGone) return; // 처음 들어갈 때, 또는 서버가 방 정보를 되찾은 것
     this.roomGone = false;
-    World.generate(h.seed);
-    Items.computeSpots();
+    if (h.seed !== this.net.seed) {
+      Game.writeSave();
+      location.reload();
+      return;
+    }
     this.monsterMap.clear();
     Monsters.list = [];
     toast('📶');
-    console.log('[Multi] 방이 다시 열려서 이어서', this.net.code);
+    console.log('[Multi] 서버가 다시 켜져서 이어서', this.net.code);
   },
 
   // 이벤트는 받는 쪽이 놓치지 않게 잠깐 동안 매번 같이 보낸다 (받는 쪽은 번호로 한 번만 처리)
@@ -2835,7 +2852,6 @@ const Multi = {
       p.sayT = Math.max(0, (p.sayT || 0) - dt);
       if (p.seen && now - p.lastSeen > CONFIG.NET_TIMEOUT_MS) this.timeout(p);
     }
-    if (this.isGuest && this.shared) this.watchHost(now);
     if (this.isGuest) {
       for (const m of Monsters.list) {
         followRemote(m, dt);
@@ -2850,24 +2866,6 @@ const Multi = {
     const fail = err => console.warn('[Multi] 전송 실패', err);
     this.net.sendMe(this.myPacket()).catch(fail);
     if (this.isHost) this.sendWorld().catch(fail);
-  },
-
-  // 손님: 방장 소식이 HOST_STALE_MS 동안 없으면 (방장 폰이 잠들었는데 연결만 남은 경우) 내가 방장을 넘겨받는다.
-  // 내 기기가 잠들었다 깬 거면 (틱 사이가 길면) 처음부터 다시 잰다
-  watchHost(now) {
-    if (now - (this.lastTickAt || now) > 3000 || !this.worldAt) this.worldAt = now;
-    this.lastTickAt = now;
-    if (this.roomGone || this.takingOver || !this.hostKey || now - this.worldAt < CONFIG.HOST_STALE_MS) return;
-    this.takingOver = true;
-    console.log('[Multi] 방장이 멈춤 → 넘겨받기');
-    import(NET_URL)
-      .then(Net => Net.takeOver(this.net.code, this.hostKey, this.roomKey()))
-      .then(ok => {
-        if (!ok) { this.takingOver = false; this.worldAt = performance.now(); return; }
-        Game.writeSave();
-        location.reload(); // 새로 불러오면 내 방(같은 key)이라 방장으로 연다
-      })
-      .catch(err => { this.takingOver = false; this.worldAt = performance.now(); console.warn('[Multi] 넘겨받기 실패', err); });
   },
 
   leave(sid) {
@@ -2903,6 +2901,7 @@ const Multi = {
       say: Player.sayT > 0 ? [Player.saySeq, Player.sayText] : 0,
       a: Monsters.arrows.map(a => [r(a.x), r(a.y), a.fx, a.fy, a.food || 0]),
       ev: this.events.map(([seq, , kind, ...args]) => [seq, kind, ...args]),
+      ...(this.isServer ? { srv: 1 } : {}),
     };
   },
 
@@ -2935,6 +2934,17 @@ const Multi = {
     let p = this.peers.get(sid);
     const pos = d.p;
     const evs = (d.ev || []).filter(Boolean);
+    if (d.srv) {
+      // 서버: 캐릭터는 없고 이벤트(카드, 길들이기 답 등)만 받는다
+      if (!p) { p = { sid, server: true, lastSeq: evs.reduce((max, ev) => Math.max(max, ev[0]), 0) }; this.peers.set(sid, p); }
+      for (const ev of evs.sort((x, y) => x[0] - y[0])) {
+        if (ev[0] <= p.lastSeq) continue;
+        p.lastSeq = ev[0];
+        const [, kind, to, ...args] = ev;
+        if (to === this.sid || to === '*') this.handle(kind, args, p);
+      }
+      return;
+    }
     if (!p) {
       // 새로 들어옴: 위치를 바로 맞추고, 그 전 이벤트는 무시
       p = { ...makeRemote(), isPlayer: true, sid, x: pos[0], y: pos[1], arrows: [] };
@@ -3031,7 +3041,6 @@ const Multi = {
   // ---------- guest: 몬스터 + 아이템 받기 ----------
   onWorld(w) {
     if (!w) return;
-    this.worldAt = performance.now();
     const seen = new Set();
     const hadBoss = !!Monsters.boss;
     for (const [id, type, x, y, hp, face, hit, owner, hop, emote] of (w.m || []).filter(Boolean)) {
@@ -3838,6 +3847,7 @@ const Game = {
     const btn = $('#btn-start');
     btn.disabled = false;
     btn.addEventListener('click', () => (ONE_ROOM ? this.startShared() : this.start()));
+    if (SERVER_CH) { this.keepAliveInBackground(); this.startServer(SERVER_CH); return; }
     requestAnimationFrame(t => this.loop(t));
     this.keepAliveInBackground();
     this.initFullscreen();
@@ -3994,12 +4004,12 @@ const Game = {
   },
 
   writeSave() {
+    if (SERVER_CH) { Multi.saveRoomWorld(); return; }
     if (this.state === 'loading' || this.state === 'title' || this.state === 'starting') return;
     const old = Store.get(KEYS.world, null) || {};
     const bag = this.bagData();
     Cloud.save(bag);
     if (Multi.isGuest) { Store.set(KEYS.world, { ...old, bag }); return; }
-    if (Multi.isHost) Multi.saveRoomWorld();
     Store.set(KEYS.world, {
       gen: WORLD_GEN, seed: this.seed, edits: World.edits(), bag, pets: Monsters.myPets(),
       monsterKills: Monsters.kills, nextBossAt: Monsters.nextBossAt, w: World.w,
@@ -4080,6 +4090,21 @@ const Game = {
       return;
     }
     await this.begin();
+  },
+
+  // 서버로 켜기: 캐릭터 없이 채널을 돌린다. 실패하면 (인터넷 끊김 등) 10초 뒤 다시
+  async startServer(code) {
+    this.state = 'server';
+    this.playerName = '🖥️';
+    Player.x = Player.y = -1e5; // 동물/아이템 놓을 때 피하지 않게 멀리
+    document.title = `Baby Craft 서버 ${code}`;
+    $('#title').classList.add('hidden');
+    try {
+      await Multi.startServer(code);
+    } catch (err) {
+      console.error('[Server] 시작 실패 → 10초 뒤 다시', err);
+      setTimeout(() => location.reload(), 10000);
+    }
   },
 
   // ▶: 모두 한 방으로. 연결이 안 되면 혼자 논다
@@ -4266,7 +4291,7 @@ const Game = {
   // 크롬은 숨은 탭의 setInterval 을 5분 뒤부터 1분에 한 번만 돌린다 (방장이면 동물이 멈추고 안 쓰러진다).
   // Worker 타이머는 그렇게 느려지지 않아서, Worker 가 0.25초마다 깨워 준다 (안 되면 setInterval)
   keepAliveInBackground() {
-    const tick = () => { if (document.hidden && Multi.online) this.step(performance.now()); };
+    const tick = () => { if ((document.hidden || SERVER_CH) && Multi.online) this.step(performance.now()); };
     try {
       const src = 'setInterval(() => postMessage(0), 250);';
       const worker = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
@@ -4289,13 +4314,16 @@ const Game = {
       Monsters.update(dt);
     }
     if (playing || Multi.online) Monsters.updateArrows(dt);
+    // 보스, 모자란 동물, 네잎클로버: 방장/혼자/서버 기기 (여럿이 할 때는 카드 중에도)
+    if (!Multi.isGuest && (playing || Multi.isHost)) {
+      if (!Monsters.bossSpawned && Monsters.kills >= Monsters.nextBossAt) Monsters.spawnBoss();
+      Monsters.upkeep(dt);
+    }
     if (this.state !== 'play') return; // 화살로 처치해서 상태가 바뀌었을 수 있다
     Items.pickup();
     this.checkRegion(dt);
     Monsters.touch();
     if (this.state !== 'play') return; // 다쳐서 기절했을 수 있다
-    if (!Multi.isGuest && !Monsters.bossSpawned && Monsters.kills >= Monsters.nextBossAt) Monsters.spawnBoss();
-    if (!Multi.isGuest) Monsters.upkeep(dt);
     const onDoor = World.tileAtPx(Player.x, Player.y) === TILE.DOOR;
     if (onDoor && !this.wasOnDoor && !Buddy.on) this.enterHome();
     this.wasOnDoor = onDoor;
