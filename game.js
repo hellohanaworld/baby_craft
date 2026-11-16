@@ -102,6 +102,10 @@ const ITEMS = {
   tree:   { emoji: '🌳', ko: '나무', en: 'tree',    kind: 'block', tile: 'TREE',   weight: 0 },
   flower: { emoji: '🌷', ko: '꽃',   en: 'flower',  kind: 'block', tile: 'FLOWER', weight: 0 },
   rock:   { emoji: '🪨', ko: '바위', en: 'boulder', kind: 'block', tile: 'ROCK',   weight: 0 },
+  // 땅: 캐면 흙이 남는다. 흙/풀밭/모래 위에 놓는다 (물은 길을 막는다)
+  grass:  { emoji: '🌱', ko: '풀',   en: 'grass',   kind: 'block', tile: 'GRASS',  weight: 0 },
+  sand:   { emoji: '🏖️', ko: '모래', en: 'sand',    kind: 'block', tile: 'SAND',   weight: 0 },
+  water:  { emoji: '💧', ko: '물',   en: 'water',   kind: 'block', tile: 'WATER',  weight: 0 },
   // 제작대에서 만드는 블록
   brick:  { emoji: '🧱', ko: '벽돌', en: 'brick',   kind: 'block', tile: 'BRICK',  weight: 0 },
   gate:   { emoji: '🚪', ko: '문',   en: 'door',    kind: 'block', tile: 'GATE',   weight: 0 }, // 사람은 지나가고 몬스터는 못 지나간다
@@ -1237,7 +1241,13 @@ const DIG = {
   [TILE.GATE]: { gives: ['gate'], hand: 'TREE_HITS', tool: 1, tools: ['axe'] },
   [TILE.BRIDGE]: { gives: ['bridge'], hand: 1, after: TILE.WATER },
   [TILE.TORCH]: { gives: ['torch'], hand: 1 },
+  // 땅 (풀밭, 모래, 물): 캐면 흙(PATH)이 남는다. 흙은 캐지 않는다
+  [TILE.GRASS]: { gives: ['grass'], hand: 3, tool: 1, tools: ['axe', 'sword'], after: TILE.PATH, ground: true },
+  [TILE.SAND]: { gives: ['sand'], hand: 2, tool: 1, tools: ['axe', 'sword'], after: TILE.PATH, ground: true },
+  [TILE.WATER]: { gives: ['water'], hand: 2, tool: 1, tools: ['axe', 'sword'], after: TILE.PATH, ground: true },
 };
+// 땅 블록: 이 위에 다른 블록을 놓을 수 있다
+const PLACE_ON = new Set([TILE.GRASS, TILE.SAND, TILE.PATH]);
 // 손에 들 수 있는 것: 무기 또는 놓을 수 있는 블록
 const holdable = id => !!WEAPONS[id] || !!(ITEMS[id] && (ITEMS[id].tile || ITEMS[id].kind === 'food'));
 const holdEmoji = id => (WEAPONS[id] || ITEMS[id] || WEAPONS.hand).emoji;
@@ -3950,7 +3960,8 @@ const Game = {
   // 사람이 서 있는 다리는 캐지 않는다 (캐면 물이 되어 갇힌다)
   digTile() {
     const f = this.frontTile(), me = { x: Math.floor(Player.x / T), y: Math.floor(Player.y / T) };
-    return [f, me].find(t => World.diggable(t.x, t.y) && !(DIG[World.tile(t.x, t.y)].after === TILE.WATER && this.someoneOn(t.x, t.y))) || null;
+    if (World.diggable(f.x, f.y) && !(DIG[World.tile(f.x, f.y)].after === TILE.WATER && this.someoneOn(f.x, f.y))) return f;
+    return World.tile(me.x, me.y) === TILE.FLOWER ? me : null; // 밟고 있는 칸은 꽃만 (발밑 풀밭을 캐지 않게)
   },
 
   // 그 칸에 나나 다른 사람의 몸이 걸쳐 있는지
@@ -3982,17 +3993,18 @@ const Game = {
     if (this.dig.n < need || this.busy) return;
     this.dig = { i: -1, n: 0 };
     this.busy = true;
-    const ok = await Multi.editTile(i, tt, dig.after ?? TILE.GRASS);
+    // 놓았던 블록을 캐면 그 아래 원래 땅 (모래 위에 놓았으면 모래), 땅을 캐면 흙
+    const ok = await Multi.editTile(i, tt, dig.after ?? (World.base[i] === TILE.SAND ? TILE.SAND : TILE.GRASS));
     this.busy = false;
     if (ok) dig.gives.forEach(type => this.addItem(type));
   },
 
-  // 놓을 수 있는 칸: 풀밭/모래이고, 사람/몬스터/아이템이 없고, 집 문 앞이 아닌 곳
+  // 놓을 수 있는 칸: 풀밭/모래/흙이고 (땅 블록은 같은 땅 위에는 안 놓는다), 사람/몬스터/아이템이 없고, 집 문 앞이 아닌 곳
   canPlace(tx, ty) {
     if (tx <= 0 || ty <= 0 || tx >= World.w - 1 || ty >= World.h - 1) return false;
     const tt = World.tile(tx, ty), def = ITEMS[this.heldBlock], next = def && TILE[def.tile];
-    // 다리는 물 위에만, 나머지는 풀밭/모래에만
-    if (next === TILE.BRIDGE ? tt !== TILE.WATER : tt !== TILE.GRASS && tt !== TILE.SAND) return false;
+    // 다리는 물 위에만, 나머지는 풀밭/모래/흙에만
+    if (next === TILE.BRIDGE ? tt !== TILE.WATER : !PLACE_ON.has(tt) || tt === next) return false;
     if (tx === World.door.x && ty > World.door.y && ty <= World.door.y + 4) return false;
     const x0 = tx * T, y0 = ty * T;
     const overlaps = (x, y, r) => x + r > x0 && x - r < x0 + T && y + r > y0 && y - r < y0 + T;
@@ -5286,7 +5298,7 @@ const Buddy = {
       const x = ch.i % World.w, y = Math.floor(ch.i / World.w);
       if (Math.hypot(x * T + T / 2 - f.x, y * T + T / 2 - f.y) > 2.5 * T) continue;
       const placed = Object.keys(ITEMS).find(id => ITEMS[id].tile && TILE[ITEMS[id].tile] === ch.to);
-      if (placed && (ch.from === TILE.GRASS || ch.from === TILE.SAND || ch.from === TILE.WATER)) this.react('place', f, { x, y, block: placed });
+      if (placed && ch.to !== TILE.PATH && (PLACE_ON.has(ch.from) || ch.from === TILE.WATER)) this.react('place', f, { x, y, block: placed });
       else if (ch.from === TILE.TREE || ch.from === TILE.ROCK) this.react('dig', f, { x, y, tile: ch.from });
       else if (ch.from === TILE.FLOWER) this.react('flower', f);
     }
