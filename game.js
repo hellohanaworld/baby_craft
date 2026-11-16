@@ -4176,10 +4176,18 @@ const Game = {
   },
 
   // 여럿이 할 때 이 탭이 안 보이면(다른 탭/앱) 화면 그리기가 멈춘다. 그래도 다른 사람과 통신은 계속한다
+  // 크롬은 숨은 탭의 setInterval 을 5분 뒤부터 1분에 한 번만 돌린다 (방장이면 동물이 멈추고 안 쓰러진다).
+  // Worker 타이머는 그렇게 느려지지 않아서, Worker 가 0.25초마다 깨워 준다 (안 되면 setInterval)
   keepAliveInBackground() {
-    setInterval(() => {
-      if (document.hidden && Multi.online) this.step(performance.now());
-    }, 250);
+    const tick = () => { if (document.hidden && Multi.online) this.step(performance.now()); };
+    try {
+      const src = 'setInterval(() => postMessage(0), 250);';
+      const worker = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+      worker.onmessage = tick;
+    } catch (err) {
+      console.warn('[Game] Worker 안 됨 → setInterval', err);
+      setInterval(tick, 250);
+    }
   },
 
   update(dt) {
