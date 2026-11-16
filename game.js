@@ -2718,6 +2718,8 @@ const Input = {
     // e.code 를 써서 한글 입력 상태에서도 WASD 가 동작하게 한다
     addEventListener('keydown', e => {
       if (Game.pickerOpen) { e.preventDefault(); if (!e.repeat || e.code.startsWith('Arrow')) Game.pickerKey(e.code); return; }
+      if (Game.helpOpen) { e.preventDefault(); if (['Escape', 'Slash', 'Enter', 'Space'].includes(e.code)) Game.setHelp(false); return; }
+      if (e.code === 'Slash' && !e.repeat && Game.state === 'play') { e.preventDefault(); Game.setHelp(true); return; }
       if (Game.talkOpen) { e.preventDefault(); if (!e.repeat || e.code.startsWith('Arrow')) Game.talkKey(e.code); return; }
       if (e.code === 'KeyJ' && !e.repeat) Social.jump();
       if (e.code === 'KeyC' && !e.repeat) { Game.toggleTalk(); Sfx.click(); }
@@ -3478,6 +3480,7 @@ const Game = {
     this.keepAliveInBackground();
     this.initFullscreen();
     this.initBag();
+    this.initHelp();
     this.initClickSound();
     this.initHome();
     this.initBuddy();
@@ -4268,6 +4271,41 @@ const Game = {
   },
 
   // 위쪽 가방(아이템) 칸: 🎒 버튼을 눌렀을 때만 보인다 (폰에서 화면을 덜 가리게). PC 는 처음부터 펼침
+  // ---------- ? 단축키 설명 (작은 지도 아래 ? 버튼 / ? 키) ----------
+  get helpOpen() { return !$('#help-panel').classList.contains('hidden'); },
+
+  initHelp() {
+    $('#btn-help').addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); this.setHelp(!this.helpOpen); });
+    $('#help-panel').addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); this.setHelp(false); });
+  },
+
+  setHelp(open) {
+    const panel = $('#help-panel');
+    if (open) {
+      this.closeWeaponPicker(false);
+      this.closeTalk(false);
+      Input.reset();
+      const rows = [
+        ['🚶', '움직이기', 'Move', 'WASD / ← ↑ → ↓', '왼쪽 아래 조이스틱', 'Joystick'],
+        ['✋', '때리기 · 캐기 · 놓기 · 먹이 던지기', 'Hit · Dig · Place · Throw food', 'Space', '✋ 큰 버튼', 'Big ✋ button'],
+        ['🗡️', '손에 들 것 고르기', 'Choose what to hold', 'Q', '✋ 위 작은 버튼', 'Small button above ✋'],
+        ['🦘', '점프', 'Jump', 'J', '🦘 버튼', '🦘 button'],
+        ['💬', '말하기 (✏️ 쓰기, 표정, 먹기, 주기)', 'Talk (write, faces, eat, give)', 'C', '💬 버튼', '💬 button'],
+        ['🎒', '가방 접기 · 펴기', 'Open / close bag', 'B', '하트 옆 🎒', '🎒 next to hearts'],
+        ['📖', '카드 다 읽었어요', 'Card done', 'Space / Enter', '✅ 버튼', '✅ button'],
+        ['🚪', '고르는 칸 · 말하기 칸 닫기', 'Close a panel', 'Esc', '바깥 누르기', 'Tap outside'],
+        ['❓', '이 설명 열기 · 닫기', 'This help', '?', '? 버튼', '? button'],
+      ];
+      const touch = document.body.classList.contains('touch');
+      panel.innerHTML = `<div class="help-card"><h2>${tr('❓ 이렇게 해요', '❓ How to play')}</h2><table>${rows.map(([icon, ko, en, key, tko, ten]) =>
+        `<tr><td class="help-icon">${icon}</td><td>${tr(ko, en)}</td><td class="help-keys">${key.split(' / ').map(k => `<kbd>${k}</kbd>`).join(' ')}</td>${touch ? `<td class="help-touch">${tr(tko, ten)}</td>` : ''}</tr>`).join('')}</table>
+        <p>${tr('아무 곳이나 누르면 닫혀요', 'Tap anywhere to close')}</p></div>`;
+    }
+    panel.classList.toggle('hidden', !open);
+    $('#btn-help').classList.toggle('on', open);
+    Sfx.click();
+  },
+
   initBag() {
     this.setBag(!document.body.classList.contains('touch'));
     $('#btn-bag').addEventListener('pointerdown', e => {

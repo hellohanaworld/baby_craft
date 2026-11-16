@@ -8,7 +8,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <link rel="manifest" href="manifest.json">
   <title>Baby Craft</title>
-  <link rel="stylesheet" href="style.css?v=35">
+  <link rel="stylesheet" href="style.css?v=36">
 </head>
 <body>
   <canvas id="game"></canvas>
@@ -41,6 +41,9 @@
     </div>
   </div>
   <canvas id="minimap" class="minimap hidden"></canvas>
+  <!-- 작은 지도 오른쪽 아래 ?: 단축키 설명 -->
+  <button id="btn-help" class="help-btn" aria-label="help">?</button>
+  <div id="help-panel" class="help-panel hidden"></div>
 
   <div id="faint" class="faint hidden"></div>
 
@@ -116,6 +119,6 @@
     <p id="title-msg" class="msg"></p>
   </div>
 
-  <script src="game.js?v=48"></script>
+  <script src="game.js?v=49"></script>
 </body>
 </html>
