@@ -269,7 +269,9 @@ function itemNames(def) {
 // Store — localStorage 래퍼 (기기 안에만 저장)
 // ============================================================
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
-const NET_URL = './net.js?v=26';
+const NET_URL = './net.js?v=27';
+// 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
+const GAME_V = 61;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -2668,7 +2670,7 @@ const Multi = {
     }
     const world = kept.world && Number.isInteger(kept.world.seed) ? kept.world : { seed: channelSeed(code), w: World.w };
     this.useRoomWorld(world, kept.world ? kept.tiles : {});
-    this.net = await Net.serve(code, Game.seed, this.sid, this.roomKey());
+    this.net = await Net.serve(code, Game.seed, this.sid, this.roomKey(), GAME_V);
     this.mode = 'host';
     await this.uploadWorld();
     this.listen();
@@ -2745,7 +2747,12 @@ const Multi = {
     this.listen();
     this.net.onWorld(w => this.onWorld(w));
     this.net.onItems(list => this.onItems(list));
-    this.net.onRoom(h => (h ? this.onRoomBack(h) : this.onRoomGone()));
+    this.net.onRoom(h => {
+      if (!h) { this.onRoomGone(); return; }
+      this.hostKey = h.key;
+      if (this.tooOld(h)) return;
+      this.onRoomBack(h);
+    });
     Store.set(KEYS.room, { ...(Store.get(KEYS.room, {}) || {}), join: code });
     Session.set({ mode: 'guest', code });
     this.showBadge(code);
@@ -2783,6 +2790,19 @@ const Multi = {
     if (!this.roomGone) toast('📴');
     this.roomGone = true;
     for (const sid of [...this.peers.keys()]) this.leave(sid);
+  },
+
+  // 서버가 더 새 버전이다 (게임을 고쳤는데 이 기기는 예전 창 그대로): 새로고침해서 새 버전으로. 그래도 옛 버전이면 (캐시) 한 번만
+  tooOld(h) {
+    if (!(h.v > GAME_V)) return false;
+    try {
+      if (sessionStorage.getItem('bc.reloadV') === String(h.v)) return false;
+      sessionStorage.setItem('bc.reloadV', String(h.v));
+    } catch { return false; }
+    console.log(`[Multi] 서버가 새 버전 (${h.v}): 새로고침`);
+    Game.writeSave();
+    location.reload();
+    return true;
   },
 
   // 서버가 다시 켜졌다 (같은 채널): 같은 맵이면 그대로 이어서, 다른 맵이면 새로 불러온다 (바뀐 칸은 방에 남아 있다)
@@ -2915,6 +2935,7 @@ const Multi = {
     }
     return this.net.sendWorld({
       h: this.beat,
+      k: this.roomKey(), // 누가 보냈는지: 손님은 방 주인(서버)이 보낸 몬스터만 쓴다
       m: Monsters.list.map(m => [m.id, m.type, r(m.x), r(m.y), m.hp, m.faceRight ? 1 : 0, m.hitT > 0 ? 1 : 0, m.owner || 0,
         m.hopT > 0 ? 1 : 0, m.emoteT > 0 ? m.emote : 0]),
     });
@@ -3040,7 +3061,8 @@ const Multi = {
 
   // ---------- guest: 몬스터 + 아이템 받기 ----------
   onWorld(w) {
-    if (!w) return;
+    // 방 주인이 아닌 기기 (방장인 줄 아는 예전 버전 창)가 보낸 몬스터는 버린다. 섞이면 몬스터가 깜빡깜빡
+    if (!w || w.k !== this.hostKey) return;
     const seen = new Set();
     const hadBoss = !!Monsters.boss;
     for (const [id, type, x, y, hp, face, hit, owner, hop, emote] of (w.m || []).filter(Boolean)) {

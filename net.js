@@ -83,10 +83,11 @@ export async function peek(code) {
 }
 
 // 서버: 채널 주인 자리를 (누가 있든) 차지한다. srv: 서버 표시 (key 와 같다. 예전 버전 기기가 자리를 베껴 가면 key 만 달라진다). 서버가 꺼지면 방 정보 / 몬스터 / 아이템만 지우고 세상(world, t)은 남긴다
-export async function serve(code, seed, sid, key) {
+// v: 서버의 게임 버전 (더 옛 버전 기기는 새로고침한다)
+export async function serve(code, seed, sid, key, v) {
   await connect();
   const open = async () => {
-    await set(path(code, 'host'), { seed, key, srv: key, t: serverTimestamp() });
+    await set(path(code, 'host'), { seed, key, srv: key, v, t: serverTimestamp() });
     for (const k of ['host', 'w', 'items']) onDisconnect(path(code, k)).remove();
   };
   await open();
