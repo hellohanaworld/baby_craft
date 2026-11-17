@@ -271,7 +271,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 63;
+const GAME_V = 64;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -296,6 +296,15 @@ const Session = {
   get() { try { return JSON.parse(sessionStorage.getItem(this.KEY)); } catch { return null; } },
   set(v) { try { sessionStorage.setItem(this.KEY, JSON.stringify(v)); } catch { /* 저장 불가 */ } },
   clear() { try { sessionStorage.removeItem(this.KEY); } catch { /* 저장 불가 */ } },
+};
+
+// 이 탭의 이름 / 모양 (sessionStorage: 새로고침해도 남고, 탭마다 따로). 한 기기에서 여러 탭으로 놀아도 F5 하면 그 탭 사람으로.
+// 새 탭은 이 기기에서 마지막으로 쓴 것(localStorage)으로 시작
+const TabStore = {
+  get(key, fallback) {
+    try { const v = sessionStorage.getItem(key); return v === null ? fallback : JSON.parse(v); } catch { return fallback; }
+  },
+  set(key, value) { try { sessionStorage.setItem(key, JSON.stringify(value)); } catch { /* 저장 불가 */ } },
 };
 
 // room: 지난번 방 번호 { host: 내가 만든 방, join: 들어간 방 } (새로고침해도 같은 번호로)
@@ -3985,11 +3994,11 @@ const Game = {
     this.playAt = performance.now(); // 들어온 직전에 받은 칸 변화는 알리지 않는다
   },
 
-  // 캐릭터 이름: 머리 위에 보인다. 이 기기에 저장해서 다음부터는 바로 시작
+  // 캐릭터 이름: 머리 위에 보인다. 이 탭(새로고침해도 그대로)과 이 기기(새 탭의 처음 이름)에 저장
   initName() {
     const input = $('#name-input');
     input.maxLength = CONFIG.NAME_MAX;
-    input.value = Store.get(KEYS.name, '') || '';
+    input.value = TabStore.get(KEYS.name, null) || Store.get(KEYS.name, '') || '';
     // 글자를 칠 때 WASD/스페이스가 게임 조작으로 가지 않게
     input.addEventListener('keydown', e => {
       e.stopPropagation();
@@ -4009,6 +4018,7 @@ const Game = {
     }
     this.playerName = name;
     Store.set(KEYS.name, name);
+    TabStore.set(KEYS.name, name);
     return true;
   },
 
@@ -4107,14 +4117,16 @@ const Game = {
 
   // 캐릭터 모양: 처음엔 무작위, 이 기기에 저장. 🎨 로 다음 모양
   initLook() {
-    const saved = Store.get(KEYS.look, null);
+    const saved = TabStore.get(KEYS.look, null) ?? Store.get(KEYS.look, null);
     this.lookIndex = Number.isInteger(saved) && saved >= 0 && saved < LOOKS.length
       ? saved : Math.floor(Math.random() * LOOKS.length);
     Store.set(KEYS.look, this.lookIndex);
+    TabStore.set(KEYS.look, this.lookIndex);
     Render.drawLookPreview();
     $('#btn-look').addEventListener('click', () => {
       this.lookIndex = (this.lookIndex + 1) % LOOKS.length;
       Store.set(KEYS.look, this.lookIndex);
+      TabStore.set(KEYS.look, this.lookIndex);
       Render.drawLookPreview();
       Sfx.unlock();
       Sfx.pickup();
