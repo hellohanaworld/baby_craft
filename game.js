@@ -269,9 +269,9 @@ function itemNames(def) {
 // Store — localStorage 래퍼 (기기 안에만 저장)
 // ============================================================
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
-const NET_URL = './net.js?v=27';
+const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 62;
+const GAME_V = 63;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -2789,7 +2789,24 @@ const Multi = {
 
   listen() {
     this.net.onPlayers(all => this.onPlayers(all));
-    this.net.onTiles((i, v) => World.setTile(i, fixLand(i, v)));
+    this.net.onTiles((i, v) => (v === null ? this.onTileGone(i) : World.setTile(i, fixLand(i, v))));
+  },
+
+  // 방에서 맵 칸 기록이 지워졌다 (예전 버전 방장 창이 방을 지우거나 자기 맵으로 덮어씀).
+  // 서버: 내가 가진 칸으로 다시 적는다 (모아서 한 번에). 손님: 원래 맵으로 (서버가 다시 적으면 그 값으로) → 모든 기기가 같은 맵
+  onTileGone(i) {
+    if (!(i >= 0 && i < World.tiles.length)) return;
+    if (!this.isServer) { World.setTile(i, World.base[i]); return; }
+    if (World.tiles[i] === World.base[i]) return;
+    this.restoring ||= {};
+    this.restoring[i] = World.tiles[i];
+    clearTimeout(this.restoreTimer);
+    this.restoreTimer = setTimeout(() => {
+      const edits = this.restoring;
+      this.restoring = null;
+      console.log(`[Server] 지워진 칸 다시 적기 (${Object.keys(edits).length}개)`);
+      this.net.restoreTiles(edits).catch(err => console.warn('[Server] 칸 다시 적기 실패', err));
+    }, 300);
   },
 
   // 모두 한 방: 서버가 연 채널에 손님으로 들어간다. 서버가 아직 안 켜져 있으면 켜질 때까지 기다린다

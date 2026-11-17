@@ -15,7 +15,7 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import { getAuth, signInAnonymously } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
 import {
-  getDatabase, ref, get, set, onValue, onChildAdded, onChildChanged, onDisconnect, remove,
+  getDatabase, ref, get, set, update, onValue, onChildAdded, onChildChanged, onChildRemoved, onDisconnect, remove,
   runTransaction, serverTimestamp,
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js';
 
@@ -126,14 +126,18 @@ function room(code, seed, sid) {
     sendItems: list => set(path(code, 'items'), list),
     onItems: cb => onValue(path(code, 'items'), s => cb(s.val())),
     putTiles: edits => set(path(code, 't'), edits),
+    // 지워진 칸만 다시 적기 (다른 칸은 그대로)
+    restoreTiles: edits => update(path(code, 't'), edits),
     saveWorld: world => set(path(code, 'world'), world),
     // 방 정보가 바뀔 때마다 (방장이 나가면 null, 같은 번호로 다시 열면 다시 온다)
     onRoom: cb => onValue(path(code, 'host'), s => cb(s.val())),
-    // 맵 칸: 처음 붙을 때 지금까지 바뀐 칸이 모두 오고, 그 뒤로는 바뀔 때마다 온다
+    // 맵 칸: 처음 붙을 때 지금까지 바뀐 칸이 모두 오고, 그 뒤로는 바뀔 때마다 온다. 칸이 지워지면 null
+    // (예전 버전 방장 창이 방을 지우거나 자기 맵으로 덮어쓸 때)
     onTiles: cb => {
       const each = s => cb(Number(s.key), s.val());
       onChildAdded(path(code, 't'), each);
       onChildChanged(path(code, 't'), each);
+      onChildRemoved(path(code, 't'), s => cb(Number(s.key), null));
     },
     // 칸이 아직 expect 일 때만 next 로 바꾼다 (base: 한 번도 안 바뀐 칸의 원래 값). 됐으면 true
     async editTile(i, base, expect, next) {
