@@ -271,7 +271,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=27';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 61;
+const GAME_V = 62;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -1675,18 +1675,46 @@ const World = {
       }
       case TILE.CLOVER:
       case TILE.LUCKY: {
-        // 세잎: 위/왼쪽/오른쪽 잎 + 아래로 줄기, 네잎: 위/아래/왼쪽/오른쪽 잎 (잘 봐야 보인다)
+        // 클로버밭: 풀 위에 작은 세잎이 깔리고, 가운데 큰 클로버 하나 (세잎 ♣ / 네잎은 더 크고 잎이 넷).
+        // 잎은 하트 모양 (바깥 끝이 오목, 밝은 점 하나), 반 칸(0.5) 픽셀. 잎 아래 가장자리는 진하게 (그림자)
         grass();
-        const cx = 3 + Math.floor(hash(x, y, 11) * 2), cy = 3 + Math.floor(hash(x, y, 12) * 2);
-        const leaf = '#2e9e44', light = '#5cc96b';
-        px(cx - 1, cy - 2, leaf, 2, 2); px(cx - 3, cy, leaf, 2, 2); px(cx + 1, cy, leaf, 2, 2);
-        if (type === TILE.LUCKY) px(cx - 1, cy + 2, leaf, 2, 2);
-        else px(cx - 0.25, cy + 1.5, '#1b7a30', 0.5, 2.5);
-        px(cx - 0.5, cy - 0.5, light, 1, 1);
-        px(cx - 1, cy - 2, light, 0.5, 0.5); px(cx - 3, cy, light, 0.5, 0.5); px(cx + 1, cy, light, 0.5, 0.5);
-        // 둘레에 작은 세잎 하나 (밭처럼 보이게)
-        const ox = hash(x, y, 13) > 0.5 ? 0 : 6, oy = hash(x, y, 14) > 0.5 ? 0 : 6;
-        px(ox, oy, '#3fae55', 1, 1); px(ox + 1, oy, '#3fae55', 1, 1); px(ox + 0.5, oy + 1, '#3fae55', 1, 1);
+        const clover = (cx, cy, leaf, dirs, gap, mid, dark, light) => {
+          const cells = new Map(), h = leaf.length - 1, w = (leaf[0].length - 1) / 2;
+          for (const [ux, uy] of dirs) {
+            leaf.forEach((row, r) => [...row].forEach((ch, c) => {
+              if (ch === '.') return;
+              const ax = c - w, ay = r - h - gap; // 위로 향한 잎 기준 (끝이 가운데 쪽)
+              const rx = uy ? ax * -uy : -ay * ux, ry = uy ? ay * -uy : ax * ux;
+              cells.set(`${rx},${ry}`, ch);
+            }));
+          }
+          for (const [k, ch] of cells) {
+            const [rx, ry] = k.split(',').map(Number);
+            const color = ch === 'l' ? light : cells.has(`${rx},${ry + 1}`) ? mid : dark;
+            px(cx + rx * 0.5, cy + ry * 0.5, color, 0.5, 0.5);
+          }
+          px(cx, cy, dark, 0.5, 0.5);
+        };
+        const UP = [0, -1], DOWN = [0, 1], LEFT = [-1, 0], RIGHT = [1, 0];
+        // 밭처럼: 구석에 작은 세잎 하나
+        const sx = hash(x, y, 13) > 0.5 ? 1 : 6.5, sy = hash(x, y, 15) > 0.5 ? 1 : 7;
+        clover(sx, sy, ['m.m', '.m.'], [UP, LEFT, RIGHT], 0, '#5cb860', '#43a047', '#81c784');
+        const cx = 3.5 + Math.round(hash(x, y, 11)) * 0.5, cy = 3.5 + Math.round(hash(x, y, 12)) * 0.5;
+        if (type === TILE.LUCKY) {
+          // 네잎: 크고 선명한 초록, 비스듬한 줄기, 반짝 하나 (잘 보면 보인다)
+          px(cx + 0.5, cy + 0.5, '#1b5e20', 0.5, 0.5); px(cx + 1, cy + 1, '#1b5e20', 0.5, 0.5); px(cx + 1.5, cy + 1.5, '#1b5e20', 0.5, 1);
+          clover(cx, cy, ['.mm.mm.', 'mlmmmmm', 'mmmmmmm', '.mmmmm.', '..mmm..', '...m...'], [UP, RIGHT, DOWN, LEFT], 1, '#2fb34a', '#1b7a2e', '#b9f0b4');
+          px(cx + 2.5, cy - 3, '#fffde7', 0.5, 0.5);
+        } else {
+          px(cx, cy + 0.5, '#2e7d32', 0.5, 1); px(cx + 0.5, cy + 1.5, '#2e7d32', 0.5, 1);
+          clover(cx, cy, ['mm.mm', 'mlmmm', 'mmmmm', '.mmm.', '..m..'], [UP, LEFT, RIGHT], 1, '#43a047', '#2e7d32', '#a5d6a7');
+          // 가끔 흰 토끼풀 꽃
+          if (hash(x, y, 21) < 0.15) {
+            const fx = hash(x, y, 22) > 0.5 ? 6 : 1, fy = hash(x, y, 23) > 0.5 ? 1 : 5.5;
+            px(fx - 0.5, fy, '#f5f5f5', 1.5, 1); px(fx, fy - 0.5, '#f5f5f5', 0.5, 2); px(fx, fy + 0.5, '#f8bbd0', 0.5, 0.5);
+            px(fx, fy + 1.5, '#2f7d36', 0.5, 1);
+          }
+        }
         break;
       }
       case TILE.WATER:
@@ -4371,12 +4399,13 @@ const Game = {
     return { x: Math.floor(Player.x / T) + fx, y: Math.floor(Player.y / T) + fy };
   },
 
-  // 캘 칸: 바라보는 옆칸, 아니면 밟고 있는 꽃
+  // 캘 칸: 바라보는 옆칸, 아니면 밟고 있는 꽃/네잎클로버
   // 사람이 서 있는 다리는 캐지 않는다 (캐면 물이 되어 갇힌다)
   digTile() {
     const f = this.frontTile(), me = { x: Math.floor(Player.x / T), y: Math.floor(Player.y / T) };
     if (World.diggable(f.x, f.y) && !(DIG[World.tile(f.x, f.y)].after === TILE.WATER && this.someoneOn(f.x, f.y))) return f;
-    return World.tile(me.x, me.y) === TILE.FLOWER ? me : null; // 밟고 있는 칸은 꽃만 (발밑 풀밭을 캐지 않게)
+    // 밟고 있는 칸은 꽃과 네잎클로버만 (발밑 풀밭을 캐지 않게)
+    return [TILE.FLOWER, TILE.LUCKY].includes(World.tile(me.x, me.y)) ? me : null;
   },
 
   // 그 칸에 나나 다른 사람의 몸이 걸쳐 있는지
@@ -5269,7 +5298,7 @@ const Buddy = {
   done(icon) {
     if (icon) this.emote(icon);
     // 짓는 중에는 쉬지 않고 이어서 (가끔만 아이 곁으로)
-    this.restT = this.task && this.task.project ? (Math.random() < 0.15 ? randFloat(2, 4) : 0) : randFloat(2, 5);
+    this.restT = this.task && this.task.project ? (Math.random() < 0.4 ? randFloat(2, 4) : 0) : randFloat(2, 5);
     this.task = null;
     this.path = [];
     if (Game.heldBlock || Game.heldFood) { Game.picked = Game.lastWeapon; Game.renderInventory(); }
@@ -5298,13 +5327,19 @@ const Buddy = {
       }
       return;
     }
+    // 아이가 멀어지면 하던 일 (캐기/짓기/꼬시기)은 두고 따라간다 (술래잡기/숨바꼭질은 빼고)
+    if (t && !['follow', 'tag', 'hide'].includes(t.kind) && a !== this.home && this.dist(a, me) > 8 * T) {
+      this.done();
+      this.start('follow', {}, 4);
+      return;
+    }
     if (t && t.kind !== 'follow') return;
-    // 짓는 중에는 재료를 캐러 조금 더 멀리까지 간다
-    if (this.dist(a, me) > (this.project ? 14 : 7) * T || this.restT > 0) { if (!t) this.start('follow', {}, 4); return; }
+    // 아이 곁에 붙어 있는다 (짓는 중에는 재료를 캐러 조금 더 멀리까지)
+    if (this.dist(a, me) > (this.project ? 7 : 4) * T || this.restT > 0) { if (!t) this.start('follow', {}, 4); return; }
 
     // 짓는 중이면 대부분 그걸 이어서 한다
     if (!this.project && this.projectT <= 0) this.startProject(a);
-    if (this.project && Math.random() < 0.85 && this.projectStep(a)) return;
+    if (this.project && Math.random() < 0.6 && this.projectStep(a)) return;
 
     const choices = [];
     const myPets = Monsters.list.filter(m => m.owner === Multi.sid).length;
@@ -5346,14 +5381,14 @@ const Buddy = {
   },
 
   // ---------- 짓기: 집 / 하트숲 / 미로 ----------
-  // 아이에게서 3~8칸 떨어진, 거의 다 비어 있는 풀밭을 골라 시작한다 (아이가 서 있는 칸은 넣지 않는다)
+  // 아이에게서 3~5칸 떨어진, 거의 다 비어 있는 풀밭을 골라 시작한다 (아이가 서 있는 칸은 넣지 않는다)
   startProject(a) {
     const kinds = Object.keys(BUDDY_PROJECTS), kind = kinds[this.projectN % kinds.length];
     const plan = BUDDY_PROJECTS[kind].plan, w = plan[0].length, h = plan.length;
     const ax = Math.floor(a.x / T), ay = Math.floor(a.y / T);
     let best = null;
     for (let n = 0; n < 60; n++) {
-      const ang = Math.random() * Math.PI * 2, r = randFloat(3, 8);
+      const ang = Math.random() * Math.PI * 2, r = randFloat(3, 5);
       const ox = Math.round(ax + Math.cos(ang) * r - w / 2), oy = Math.round(ay + Math.sin(ang) * r - h / 2);
       if (ax >= ox - 1 && ax <= ox + w && ay >= oy - 1 && ay <= oy + h) continue; // 아이 자리와 겹친다
       let ok = 0, bad = 0;
@@ -5412,7 +5447,7 @@ const Buddy = {
       }
       // 재료 캐기 (문은 캘 수 없으니 그냥 빈칸으로 둔다, 꽃은 둘레에 없으면 건너뛴다)
       const tiles = ids.map(id => BUDDY_DIG[id]).filter(v => v !== undefined);
-      const spot = tiles.length && this.findTile(a, tiles, 12, true);
+      const spot = tiles.length && this.findTile(a, tiles, 7, true);
       if (!spot && block) { pr.gathering = false; return this.projectStep(a); } // 더 캘 게 없다: 있는 것부터 놓는다
       if (spot) {
         this.start('gather', { tx: spot.x, ty: spot.y, tile: World.tile(spot.x, spot.y), project: true }, 15);
@@ -5428,7 +5463,7 @@ const Buddy = {
     if (kind === 'maze') this.mazes.push({ ox, oy, w, h });
     this.talk('built', [{ house: ['집 다 지었다! 들어가 봐!', 'House done! Go inside!'], heart: ['하트숲 완성!', 'Heart forest done!'], maze: ['미로 완성! 들어가 봐!', 'Maze done! Go in!'] }[kind]], 5);
     this.project = null;
-    this.projectT = randFloat(20, 40);
+    this.projectT = randFloat(40, 70);
     this.emote('🎉');
     Floaters.add(Player.x, Player.y - 40, BUDDY_PROJECTS[kind].emoji, 26);
     Sfx.success();
@@ -5550,7 +5585,7 @@ const Buddy = {
   follow(t) {
     const a = this.anchor();
     if (!t.spot || performance.now() > t.spotAt) {
-      const ang = Math.random() * Math.PI * 2, r = randFloat(1.5, 2.6) * T;
+      const ang = Math.random() * Math.PI * 2, r = randFloat(1.2, 2) * T;
       t.spot = { x: Math.cos(ang) * r, y: Math.sin(ang) * r };
       t.spotAt = performance.now() + randFloat(2500, 4500);
     }
@@ -5570,7 +5605,7 @@ const Buddy = {
   // 사람처럼: 휘두르는 틈을 두고, 맞으면 잠깐 물러서고, 하트가 적으면 도망친다 (아이가 바로 위험하면 그래도 싸운다)
   hunt(t) {
     const m = t.m, a = this.anchor(), kid = a !== this.home ? a : null;
-    if (!Monsters.list.includes(m) || (this.dist(m, a) > 10 * T && this.dist(m, Player) > 5 * T)) {
+    if (!Monsters.list.includes(m) || (this.dist(m, a) > 7 * T && this.dist(m, Player) > 4 * T)) {
       if (Monsters.list.includes(m)) { this.done(); return; }
       this.done(kid && this.dist(kid, Player) < 6 * T ? (Math.random() < 0.5 ? '👍' : '😎') : '👍');
       if (kid) this.start('follow', { spot: null }, 3); // 이겼으면 아이 곁으로 돌아가 뽐내기
