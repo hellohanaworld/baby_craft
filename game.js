@@ -271,7 +271,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 66;
+const GAME_V = 67;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -3947,6 +3947,7 @@ const Game = {
     this.initHome();
     this.initBuddy();
     Social.initVoice();
+    Social.initWords();
     this.autoResume();
   },
 
@@ -4622,6 +4623,7 @@ const Game = {
 
   // 단어 카드 n 장 (첫 장은 emoji 가 같은 단어 우선)
   async showCards(n, emoji) {
+    if (!Social.wordsOn) return; // 📖 단어 OFF: 카드 없이 그냥 논다
     this.state = 'card';
     Input.reset();
     for (let i = 0; i < n; i++) {
@@ -5122,6 +5124,24 @@ const Social = {
       if (!this.voiceOn) window.speechSynthesis?.cancel(); // 읽던 것도 멈춘다
       show();
       toast(this.voiceOn ? '🔊 ON' : '🔇 OFF');
+    });
+    show();
+  },
+  // 📖 단어 ON/OFF: 단어 카드를 낼지 (어른은 끄고 논다). 탭마다 기억하고, 새 탭은 이 기기에서 마지막으로 고른 것 (처음엔 ON)
+  wordsOn: (TabStore.get('bc.words', null) ?? Store.get('bc.words', true)) !== false,
+
+  initWords() {
+    const btn = $('#btn-words');
+    const show = () => {
+      btn.classList.toggle('on', this.wordsOn);
+      btn.innerHTML = `📖<span>${tr('단어', 'Words')} ${this.wordsOn ? 'ON' : 'OFF'}</span>`;
+    };
+    btn.addEventListener('click', () => {
+      this.wordsOn = !this.wordsOn;
+      TabStore.set('bc.words', this.wordsOn);
+      Store.set('bc.words', this.wordsOn);
+      show();
+      toast(`📖 ${this.wordsOn ? 'ON' : 'OFF'}`);
     });
     show();
   },
