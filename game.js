@@ -271,7 +271,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 64;
+const GAME_V = 65;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -296,6 +296,14 @@ const Session = {
   get() { try { return JSON.parse(sessionStorage.getItem(this.KEY)); } catch { return null; } },
   set(v) { try { sessionStorage.setItem(this.KEY, JSON.stringify(v)); } catch { /* 저장 불가 */ } },
   clear() { try { sessionStorage.removeItem(this.KEY); } catch { /* 저장 불가 */ } },
+  // 게임이 스스로 새로고침할 때만 (새 버전, 새 맵) 그 방으로 바로 다시 간다. 사람이 F5 하면 시작 화면 (같은 컴퓨터로 다른 사람이 들어올 수 있게)
+  reload() {
+    try { sessionStorage.setItem('bc.resume', '1'); } catch { /* 저장 불가 */ }
+    location.reload();
+  },
+  takeResume() {
+    try { const v = sessionStorage.getItem('bc.resume'); sessionStorage.removeItem('bc.resume'); return v === '1'; } catch { return false; }
+  },
 };
 
 // 이 탭의 이름 / 모양 (sessionStorage: 새로고침해도 남고, 탭마다 따로). 한 기기에서 여러 탭으로 놀아도 F5 하면 그 탭 사람으로.
@@ -2855,7 +2863,7 @@ const Multi = {
     } catch { return false; }
     console.log(`[Multi] 서버가 새 버전 (${h.v}): 새로고침`);
     Game.writeSave();
-    location.reload();
+    Session.reload();
     return true;
   },
 
@@ -2865,7 +2873,7 @@ const Multi = {
     this.roomGone = false;
     if (h.seed !== this.net.seed) {
       Game.writeSave();
-      location.reload();
+      Session.reload();
       return;
     }
     this.monsterMap.clear();
@@ -4305,11 +4313,11 @@ const Game = {
     }, true);
   },
 
-  // 새로고침 전에 여럿이 하기 중이었으면 시작 화면 없이 그 방으로 바로 (방장은 같은 번호로 다시 열고,
-  // 손님은 방이 열릴 때까지 기다린다). 소리는 브라우저 규칙상 첫 키/터치 뒤부터 난다
+  // 게임이 스스로 새로고침했고 (새 버전, 새 맵) 그 전에 여럿이 하기 중이었으면 시작 화면 없이 그 방으로 바로 (방장은 같은 번호로 다시 열고,
+  // 손님은 방이 열릴 때까지 기다린다). 사람이 F5 하면 시작 화면 (이름은 이 탭 이름이 채워져 있다). 소리는 브라우저 규칙상 첫 키/터치 뒤부터 난다
   async autoResume() {
     const s = Session.get();
-    if (!s || !/^\d{4}$/.test(s.code || '') || !$('#name-input').value.trim()) return;
+    if (!Session.takeResume() || !s || !/^\d{4}$/.test(s.code || '') || !$('#name-input').value.trim()) return;
     addEventListener('pointerdown', () => { Sfx.unlock(); Speech.unlock(); }, { once: true, capture: true });
     addEventListener('keydown', () => { Sfx.unlock(); Speech.unlock(); }, { once: true, capture: true });
     $('#mp-panel').classList.remove('hidden');
