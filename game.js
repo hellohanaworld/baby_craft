@@ -271,7 +271,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 67;
+const GAME_V = 68;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -745,6 +745,8 @@ const Speech = {
       };
       u.onend = finish;
       u.onerror = finish;
+      // 카드가 듣는 중에 안내 음성이 나오면 마이크를 잠깐 끈다 (게임 목소리를 아이 말로 듣지 않게). 음성이 끝나면 다시 켜진다
+      if (Card.listener) { Card.stopListening(); Card.scheduleListen(300); }
       this.speaking = true;
       speechSynthesis.speak(u);
     });
@@ -928,6 +930,8 @@ const Card = {
   },
 
   listen() {
+    // 안내 음성이 나오는 중이면 (용을 잡자마자 "황금 나무가 생겼어요" 등) 끝난 뒤 다시
+    if (Speech.speaking && this.active && !this.passed && !this.listener) { this.scheduleListen(300); return; }
     if (!this.canListen()) return;
     this.startedAt = performance.now();
     this.heard = false;
