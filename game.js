@@ -271,7 +271,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 68;
+const GAME_V = 69;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -3982,8 +3982,9 @@ const Game = {
   },
 
   // 폰 아래 버튼(뒤로/홈)을 덜 건드리게 전체 화면으로. 누른 순간에만 허락된다.
-  // 실수로 빠져나가면 다음에 화면을 누를 때 다시 들어간다
+  // 실수로 빠져나가면 다음에 화면을 누를 때 다시 들어간다. 터치 화면(폰/태블릿)만: 노트북은 Esc 로 풀리고 클릭하면 다시 들어가 깜빡인다
   goFullscreen() {
+    if (!matchMedia('(pointer: coarse)').matches) return;
     const el = document.documentElement;
     const req = el.requestFullscreen || el.webkitRequestFullscreen;
     this.wantFullscreen = true;
@@ -3995,8 +3996,8 @@ const Game = {
   },
 
   initFullscreen() {
-    document.addEventListener('pointerdown', () => {
-      if (this.wantFullscreen && this.state === 'play') this.goFullscreen();
+    document.addEventListener('pointerdown', e => {
+      if (e.pointerType === 'touch' && this.wantFullscreen && this.state === 'play') this.goFullscreen();
     }, true);
   },
 
