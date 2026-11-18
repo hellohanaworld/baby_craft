@@ -289,7 +289,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 70;
+const GAME_V = 71;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -1485,7 +1485,7 @@ const World = {
   },
 
   // 2탄 🍀 클로버 들판: 1탄 오른쪽. 들판 곳곳 클로버밭 사이에 네잎클로버가 숨어 있다.
-  // 1탄 오른쪽 테두리 가운데쯤 🔒 잠긴 나무 하나 (1탄 용을 잡으면 황금 나무가 된다), 거기서 들판 가운데까지 길
+  // 1탄 오른쪽 테두리 가운데쯤 ✨ 황금 나무 하나 (처음부터 캘 수 있다), 거기서 들판 가운데까지 길
   buildStage2(t, W, H, SW) {
     const X0 = SW, X1 = 2 * SW; // 2탄 칸: X0 ~ X1-1 (왼쪽 테두리는 1탄의 오른쪽 테두리 X0-1)
     const set = (x, y, v) => { if (x >= X0 && y >= 0 && x < X1 && y < H) t[y * W + x] = v; };
@@ -1540,7 +1540,8 @@ const World = {
       const x = Math.round(X0 + (c.x - X0) * s), y = Math.round(gy + (c.y - gy) * s + Math.sin(s * 8 + wob) * 4 * Math.min(1, s * 4));
       for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) clear(x + dx, y + dy);
     }
-    t[gy * W + X0 - 1] = TILE.LOCK_TREE;
+    // 보스를 안 잡아도 넘어갈 수 있게 처음부터 ✨ 황금 나무 (캐면 길이 열린다)
+    t[gy * W + X0 - 1] = TILE.GOLD_TREE;
     this.stageGates = [{ x: X0 - 1, y: gy }];
 
     // 테두리 나무 (위, 아래, 오른쪽)
