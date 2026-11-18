@@ -85,8 +85,11 @@ const PRAISE = { ko: '잘했어요!', en: 'Great job!' };
 const FOLLOW_TEXT = { ko: '따라 읽어봐!', en: 'Say it with me!' };
 const FATAL_SPEECH_ERRORS = ['not-allowed', 'service-not-allowed', 'audio-capture', 'language-not-supported', 'network'];
 
-const FONT_UI = '"Malgun Gothic","Apple SD Gothic Neo","Noto Sans KR",sans-serif';
+const FONT_UI = '"Malgun Gothic","Apple SD Gothic Neo","Noto Sans KR",sans-serif,"Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji"';
 const FONT_EMOJI = '"Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",sans-serif';
+// 옛 윈도우 10 이모지 글꼴에 없는 새 이모지 → index.html 의 Noto 이모지 웹 글꼴 (이 글자들만 받는다). 캔버스는 글꼴을 저절로 받지 않아서 미리 받아 둔다
+const EMOJI_FALLBACK = '🪵🪨🪓🟫🤍🦛🦘🧱🧵🛡🦔🥩';
+try { document.fonts.load(`20px "Noto Color Emoji"`, EMOJI_FALLBACK).catch(() => {}); } catch { /* 미지원 */ }
 
 // 게임 아이템 (이름은 화면에 글자로 같이 보여준다)
 const ITEMS = {
@@ -289,7 +292,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 71;
+const GAME_V = 72;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다

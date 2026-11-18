@@ -3,9 +3,10 @@
   --card: #fffdf5;
   --ink: #2b2b2b;
   --wood: #5d4037;
-  --font-ui: "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif;
+  /* 이모지: 기기 글꼴 먼저, 없으면 (옛 윈도우 10 의 🪵 🪨 등) Noto 이모지 웹 글꼴 */
+  --font-ui: "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif, "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji";
   /* 영어는 a/g 모양이 단순한 글꼴 우선 (초기 읽기용) */
-  --font-en: "Andika", "Century Gothic", "Trebuchet MS", "Verdana", sans-serif;
+  --font-en: "Andika", "Century Gothic", "Trebuchet MS", "Verdana", sans-serif, "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji";
   --btn: 96px;
 }
 
