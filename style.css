@@ -214,7 +214,7 @@ body:not(.touch) #btn-talk::after { content: 'C'; }
   min-width: 26px; padding: 1px 5px; border-radius: 12px;
   background: #5d4037; color: #fff; font: 900 15px/1.2 var(--font-ui);
 }
-/* 오른쪽 위 작은 지도 (맵 120x90 칸 → 1칸 1px 이상) */
+/* 오른쪽 위 작은 지도 (탄 하나 120x90 칸 → 1칸 1px 이상. 높이는 game.js 가 탄 모양에 맞춘다) */
 .minimap {
   position: fixed;
   right: max(10px, env(safe-area-inset-right));
@@ -225,10 +225,21 @@ body:not(.touch) #btn-talk::after { content: 'C'; }
   border: 3px solid #5d4037;
   border-radius: 8px;
   background: #2e7d32;
-  pointer-events: none;
+  cursor: zoom-in;
+  touch-action: none;
   image-rendering: pixelated;
 }
 @media (max-width: 700px), (max-height: 420px) { .minimap { width: 120px; height: 90px; } }
+/* 🗺️ 누르면 화면 가운데에 크게 (넓이/높이는 game.js 가 탄 모양에 맞춘다) */
+.minimap.big {
+  right: auto; top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 30;
+  border-width: 5px;
+  border-radius: 12px;
+  box-shadow: 0 6px 30px rgba(0, 0, 0, .5);
+  cursor: zoom-out;
+}
 #hud .inv-slot.weapon { pointer-events: auto; cursor: pointer; }
 
 /* ---------- 토스트 ---------- */

@@ -15,8 +15,9 @@ const CONFIG = {
   // 맵
   TILE: 32,               // 맵 그림의 타일 크기(px). 화면 배율은 VIEW_TILES 로 정해진다
   STAGE_W: 120,           // 한 탄(스테이지)의 넓이 (칸)
-  MAP_W: 240,             // 지금 만든 탄 수 × STAGE_W (1탄 + 2탄)
-  MAP_H: 90,
+  MAP_W: 240,             // 옆으로 이어 붙인 탄 수 × STAGE_W (1탄 + 2탄)
+  STAGE_H: 90,            // 1탄 / 2탄의 높이 (칸)
+  MAP_H: 150,             // STAGE_H + 3탄 높이 (3탄 🧭 절벽 미로는 2탄 아래)
   VIEW_TILES: 9,          // 화면 짧은 변에 보이는 타일 수
   PLAYER_SPEED: 4.2,      // 타일/초
   PLAYER_RADIUS: 0.3,     // 타일 단위 충돌 반경
@@ -113,6 +114,8 @@ const ITEMS = {
   heart:  { emoji: '❤️', ko: '하트', en: 'heart',  kind: 'heart',    weight: 0 },
   // 2탄: 클로버 들판에서 찾은 네잎클로버 (가방에 모은다)
   clover: { emoji: '🍀', ko: '네잎클로버', en: 'four-leaf clover', kind: 'luck', weight: 0, icon: 'LUCKY' },
+  // 3탄: 미로 끝 보물 상자에서 받는 보석 (가방에 모은다)
+  gem:    { emoji: '💎', ko: '보석', en: 'jewel', kind: 'luck', weight: 0 },
   // 제작대에서 만드는 몸에 지니는 것 (한 번만 만든다). 방패: 맞을 때 두 번에 한 번 막아 준다
   shield: { emoji: '🛡️', ko: '방패', en: 'shield', kind: 'gear', weight: 0 },
   // 맵에서 캔 것. 손에 들고 ✋ 를 누르면 앞칸에 놓는다 (tile: 놓으면 되는 맵 칸).
@@ -155,13 +158,14 @@ const RECIPES = [
 const recipeGroup = r => (WEAPONS[r.result] || ITEMS[r.result].kind === 'gear' ? 'weapon' : ITEMS[r.result].kind === 'food' ? 'food' : 'block');
 
 // 지도 네 구역 (집은 가운데, 경계는 구불구불하게 이어진다). 구역마다 땅 색과 사는 동물이 다르다
-const REGION = { FOREST: 0, LAKE: 1, SWAMP: 2, MEADOW: 3, CLOVER: 4 };
+const REGION = { FOREST: 0, LAKE: 1, SWAMP: 2, MEADOW: 3, CLOVER: 4, MAZE: 5 };
 const REGIONS = [
   { emoji: '🌲', ko: '무서운 숲', en: 'Dark Forest' }, // 왼쪽 위: 나무가 빽빽, 육식동물
   { emoji: '🏞️', ko: '호수',     en: 'Lakes' },       // 오른쪽 위: 큰 호수, 물고기
   { emoji: '🍄', ko: '어두운 늪', en: 'Dark Swamp' },  // 왼쪽 아래: 어둡고 축축, 벌레
   { emoji: '🌼', ko: '초원',     en: 'Meadow' },      // 오른쪽 아래: 꽃밭, 초식동물
   { emoji: '🍀', ko: '클로버 들판', en: 'Clover Field' }, // 2탄: 클로버밭 사이에 네잎클로버가 숨어 있다
+  { emoji: '🧭', ko: '절벽 미로', en: 'Cliff Maze' },   // 3탄: 절벽 사이 길을 따라가면 끝에 보물 상자
 ];
 // 땅 색 (풀 + 점, 물, 모래, 나뭇잎). DEFAULT 는 블록 그림 같은 구역 없는 그림
 const GROUND = {
@@ -171,6 +175,8 @@ const GROUND = {
   [REGION.SWAMP]:  { grass: ['#4e6b48', '#435d3e', '#6b5a7a'], water: ['#4d7468', '#6b9488'], sand: ['#7d6b4c', '#6d5c40', '#8c7a58'], leaf: ['#33502f', '#3f6339', '#55744a'] },
   [REGION.MEADOW]: { grass: ['#7ccc5c', '#6dbd4e', '#8fd96b'], water: ['#3b8de0', '#74b9f0'], sand: ['#f0df9a', '#e0cd85', '#f8ebb5'], leaf: ['#2e7d32', '#43a047', '#66bb6a'] },
   [REGION.CLOVER]: { grass: ['#86d36a', '#78c55c', '#9be07f'], water: ['#42a5f5', '#90caf9'], sand: ['#f3e5ab', '#e6d592', '#faf0c4'], leaf: ['#388e3c', '#4caf50', '#81c784'] },
+  // 미로 바닥은 밝은 흙길 (작은 지도에서 어두운 절벽과 잘 구별되게)
+  [REGION.MAZE]:   { grass: ['#d9c49a', '#cbb489', '#e6d4ae'], water: ['#42a5f5', '#90caf9'], sand: ['#efe0b8', '#e2d1a3', '#f7ecd0'], leaf: ['#388e3c', '#4caf50', '#81c784'] },
 };
 
 // 동물 (이름도 글자로 같이 보여준다. emoji 가 words.csv 와 같으면 잡은 뒤 그 단어 카드가 나온다)
@@ -292,7 +298,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 72;
+const GAME_V = 73;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -1297,14 +1303,15 @@ const TILE = {
   CLOVER: 13, LUCKY: 14, // 2탄: 세잎클로버 / 네잎클로버 (지나갈 수 있다. 네잎클로버만 뽑는다)
   LOCK_TREE: 15, GOLD_TREE: 16, // 탄 사이 테두리의 잠긴 나무 → 보스를 잡으면 황금 나무 (캐면 다음 탄으로 가는 길)
   THORN: 17, // 놓아서 생기는 가시 울타리 (막고, 부딪친 사나운 동물은 따끔)
+  CLIFF: 18, CHEST: 19, // 3탄: 미로 벽 절벽 (캘 수 없다) / 미로 끝 보물 상자
 };
-const BLOCKING = new Set([TILE.TREE, TILE.WATER, TILE.ROCK, TILE.HOUSE, TILE.BRICK, TILE.TORCH, TILE.LOCK_TREE, TILE.GOLD_TREE, TILE.THORN]);
+const BLOCKING = new Set([TILE.TREE, TILE.WATER, TILE.ROCK, TILE.HOUSE, TILE.BRICK, TILE.TORCH, TILE.LOCK_TREE, TILE.GOLD_TREE, TILE.THORN, TILE.CLIFF, TILE.CHEST]);
 const MONSTER_BLOCKING = new Set([...BLOCKING, TILE.GATE]); // 문은 몬스터만 막는다
-const ARROW_BLOCKING = new Set([TILE.TREE, TILE.ROCK, TILE.HOUSE, TILE.BRICK, TILE.GATE, TILE.TORCH, TILE.LOCK_TREE, TILE.GOLD_TREE]);
+const ARROW_BLOCKING = new Set([TILE.TREE, TILE.ROCK, TILE.HOUSE, TILE.BRICK, TILE.GATE, TILE.TORCH, TILE.LOCK_TREE, TILE.GOLD_TREE, TILE.CLIFF, TILE.CHEST]);
 const CHUNK = 16; // 그림 조각 크기 (칸)
 const MINI_COLORS = ['#7ccf6f', '#2e7d32', '#3b8de0', '#e9d68f', '#8d939b', '#f48fb1', '#c0392b', '#c0392b', '#c8a06a',
   '#b5523b', '#8d5a2b', '#a0703f', '#ffb300',
-  '#5fbf4f', '#5fbf4f', '#2e7d32', '#ffd54f', '#33691e']; // 네잎클로버는 작은 지도에서 세잎클로버와 같은 색 (찾는 재미)
+  '#5fbf4f', '#5fbf4f', '#2e7d32', '#ffd54f', '#33691e', '#5d4037', '#ffb300']; // 네잎클로버는 작은 지도에서 세잎클로버와 같은 색 (찾는 재미)
 // 캐기: 칸 → 나오는 것, 맨손 횟수, 도구 횟수(tools 를 들었을 때), 캔 뒤 칸
 const DIG = {
   [TILE.FLOWER]: { gives: ['flower'], hand: 1 },
@@ -1389,12 +1396,15 @@ const World = {
 
   // 탄(스테이지)마다 STAGE_W 칸씩 오른쪽으로 이어 붙인다. 1탄은 예전 맵 그대로 (같은 시드면 같은 맵, 저장해 둔 바뀐 칸도 그대로).
   // 탄 사이 테두리 나무 한 줄 가운데 하나가 🔒 잠긴 나무: 그 탄의 보스를 잡으면 ✨ 황금 나무가 되어 캘 수 있다
+  // 3탄은 2탄 아래에 붙인다 (맵이 아래로 길어져도 칸 번호 = y * W + x 라서 1탄/2탄의 바뀐 칸은 그대로)
   build() {
-    const SW = CONFIG.STAGE_W, H = this.h = CONFIG.MAP_H;
+    const SW = CONFIG.STAGE_W, SH = CONFIG.STAGE_H;
+    this.h = CONFIG.MAP_H;
     const W = this.w = CONFIG.MAP_W; // 칸 번호 = y * W + x (모든 탄을 합친 넓이)
-    const t = this.tiles = new Uint8Array(W * H);
-    this.buildStage1(t, W, H, SW);
-    this.buildStage2(t, W, H, SW);
+    const t = this.tiles = new Uint8Array(W * this.h);
+    this.buildStage1(t, W, SH, SW);
+    this.buildStage2(t, W, SH, SW);
+    this.buildStage3(t, W, SH, SW);
     this.base = t.slice();
     this.edited();
   },
@@ -1415,7 +1425,7 @@ const World = {
     const ph = Array.from({ length: 4 }, () => randFloat(0, Math.PI * 2));
     const midX = y => SW / 2 + Math.sin(y * 0.09 + ph[0]) * 4 + Math.sin(y * 0.23 + ph[1]) * 2;
     const midY = x => H / 2 + Math.sin(x * 0.08 + ph[2]) * 4 + Math.sin(x * 0.21 + ph[3]) * 2;
-    const reg = this.regions = new Uint8Array(W * H);
+    const reg = this.regions = new Uint8Array(W * this.h);
     for (let y = 0; y < H; y++) for (let x = 0; x < SW; x++) reg[y * W + x] = (x >= midX(y) ? 1 : 0) + (y >= midY(x) ? 2 : 0);
     this.regionCenters = [[SW / 4, H / 4], [SW * 3 / 4, H / 4], [SW / 4, H * 3 / 4], [SW * 3 / 4, H * 3 / 4]]
       .map(([x, y]) => ({ x: Math.floor(x), y: Math.floor(y) }));
@@ -1558,20 +1568,90 @@ const World = {
       t[this.cloverTiles[Math.floor(rng() * this.cloverTiles.length)]] = TILE.LUCKY;
     }
 
-    // 2탄 → 다음 탄 문: 아래 테두리 가운데 🔒 잠긴 나무 (다음 탄이 생기면 열린다), 들판 가운데에서 거기까지 길
+    // 2탄 → 3탄 문: 아래 테두리 가운데 ✨ 황금 나무 (처음부터 캘 수 있다), 들판 가운데에서 거기까지 길
     // (위의 맵은 그대로 두려고 맨 끝에서 만든다: 난수 순서가 바뀌면 이미 바뀐 칸들과 맵이 어긋난다)
     const bx = X0 + Math.floor(SW / 2), wob2 = randFloat(0, Math.PI * 2);
     for (let s = 0; s <= 1; s += 0.005) {
       const x = Math.round(c.x + (bx - c.x) * s + Math.sin(s * 7 + wob2) * 3 * Math.min(1, (1 - s) * 4)), y = Math.round(c.y + (H - 2 - c.y) * s);
       for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) clear(x + dx, y + dy);
     }
-    t[(H - 1) * W + bx] = TILE.LOCK_TREE;
+    t[(H - 1) * W + bx] = TILE.GOLD_TREE;
     this.stageGates.push({ x: bx, y: H - 1 });
   },
 
-  // 몇 탄인지 (0 = 1탄)
-  stageAt(tx) { return clamp(Math.floor(tx / CONFIG.STAGE_W), 0, Math.ceil(this.w / CONFIG.STAGE_W) - 1); },
-  stageAtPx(x) { return this.stageAt(Math.floor(x / T)); },
+  // 3탄 🧭 절벽 미로: 2탄 아래 (2탄 아래 테두리의 황금 나무가 입구). 벽은 캘 수 없는 절벽, 길은 3칸 너비.
+  // 고리가 없는 미로라서 한쪽 벽(오른쪽 벽)만 손으로 짚고 따라가면 언젠가는 끝의 🎁 보물 상자에 닿는다
+  buildStage3(t, W, SH, SW) {
+    const X0 = SW, X1 = 2 * SW, Y0 = SH, Y1 = this.h; // 3탄 칸: X0 ~ X1-1, Y0 ~ Y1-1 (위 테두리는 2탄 아래 테두리 Y0-1)
+    for (let y = Y0; y < Y1; y++) {
+      for (let x = 0; x < W; x++) {
+        const i = y * W + x;
+        // 1탄 아래 (아무도 못 가는 곳)는 숲, 3탄은 절벽으로 채운 다음 길을 판다
+        if (x < X0) { t[i] = TILE.TREE; this.regions[i] = REGION.FOREST; } else { t[i] = TILE.CLIFF; this.regions[i] = REGION.MAZE; }
+      }
+    }
+    // 방 한 칸 = 길 3x3 + 벽 1줄. 벽 줄: x = MX + 4k, y = Y0 - 1 + 4k (맨 위 벽은 2탄 아래 테두리 나무)
+    const MX = X0 + 1, CW = Math.floor((X1 - MX - 1) / 4), CH = Math.floor((Y1 - Y0) / 4);
+    const open = (x0, y0, w, h) => { for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) t[y * W + x] = TILE.GRASS; };
+    const cellX = c => MX + 4 * c + 1, cellY = r => Y0 + 4 * r;
+    // 입구: 2탄 → 3탄 황금 나무 바로 아래 방
+    const gate = this.stageGates[1], c0 = Math.floor((gate.x - MX) / 4), seen = new Uint8Array(CW * CH);
+    const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+    // 길 파기: 이미 판 방 둘레의 벽 중 아무거나 하나씩 튼다 (갈림길과 짧은 막다른 길이 많고, 진짜 길은 너무 길지 않다)
+    const edges = [];
+    const add = (c, r) => {
+      seen[r * CW + c] = 1;
+      open(cellX(c), cellY(r), 3, 3);
+      for (const [dx, dy] of dirs) {
+        const nc = c + dx, nr = r + dy;
+        if (nc >= 0 && nr >= 0 && nc < CW && nr < CH && !seen[nr * CW + nc]) edges.push([c, r, nc, nr]);
+      }
+    };
+    add(c0, 0);
+    while (edges.length) {
+      const k = Math.floor(rng() * edges.length), [c, r, nc, nr] = edges[k];
+      edges[k] = edges[edges.length - 1];
+      edges.pop();
+      if (seen[nr * CW + nc]) continue;
+      // 두 방 사이 벽을 튼다
+      if (nc !== c) open(cellX(Math.max(c, nc)) - 1, cellY(r), 1, 3);
+      else open(cellX(c), cellY(Math.max(r, nr)) - 1, 3, 1);
+      add(nc, nr);
+    }
+    // 보물 상자: 입구에서 가장 먼 방 (막다른 방) 가운데
+    const dist = new Int32Array(CW * CH).fill(-1), q = [[c0, 0]];
+    dist[c0] = 0;
+    let far = [c0, 0];
+    for (let qi = 0; qi < q.length; qi++) {
+      const [c, r] = q[qi];
+      if (dist[r * CW + c] > dist[far[1] * CW + far[0]]) far = [c, r];
+      for (const [dx, dy] of dirs) {
+        const nc = c + dx, nr = r + dy;
+        if (nc < 0 || nr < 0 || nc >= CW || nr >= CH || dist[nr * CW + nc] >= 0) continue;
+        // 벽이 트였는지: 두 방 사이 벽 칸 가운데가 길이면
+        const wx = dx ? cellX(Math.max(c, nc)) - 1 : cellX(c) + 1, wy = dy ? cellY(Math.max(r, nr)) - 1 : cellY(r) + 1;
+        if (t[wy * W + wx] !== TILE.GRASS) continue;
+        dist[nr * CW + nc] = dist[r * CW + c] + 1;
+        q.push([nc, nr]);
+      }
+    }
+    this.mazeGoal = { x: cellX(far[0]) + 1, y: cellY(far[1]) + 1 };
+    t[this.mazeGoal.y * W + this.mazeGoal.x] = TILE.CHEST;
+    this.mazeStart = { x: gate.x, y: Y0 + 1 }; // 보물을 찾으면 여기(입구)로 돌아온다
+  },
+
+  // 몇 탄인지 (0 = 1탄, 1 = 2탄 (1탄 오른쪽), 2 = 3탄 (2탄 아래))
+  stageAt(tx, ty) {
+    if (ty >= CONFIG.STAGE_H) return 2;
+    return clamp(Math.floor(tx / CONFIG.STAGE_W), 0, Math.ceil(this.w / CONFIG.STAGE_W) - 1);
+  },
+  stageAtPx(x, y) { return this.stageAt(Math.floor(x / T), Math.floor(y / T)); },
+  // 작은 지도에 보여 줄 그 탄의 칸 범위 (2탄은 왼쪽 테두리, 3탄은 위 테두리도 같이 보여서 네 테두리가 다 보인다)
+  stageRect(st) {
+    const SW = CONFIG.STAGE_W, SH = CONFIG.STAGE_H;
+    if (st === 2) return { x: SW, y: SH - 1, w: SW, h: this.h - SH + 1 };
+    return { x: st * SW - (st ? 1 : 0), y: 0, w: SW + (st ? 1 : 0), h: SH };
+  },
 
   // 바뀐 칸만 (base 와 다른 칸): 저장/방에 올리기용 { 칸 번호: 값 }
   edits() {
@@ -1636,6 +1716,7 @@ const World = {
   diggable(tx, ty) {
     if (tx <= 0 || ty <= 0 || tx >= this.w - 1 || ty >= this.h - 1) return false;
     if (tx % CONFIG.STAGE_W === CONFIG.STAGE_W - 1 && this.tile(tx, ty) !== TILE.GOLD_TREE) return false; // 탄 사이 테두리
+    if (ty === CONFIG.STAGE_H - 1 && this.tile(tx, ty) !== TILE.GOLD_TREE) return false; // 2탄과 3탄 사이 (1탄 아래) 테두리
     return !!DIG[this.tile(tx, ty)];
   },
 
@@ -1844,6 +1925,31 @@ const World = {
         for (const [tx, ty] of [[3, 2.5], [5.5, 3], [1.5, 4.5], [4, 4.5], [6, 5.5]]) px(tx, ty, '#d7ccc8', 0.5, 0.5);
         break;
       }
+      case TILE.CLIFF: {
+        // 절벽: 위는 울퉁불퉁한 바위 땅, 아래가 길이면 깎아지른 절벽 면 (어두운 줄무늬)
+        fill('#8d7b6b');
+        specks(7, ['#7a6a5b', '#a1907f', '#6f6052'], 41);
+        const open = v => v !== TILE.CLIFF && v !== TILE.TREE;
+        if (open(this.tile(x, y - 1))) px(0, 0, '#b3a291', 8, 1);
+        if (open(this.tile(x, y + 1))) {
+          px(0, 5, '#5d4037', 8, 3);
+          px(0, 5, '#795548', 8, 0.5);
+          for (let i = 0; i < 3; i++) px(Math.floor(hash(x, y, 60 + i) * 8), 5.5, '#3e2723', 0.5, 2.5);
+        }
+        if (open(this.tile(x - 1, y))) px(0, 0, '#6f6052', 0.5, 8);
+        if (open(this.tile(x + 1, y))) px(7.5, 0, '#6f6052', 0.5, 8);
+        break;
+      }
+      case TILE.CHEST: {
+        // 보물 상자: 나무 상자 + 금테 + 자물쇠, 반짝
+        grass();
+        px(1, 6.5, 'rgba(0,0,0,.2)', 6, 1);
+        px(1, 3, '#8d5a2b', 6, 4); px(1, 2, '#a86d36', 6, 1.5); px(1.5, 1.5, '#a86d36', 5, 0.5);
+        px(1, 3.5, '#ffca28', 6, 0.5); px(1, 2, '#ffca28', 0.5, 5); px(6.5, 2, '#ffca28', 0.5, 5);
+        px(3.5, 3, '#fff59d', 1, 1.5); px(3.75, 3.75, '#5d4037', 0.5, 0.5);
+        px(6, 0.5, '#fff'); px(0.5, 1.5, '#fffde7', 0.5, 0.5);
+        break;
+      }
       default: break; // HOUSE, DOOR 는 drawHouse 에서 한 번에 그린다
     }
   },
@@ -2016,7 +2122,7 @@ const Monsters = {
   // 초식동물은 사람처럼 문도 지나가고 안전지대(집)에도 들어간다. 물고기는 물에서만
   canStand(m, x, y) {
     // 탄마다 동물은 따로: 야생 동물은 다른 탄으로 넘어가지 않는다 (내 동물은 나를 따라 넘어간다)
-    if (!m.owner && World.stageAtPx(x) !== World.stageAtPx(m.x)) return false;
+    if (!m.owner && World.stageAtPx(x, y) !== World.stageAtPx(m.x, m.y)) return false;
     if (m.def.swim) return World.canSwim(x, y, this.bodyRadius(m));
     if (m.def.calm) return World.canStand(x, y, this.bodyRadius(m));
     if (!this.safeZone(m.x, m.y) && this.safeZone(x, y)) return false;
@@ -2031,7 +2137,7 @@ const Monsters = {
       for (let i = 0; i < World.tiles.length; i++) if (World.tiles[i] === TILE.WATER) list.push({ x: i % World.w, y: Math.floor(i / World.w) });
     }
     return list.filter(s =>
-      (region === -1 || (region === -2 ? World.stageAt(s.x) === 0 : World.region(s.x, s.y) === region)) &&
+      (region === -1 || (region === -2 ? World.stageAt(s.x, s.y) === 0 : World.region(s.x, s.y) === region)) &&
       Math.hypot(s.x - World.door.x, s.y - World.door.y) >= minFromHome &&
       !this.safeZone(s.x * T + T / 2, s.y * T + T / 2) &&
       !Multi.nearPlayer(s.x * T, s.y * T, 7 * T));
@@ -2079,7 +2185,7 @@ const Monsters = {
     this.spawn('boss', far);
     const { main } = itemNames(BOSS);
     console.log('[Monsters] 보스 등장');
-    if (World.stageAtPx(Player.x) !== 0) return; // 1탄 용 알림은 1탄에 있는 사람만
+    if (World.stageAtPx(Player.x, Player.y) !== 0) return; // 1탄 용 알림은 1탄에 있는 사람만
     Sfx.boss();
     toast(`${BOSS.emoji} ${main}!`);
     if (Store.settings.lang === 'en') Speech.speak(`A ${BOSS.en}!`, 'en');
@@ -2088,7 +2194,7 @@ const Monsters = {
 
   get boss() { return this.list.find(m => m.def.boss); },
   // 그 탄의 보스 (stage: 0 = 1탄 용, 1 = 2탄 독수리). 화면 가장자리 화살표와 작은 지도에는 내가 있는 탄의 보스만
-  bossIn(stage) { return this.list.find(m => m.def.boss && World.stageAtPx(m.x) === stage); },
+  bossIn(stage) { return this.list.find(m => m.def.boss && World.stageAtPx(m.x, m.y) === stage); },
 
   // 가시 울타리 칸에 붙어 있는지
   nearThorn(m) {
@@ -2113,7 +2219,7 @@ const Monsters = {
 
   announceBoss(type) {
     const def = MONSTERS[type] || BOSS;
-    if (World.stageAtPx(Player.x) !== (def === BOSS ? 0 : 1)) return; // 그 탄에 있는 사람만
+    if (World.stageAtPx(Player.x, Player.y) !== (def === BOSS ? 0 : 1)) return; // 그 탄에 있는 사람만
     Sfx.boss();
     toast(`${def.emoji} ${itemNames(def).main}!`);
     if (Store.settings.lang === 'en') Speech.speak(`A ${def.en}!`, 'en');
@@ -3228,7 +3334,7 @@ const Multi = {
     }
     for (const id of [...this.monsterMap.keys()]) if (!seen.has(id)) this.monsterMap.delete(id);
     Monsters.list = [...this.monsterMap.values()].filter(m => m.def);
-    if (!hadBoss && Monsters.list.some(m => m.type === 'boss') && World.stageAtPx(Player.x) === 0) {
+    if (!hadBoss && Monsters.list.some(m => m.type === 'boss') && World.stageAtPx(Player.x, Player.y) === 0) {
       Sfx.boss();
       toast(`${BOSS.emoji} ${itemNames(BOSS).main}!`);
     }
@@ -3263,6 +3369,8 @@ const Input = {
       if (e.code === 'KeyJ' && !e.repeat) Social.jump();
       if (e.code === 'KeyC' && !e.repeat) { Game.toggleTalk(); Sfx.click(); }
       if (e.code === 'KeyB' && !e.repeat && Game.state === 'play') { Game.setBag($('#inventory').classList.contains('hidden')); Sfx.click(); }
+      if (e.code === 'KeyM' && !e.repeat) Game.setBigMap(!Game.bigMap);
+      if (e.code === 'Escape' && Game.bigMap) Game.setBigMap(false);
       if (KEYMAP[e.code]) { this.keys.add(e.code); e.preventDefault(); }
       if (e.code === 'KeyQ' && !e.repeat) { Game.toggleWeaponPicker(); Sfx.click(); }
       if (e.code === 'Space' || e.code === 'Enter') {
@@ -3414,9 +3522,12 @@ const Render = {
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     this.drawSwampDark();
     this.drawEdgeArrow(World.door.x * T + T / 2, World.door.y * T, '🏠', Craft.canMakeAny() ? '🔨' : '');
-    const boss = Monsters.bossIn(World.stageAtPx(Player.x));
+    const boss = Monsters.bossIn(World.stageAtPx(Player.x, Player.y));
     if (boss) this.drawEdgeArrow(boss.x, boss.y, boss.def.emoji, '');
-    for (const g of World.stageGates || []) if (World.tile(g.x, g.y) === TILE.GOLD_TREE) this.drawEdgeArrow(g.x * T + T / 2, g.y * T, '✨', '🌳');
+    const stNow = World.stageAtPx(Player.x, Player.y);
+    for (const g of World.stageGates || []) {
+      if (World.tile(g.x, g.y) === TILE.GOLD_TREE && World.stageAt(g.x, g.y) === stNow) this.drawEdgeArrow(g.x * T + T / 2, g.y * T, '✨', '🌳');
+    }
     for (const p of peers) this.drawEdgeArrow(p.x, p.y, '🧑', '', p.name);
     this.drawMinimap(peers, boss);
   },
@@ -3493,25 +3604,37 @@ const Render = {
     ctx.strokeRect(t.x * T + 1, t.y * T + 1, T - 2, T - 2);
   },
 
-  // 오른쪽 위 작은 지도: 맵 전체 + 지금 보이는 곳(흰 네모) + 나(파랑)/다른 사람(빨강)/보스
+  // 오른쪽 위 작은 지도: 내가 있는 탄 + 지금 보이는 곳(흰 네모) + 나(파랑)/다른 사람(빨강)/보스.
+  // 누르면 화면 가운데에 크게 (Game.bigMap. 3탄 미로는 지나온 길이 하늘색 발자국으로 보인다)
   drawMinimap(peers, boss) {
     const c = $('#minimap');
     if (!World.mini || c.classList.contains('hidden')) return;
-    const w = c.clientWidth, h = c.clientHeight;
+    const st = World.stageAtPx(Player.x, Player.y), R = World.stageRect(st), big = Game.bigMap;
+    // 탄마다 가로세로 비율이 달라서 (3탄은 납작하다) 높이를 넓이에 맞춘다
+    let cw;
+    if (big) cw = Math.round(Math.min(innerWidth * 0.94, (innerHeight * 0.86) * R.w / R.h, 1100));
+    c.style.width = big ? `${cw}px` : '';
+    const w = c.clientWidth;
     if (!w) return;
-    if (c.width !== Math.round(w * this.dpr)) { c.width = Math.round(w * this.dpr); c.height = Math.round(h * this.dpr); }
-    // 내가 있는 탄만 보여 준다 (탄마다 넓이 STAGE_W). 2탄부터는 왼쪽 테두리(앞 탄의 마지막 줄)도 같이 보여서 네 테두리가 다 보인다
-    const st = World.stageAtPx(Player.x), ox = st * CONFIG.STAGE_W - (st ? 1 : 0), SW = CONFIG.STAGE_W + (st ? 1 : 0);
-    const g = c.getContext('2d'), k = (w * this.dpr) / SW;
+    const h = Math.round(w * R.h / R.w);
+    if (c.style.height !== `${h}px`) c.style.height = `${h}px`;
+    if (c.width !== Math.round(w * this.dpr) || c.height !== Math.round(h * this.dpr)) { c.width = Math.round(w * this.dpr); c.height = Math.round(h * this.dpr); }
+    const ox = R.x, oy = R.y, z = big ? 2 : 1; // z: 크게 볼 때 점/그림 크기
+    const g = c.getContext('2d'), k = (w * this.dpr) / R.w;
     g.imageSmoothingEnabled = false;
-    g.drawImage(World.mini, ox, 0, SW, World.h, 0, 0, c.width, c.height);
+    g.drawImage(World.mini, ox, oy, R.w, R.h, 0, 0, c.width, c.height);
+    if (st === 2 && World.trail) {
+      g.globalAlpha = 0.75;
+      g.drawImage(World.trail, ox, oy, R.w, R.h, 0, 0, c.width, c.height);
+      g.globalAlpha = 1;
+    }
     g.strokeStyle = 'rgba(255,255,255,.9)';
     g.lineWidth = Math.max(1, this.dpr);
-    g.strokeRect((this.camX / T - ox) * k, this.camY / T * k, this.cssW / this.scale / T * k, this.cssH / this.scale / T * k);
+    g.strokeRect((this.camX / T - ox) * k, (this.camY / T - oy) * k, this.cssW / this.scale / T * k, this.cssH / this.scale / T * k);
     const dot = (x, y, color, r) => {
       g.fillStyle = color;
       g.beginPath();
-      g.arc((x / T - ox) * k, y / T * k, r * this.dpr, 0, Math.PI * 2);
+      g.arc((x / T - ox) * k, (y / T - oy) * k, r * z * this.dpr, 0, Math.PI * 2);
       g.fill();
       g.strokeStyle = '#fff';
       g.stroke();
@@ -3520,19 +3643,24 @@ const Render = {
     g.globalAlpha = 0.9;
     g.textAlign = 'center';
     g.textBaseline = 'middle';
-    g.font = `${Math.round(14 * this.dpr)}px ${FONT_EMOJI}`;
+    g.font = `${Math.round(14 * z * this.dpr)}px ${FONT_EMOJI}`;
     REGIONS.forEach((r, i) => {
       const c = World.regionCenters[i];
-      if (c && World.stageAt(c.x) === st) g.fillText(r.emoji, (c.x + 0.5 - ox) * k, (c.y + 0.5) * k);
+      if (c && World.stageAt(c.x, c.y) === st) g.fillText(r.emoji, (c.x + 0.5 - ox) * k, (c.y + 0.5 - oy) * k);
     });
-    // 다음 탄 가는 나무: 🔒 잠김 / ✨ 황금 나무
-    g.font = `${Math.round(11 * this.dpr)}px ${FONT_EMOJI}`;
+    // 다음 탄 가는 나무: 🔒 잠김 / ✨ 황금 나무, 3탄 미로 끝 🎁 보물 상자
+    g.font = `${Math.round(11 * z * this.dpr)}px ${FONT_EMOJI}`;
+    const mark = (x, y, emoji) => {
+      if (x < ox || x >= ox + R.w || y < oy || y >= oy + R.h) return;
+      const m = 7 * z * this.dpr;
+      g.fillText(emoji, clamp((x + 0.5 - ox) * k, m, c.width - m), clamp((y + 0.5 - oy) * k, m, c.height - m));
+    };
     for (const gt of World.stageGates || []) {
       const tt = World.tile(gt.x, gt.y);
-      if (gt.x < ox || gt.x >= ox + SW || (tt !== TILE.LOCK_TREE && tt !== TILE.GOLD_TREE)) continue;
-      const gx = clamp((gt.x + 0.5 - ox) * k, 7 * this.dpr, c.width - 7 * this.dpr), gy = clamp((gt.y + 0.5) * k, 7 * this.dpr, c.height - 7 * this.dpr);
-      g.fillText(tt === TILE.LOCK_TREE ? '🔒' : '✨', gx, gy);
+      if (tt === TILE.LOCK_TREE || tt === TILE.GOLD_TREE) mark(gt.x, gt.y, tt === TILE.LOCK_TREE ? '🔒' : '✨');
     }
+    const goal = World.mazeGoal;
+    if (goal && World.tile(goal.x, goal.y) === TILE.CHEST) mark(goal.x, goal.y, '🎁');
     g.globalAlpha = 1;
     // 내 동물 (분홍 점)
     for (const m of Monsters.list) if (m.owner === Multi.sid) dot(m.x, m.y, '#ec407a', 2);
@@ -4507,6 +4635,7 @@ const Game = {
     if (this.state !== 'play') return; // 화살로 처치해서 상태가 바뀌었을 수 있다
     Items.pickup();
     this.checkRegion(dt);
+    this.checkMaze();
     Monsters.touch();
     if (this.state !== 'play') return; // 다쳐서 기절했을 수 있다
     const onDoor = World.tileAtPx(Player.x, Player.y) === TILE.DOOR;
@@ -4601,13 +4730,14 @@ const Game = {
     else Speech.speak('황금 나무가 생겼어요! 잘라서 다음 탄으로 가요!', 'ko');
   },
 
-  // 황금 나무를 캐서 2탄 길이 열렸다 (모든 기기)
+  // 황금 나무를 캐서 다음 탄 길이 열렸다 (모든 기기)
   onGateOpen(x, y) {
     if (this.state === 'title' || this.state === 'loading' || performance.now() - (this.playAt || 0) < 4000) return;
     for (let i = 0; i < 6; i++) Floaters.add(x * T + T / 2 + randFloat(-16, 16), y * T + randFloat(-10, 10), '✨', 16);
-    toast('🍀 2탄!');
-    if (Store.settings.lang === 'en') Speech.speak('Stage two is open!', 'en');
-    else Speech.speak('2탄 클로버 들판이 열렸어요!', 'ko');
+    const third = y === CONFIG.STAGE_H - 1; // 2탄 아래 테두리 = 3탄 입구
+    toast(third ? '🧭 3탄!' : '🍀 2탄!');
+    if (Store.settings.lang === 'en') Speech.speak(third ? 'Stage three is open!' : 'Stage two is open!', 'en');
+    else Speech.speak(third ? '3탄 절벽 미로가 열렸어요!' : '2탄 클로버 들판이 열렸어요!', 'ko');
   },
 
   // 그 탄의 보스를 잡았다 (모든 기기)
@@ -4697,6 +4827,38 @@ const Game = {
       this.regionShown = r;
       toast(`${REGIONS[r].emoji} ${itemNames(REGIONS[r]).main}`);
     }
+  },
+
+  // 3탄 🧭 미로: 지나온 칸에 발자국 (큰 지도에 하늘색으로), 끝의 🎁 보물 상자 옆에 가면 💎 보석 + 축하, 잠시 뒤 입구로
+  checkMaze() {
+    const tx = Math.floor(Player.x / T), ty = Math.floor(Player.y / T), goal = World.mazeGoal;
+    if (World.stageAt(tx, ty) !== 2 || !goal) return;
+    if (!World.trail) {
+      World.trail = document.createElement('canvas');
+      World.trail.width = World.w;
+      World.trail.height = World.h;
+    }
+    const tg = World.trail.getContext('2d');
+    tg.fillStyle = '#29b6f6';
+    tg.fillRect(tx, ty, 1, 1);
+    const near = Math.hypot(Player.x - (goal.x * T + T / 2), Player.y - (goal.y * T + T / 2)) < T * 1.4;
+    if (!near || this.mazeDone) return;
+    this.mazeDone = true;
+    Sfx.success();
+    for (let i = 0; i < 8; i++) Floaters.add(goal.x * T + T / 2 + randFloat(-24, 24), goal.y * T - randFloat(0, 30), i % 2 ? '✨' : '💎', 18);
+    toast(tr('🎁 미로 탈출! 🎉', '🎁 You solved the maze! 🎉'));
+    if (Store.settings.lang === 'en') Speech.speak('You found the treasure! Great job!', 'en');
+    else Speech.speak('보물을 찾았어요! 미로 탈출 성공!', 'ko');
+    this.addItem('gem');
+    // 축하가 끝나면 미로 입구로 (발자국도 지우고 처음부터 다시 해 볼 수 있게)
+    setTimeout(() => {
+      this.mazeDone = false;
+      if (this.state !== 'play' || World.stageAtPx(Player.x, Player.y) !== 2) return;
+      World.trail.getContext('2d').clearRect(0, 0, World.w, World.h);
+      Player.x = World.mazeStart.x * T + T / 2;
+      Player.y = World.mazeStart.y * T + T / 2;
+      for (let i = 0; i < 5; i++) Floaters.add(Player.x + randFloat(-16, 16), Player.y - randFloat(0, 24), '✨', 16);
+    }, 3500);
   },
 
   // 집에 들어가면: 체력 회복 → 제작대
@@ -4965,6 +5127,16 @@ const Game = {
   initHelp() {
     $('#btn-help').addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); this.setHelp(!this.helpOpen); });
     $('#help-panel').addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); this.setHelp(false); });
+    // 🗺️ 작은 지도를 누르면 크게 (다시 누르면 작게). 크게 보면서도 움직일 수 있어서 지도를 보며 길을 찾는다
+    $('#minimap').addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); this.setBigMap(!this.bigMap); });
+  },
+
+  bigMap: false,
+  setBigMap(on) {
+    if (on && this.state !== 'play') return;
+    this.bigMap = on;
+    $('#minimap').classList.toggle('big', on);
+    Sfx.click();
   },
 
   setHelp(open) {
@@ -4980,6 +5152,7 @@ const Game = {
         ['🦘', '점프', 'Jump', 'J', '🦘 버튼', '🦘 button'],
         ['💬', '말하기 (✏️ 쓰기, 표정, 먹기, 주기)', 'Talk (write, faces, eat, give)', 'C', '💬 버튼', '💬 button'],
         ['🎒', '가방 접기 · 펴기', 'Open / close bag', 'B', '하트 옆 🎒', '🎒 next to hearts'],
+        ['🗺️', '지도 크게 보기 · 작게', 'Big map', 'M', '오른쪽 위 지도 누르기', 'Tap the map'],
         ['📖', '카드 다 읽었어요', 'Card done', 'Space / Enter', '✅ 버튼', '✅ button'],
         ['🚪', '고르는 칸 · 말하기 칸 닫기', 'Close a panel', 'Esc', '바깥 누르기', 'Tap outside'],
         ['❓', '이 설명 열기 · 닫기', 'This help', '?', '? 버튼', '? button'],
