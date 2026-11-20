@@ -109,6 +109,7 @@ const ITEMS = {
   honey:  { emoji: '🍯', ko: '꿀',   en: 'honey',  kind: 'food',     weight: 0 },
   fishmeat: { emoji: '🐟', ko: '생선', en: 'fish', kind: 'food',     weight: 0 },
   meat:   { emoji: '🥩', ko: '고기', en: 'meat',   kind: 'food',     weight: 0 },
+  cheese: { emoji: '🧀', ko: '치즈', en: 'cheese', kind: 'food',     weight: 0 }, // 3탄 미로의 쥐가 갖고 있다
   cooked: { emoji: '🍖', ko: '구운 고기', en: 'cooked meat', kind: 'food', weight: 0, heal: 4 }, // 제작대: 고기 + 통나무(불)
   // 하트는 따로 HEART_COUNT 개가 생긴다. 다쳤으면 바로 체력을 채우고, 가득이면 가방에 넣어 둔다
   heart:  { emoji: '❤️', ko: '하트', en: 'heart',  kind: 'heart',    weight: 0 },
@@ -183,7 +184,7 @@ const GROUND = {
 //   drops: 잡으면 나오는 것 (동물에 맞게: 사냥하는 짐승은 고기/가죽, 거미/양은 실, 고슴도치/복어/전갈은 가시, 벌은 꿀, 물고기/게는 생선)
 //   region: 사는 구역 (거기서 생기고, 쫓아가지 않을 때는 그 구역 안을 돌아다닌다), count: 몇 마리
 //   hunts: 육식동물 (사람과 초식동물을 쫓는다), calm: 먼저 공격하지 않고 다가가면 도망간다
-//   (먹이를 맞으면 그 사람을 따라다닌다), swim: 물에서만 다닌다
+//   (먹이를 맞으면 그 사람을 따라다닌다), swim: 물에서만 다닌다, ghost: 반투명하게 떠다니는 그림
 const MONSTERS = {
   // 🌲 무서운 숲
   wolf:     { emoji: '🐺', ko: '늑대',   en: 'wolf',     hp: 4, speed: 2.0, size: 26, drops: { meat: 1, leather: 1 }, region: REGION.FOREST, count: 3, hunts: true },
@@ -215,6 +216,10 @@ const MONSTERS = {
   bee:      { emoji: '🐝', ko: '벌',     en: 'bee',      hp: 2, speed: 2.6, size: 20, drops: { honey: 1 },         region: REGION.CLOVER, count: 4 },
   // 2탄 보스: 네잎클로버를 LUCK_FOR_BOSS 개 찾으면 나온다
   eagle:    { emoji: '🦅', ko: '독수리', en: 'eagle',    hp: 12, speed: 1.6, size: 52, drops: {},                    region: REGION.CLOVER, count: 0, boss: true },
+  // 🧭 3탄 절벽 미로: 어두운 미로에 사는 것들
+  ghost:    { emoji: '👻', ko: '유령',   en: 'ghost',    hp: 4, speed: 1.5, size: 28, drops: { string: 1 },        region: REGION.MAZE, count: 5, hunts: true, ghost: true },
+  rat:      { emoji: '🐀', ko: '쥐',     en: 'rat',      hp: 2, speed: 2.4, size: 22, drops: { cheese: 1 },        region: REGION.MAZE, count: 5, hunts: true },
+  lizard:   { emoji: '🦎', ko: '도마뱀', en: 'lizard',   hp: 3, speed: 2.0, size: 24, drops: { leather: 1 },       region: REGION.MAZE, count: 4 },
 };
 const BOSS = { emoji: '🐉', ko: '용', en: 'dragon', hp: 12, speed: 1.4, size: 56, drops: {}, boss: true };
 
@@ -298,7 +303,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 73;
+const GAME_V = 74;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -2637,7 +2642,7 @@ const Monsters = {
       const g = World.stageGates && World.stageGates[0];
       if (g && World.tile(g.x, g.y) === TILE.LOCK_TREE) Multi.editTile(g.y * World.w + g.x, TILE.LOCK_TREE, TILE.GOLD_TREE);
     } else {
-      if (m.def.region !== REGION.CLOVER) this.kills++; // 용은 1탄 동물을 잡은 수로만 나온다
+      if (m.def.region < REGION.CLOVER) this.kills++; // 용은 1탄 동물을 잡은 수로만 나온다
       this.respawnQueue.push({ at: performance.now() + CONFIG.MONSTER_RESPAWN_MS, type: m.type });
     }
     console.log(`[Monsters] ${m.def.ko} 처치${byOther ? ` (${byOther.name})` : ''}`);
@@ -3682,6 +3687,7 @@ const Render = {
     ctx.save();
     ctx.translate(m.x, m.y - s * 0.15 + bob);
     if (m.faceRight) ctx.scale(-1, 1); // 이모지는 대부분 왼쪽을 본다
+    if (m.def.ghost) { ctx.globalAlpha = 0.72; ctx.translate(0, Math.sin(time * 2.5 + m.phase) * 4); } // 유령: 반투명, 둥실둥실
     if (m.hitT > 0 && Math.floor(m.hitT * 20) % 2) ctx.globalAlpha = 0.35;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
