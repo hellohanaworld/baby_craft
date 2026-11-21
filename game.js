@@ -92,73 +92,61 @@ const FONT_EMOJI = '"Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",sans
 const EMOJI_FALLBACK = '🪵🪨🪓🟫🤍🦛🦘🧱🧵🛡🦔🥩';
 try { document.fonts.load(`20px "Noto Color Emoji"`, EMOJI_FALLBACK).catch(() => {}); } catch { /* 미지원 */ }
 
-// 게임 아이템 (이름은 화면에 글자로 같이 보여준다)
+// 게임 아이템. 종류(kind)는 다섯 가지 + 맵의 하트:
+//   material 재료 (제작대에서만 쓴다) / block 블록 (tile: 땅에 놓으면 되는 맵 칸) / food 음식 (먹으면 ❤️ heal, 던지면 좋아하는 동물이 따라온다)
+//   potion 물약 (마시면 특별한 힘: heal / speed / light 초) / wear 옷 (slot: 입는 곳. 꾸미기) / gear 방패 (slot 에 들면 두 번에 한 번 막아 준다)
+// 그림은 모두 픽셀 그림 (icon: PIXEL_ICONS, 블록은 맵 칸 그림). emoji 는 말풍선/알림 글자에만 쓴다
+// weight: 맵에 저절로 떨어져 있는 비율 (0 이면 안 생긴다)
 const ITEMS = {
-  wood:   { emoji: '🪵', ko: '통나무', en: 'log',  kind: 'material', weight: 4 },
-  stone:  { emoji: '🪨', ko: '돌',   en: 'rock',   kind: 'material', weight: 3 },
-  string: { emoji: '🧵', ko: '실',   en: 'string', kind: 'material', weight: 2 },
-  iron:   { emoji: '🔩', ko: '쇠',   en: 'iron',   kind: 'material', weight: 0 }, // 예전 재료 (이제 안 나온다. 가방에 남은 것만)
-  // 동물에게서 나오는 재료 (그림은 이모지 대신 픽셀 그림: icon)
-  leather: { emoji: '🟫', ko: '가죽', en: 'leather', kind: 'material', weight: 0, icon: 'LEATHER' },
-  thorn:  { emoji: '📍', ko: '가시', en: 'spike',  kind: 'material', weight: 0, icon: 'THORN' },
-  apple:  { emoji: '🍎', ko: '사과', en: 'apple',  kind: 'food',     weight: 2 },
-  milk:   { emoji: '🥛', ko: '우유', en: 'milk',   kind: 'food',     weight: 1 },
-  grape:  { emoji: '🍇', ko: '포도', en: 'grape',  kind: 'food',     weight: 1 },
-  egg:    { emoji: '🥚', ko: '알',   en: 'egg',    kind: 'food',     weight: 1 },
-  // 동물에게서 나오는 먹을 것 (heal: 먹으면 채우는 하트, 없으면 2)
-  honey:  { emoji: '🍯', ko: '꿀',   en: 'honey',  kind: 'food',     weight: 0 },
-  fishmeat: { emoji: '🐟', ko: '생선', en: 'fish', kind: 'food',     weight: 0 },
-  meat:   { emoji: '🥩', ko: '고기', en: 'meat',   kind: 'food',     weight: 0 },
-  cheese: { emoji: '🧀', ko: '치즈', en: 'cheese', kind: 'food',     weight: 0 }, // 3탄 미로의 쥐가 갖고 있다
-  // 제작대에서 만드는 음식
-  skewer: { emoji: '🍢', ko: '생선 꼬치', en: 'fish skewer', kind: 'food', weight: 0, heal: 3 }, // 생선 + 통나무(꼬치)
-  cake:   { emoji: '🎂', ko: '케이크', en: 'cake',    kind: 'food', weight: 0, heal: 4 },
-  pizza:  { emoji: '🍕', ko: '피자',   en: 'pizza',   kind: 'food', weight: 0, heal: 4 },
-  lunch:  { emoji: '🍱', ko: '도시락', en: 'lunch box', kind: 'food', weight: 0, heal: 5 },
-  // 물약: 블록처럼 손에 들고 ✋ 를 누르면 마신다 (다쳤을 때만). shield: 마시면 이만큼(초) 안 다친다
-  potion: { emoji: '⚗️', ko: '빨간 물약', en: 'red potion',  kind: 'potion', weight: 0, heal: 3, icon: 'POTION_R' },
-  honeypot: { emoji: '⚗️', ko: '꿀 물약', en: 'honey potion', kind: 'potion', weight: 0, heal: 5, icon: 'POTION_G' },
-  lovepot: { emoji: '⚗️', ko: '하트 물약', en: 'heart potion', kind: 'potion', weight: 0, heal: 5, shield: 6, icon: 'POTION_P' },
-  cooked: { emoji: '🍖', ko: '구운 고기', en: 'cooked meat', kind: 'food', weight: 0, heal: 4 }, // 제작대: 고기 + 통나무(불)
-  // 하트는 따로 HEART_COUNT 개가 생긴다. 다쳤으면 바로 체력을 채우고, 가득이면 가방에 넣어 둔다
-  heart:  { emoji: '❤️', ko: '하트', en: 'heart',  kind: 'heart',    weight: 0 },
-  // 2탄: 클로버 들판에서 찾은 네잎클로버 (가방에 모은다)
-  clover: { emoji: '🍀', ko: '네잎클로버', en: 'four-leaf clover', kind: 'luck', weight: 0, icon: 'LUCKY' },
-  // 3탄: 미로 끝 보물 상자에서 받는 보석 (가방에 모은다)
-  gem:    { emoji: '💎', ko: '보석', en: 'jewel', kind: 'luck', weight: 0 },
-  // 제작대에서 만드는 몸에 지니는 것 (한 번만 만든다). 방패: 맞을 때 두 번에 한 번 막아 준다
-  shield: { emoji: '🛡️', ko: '방패', en: 'shield', kind: 'gear', weight: 0 },
-  // 옷: 만들면 바로 입는다 (캐릭터 그림에 보이고 다른 사람 화면에도 보인다). slot: 입는 곳 (머리는 왕관 > 화관 > 모자 중 하나)
-  hat:    { emoji: '🤠', ko: '가죽 모자', en: 'leather hat', kind: 'wear', slot: 'head', weight: 0, icon: 'HAT' },
-  wreath: { emoji: '🌸', ko: '꽃 화관', en: 'flower crown', kind: 'wear', slot: 'head', weight: 0, icon: 'WREATH' },
-  crown:  { emoji: '👑', ko: '왕관',   en: 'crown',      kind: 'wear', slot: 'head', weight: 0 },
-  vest:   { emoji: '🦺', ko: '가죽 옷', en: 'leather vest', kind: 'wear', slot: 'body', weight: 0, icon: 'VEST' },
-  cape:   { emoji: '🧣', ko: '망토',   en: 'cape',       kind: 'wear', slot: 'back', weight: 0, icon: 'CAPE' },
-  boots:  { emoji: '👢', ko: '장화',   en: 'boots',      kind: 'wear', slot: 'feet', weight: 0, icon: 'BOOTS' },
-  // 맵에서 캔 것. 손에 들고 ✋ 를 누르면 앞칸에 놓는다 (tile: 놓으면 되는 맵 칸).
-  // 그림은 이모지 대신 맵 칸 그림 그대로 (iconHtml / tileIcon)
-  tree:   { emoji: '🌳', ko: '나무', en: 'tree',    kind: 'block', tile: 'TREE',   weight: 0 },
-  flower: { emoji: '🌷', ko: '꽃',   en: 'flower',  kind: 'block', tile: 'FLOWER', weight: 0 },
-  rock:   { emoji: '🪨', ko: '바위', en: 'boulder', kind: 'block', tile: 'ROCK',   weight: 0 },
-  // 제작대에서 만드는 블록
-  brick:  { emoji: '🧱', ko: '벽돌', en: 'brick',   kind: 'block', tile: 'BRICK',  weight: 0 },
-  gate:   { emoji: '🚪', ko: '문',   en: 'door',    kind: 'block', tile: 'GATE',   weight: 0 }, // 사람은 지나가고 몬스터는 못 지나간다
-  bridge: { emoji: '🌉', ko: '다리', en: 'bridge',  kind: 'block', tile: 'BRIDGE', weight: 0 }, // 물 위에만 놓는다
-  torch:  { emoji: '🔥', ko: '횃불', en: 'torch',   kind: 'block', tile: 'TORCH',  weight: 0 }, // 둘레에 몬스터가 못 온다
-  fence:  { emoji: '🌵', ko: '가시 울타리', en: 'spike fence', kind: 'block', tile: 'THORN', weight: 0 }, // 막고, 부딪친 사나운 동물은 따끔
+  // 🪵 재료
+  wood:    { emoji: '🪵', ko: '통나무', en: 'log',     kind: 'material', weight: 4, icon: 'LOG' },
+  stone:   { emoji: '🪨', ko: '돌',     en: 'stone',   kind: 'material', weight: 3, icon: 'STONE' },
+  string:  { emoji: '🧵', ko: '실',     en: 'string',  kind: 'material', weight: 1, icon: 'SPOOL' },
+  leather: { emoji: '🟫', ko: '가죽',   en: 'leather', kind: 'material', weight: 0, icon: 'LEATHER' },
+  thorn:   { emoji: '📍', ko: '가시',   en: 'spike',   kind: 'material', weight: 0, icon: 'THORN' },
+  clover:  { emoji: '🍀', ko: '네잎클로버', en: 'four-leaf clover', kind: 'material', weight: 0, icon: 'LUCKY' }, // 2탄 들판에서 뽑는다
+  gem:     { emoji: '💎', ko: '보석',   en: 'jewel',   kind: 'material', weight: 0, icon: 'GEM' }, // 3탄 미로 끝 보물 상자
+  // 🍎 음식 (likes: MONSTERS 의 좋아하는 음식)
+  apple:   { emoji: '🍎', ko: '사과',   en: 'apple',   kind: 'food', weight: 2, heal: 1, icon: 'APPLE' },
+  carrot:  { emoji: '🥕', ko: '당근',   en: 'carrot',  kind: 'food', weight: 2, heal: 1, icon: 'CARROT' },
+  meat:    { emoji: '🍖', ko: '고기',   en: 'meat',    kind: 'food', weight: 0, heal: 2, icon: 'MEAT' },
+  fish:    { emoji: '🐟', ko: '생선',   en: 'fish',    kind: 'food', weight: 0, heal: 2, icon: 'FISH' },
+  honey:   { emoji: '🍯', ko: '꿀',     en: 'honey',   kind: 'food', weight: 0, heal: 1, icon: 'HONEY' }, // 2탄 벌. 물약 재료
+  cake:    { emoji: '🎂', ko: '케이크', en: 'cake',    kind: 'food', weight: 0, heal: 5, icon: 'CAKE' }, // 모든 동물이 좋아한다
+  // ⚗️ 물약
+  redpot:  { emoji: '⚗️', ko: '빨간 물약', en: 'red potion',    kind: 'potion', weight: 0, heal: 3, icon: 'POTION_R' },
+  bluepot: { emoji: '⚗️', ko: '파란 물약', en: 'blue potion',   kind: 'potion', weight: 0, speed: 30, icon: 'POTION_B' }, // 30초 빨리 달리기
+  yellowpot: { emoji: '⚗️', ko: '노란 물약', en: 'yellow potion', kind: 'potion', weight: 0, light: 60, icon: 'POTION_Y' }, // 60초 어두운 곳이 밝다
+  // 👕 옷 (꾸미기) / 🛡️ 방패
+  hat:     { emoji: '🤠', ko: '가죽 모자', en: 'leather hat',    kind: 'wear', slot: 'head', weight: 0, icon: 'HAT' },
+  crown:   { emoji: '👑', ko: '왕관',      en: 'crown',          kind: 'wear', slot: 'head', weight: 0, icon: 'CROWN' },
+  vest:    { emoji: '🦺', ko: '가죽 갑옷', en: 'leather armor',  kind: 'wear', slot: 'body', weight: 0, icon: 'VEST' },
+  boots:   { emoji: '👢', ko: '장화',      en: 'boots',          kind: 'wear', slot: 'feet', weight: 0, icon: 'BOOTS' },
+  shield:  { emoji: '🛡️', ko: '방패',      en: 'shield',         kind: 'gear', weight: 0, icon: 'SHIELD' }, // 가방에 있으면 맞을 때 두 번에 한 번 막는다
+  // 🧱 블록: 꽃은 캐서, 묘목은 나무를 캐면 같이 나온다 (심으면 자라서 나무), 나머지는 제작대에서
+  flower:  { emoji: '🌷', ko: '꽃',     en: 'flower',  kind: 'block', tile: 'FLOWER',  weight: 0 },
+  sapling: { emoji: '🌱', ko: '묘목',   en: 'sapling', kind: 'block', tile: 'SAPLING', weight: 0 },
+  brick:   { emoji: '🧱', ko: '벽돌',   en: 'brick',   kind: 'block', tile: 'BRICK',   weight: 0 },
+  gate:    { emoji: '🚪', ko: '문',     en: 'door',    kind: 'block', tile: 'GATE',    weight: 0 }, // 사람은 지나가고 몬스터는 못 지나간다
+  bridge:  { emoji: '🌉', ko: '다리',   en: 'bridge',  kind: 'block', tile: 'BRIDGE',  weight: 0 }, // 물 위에만 놓는다
+  torch:   { emoji: '🔥', ko: '횃불',   en: 'torch',   kind: 'block', tile: 'TORCH',   weight: 0 }, // 둘레에 몬스터가 못 온다
+  fence:   { emoji: '🌵', ko: '가시 울타리', en: 'spike fence', kind: 'block', tile: 'THORN', weight: 0 }, // 막고, 부딪친 사나운 동물은 따끔
+  // 맵에 떠 있는 ❤️ (HEART_COUNT 개). 다쳤을 때만 주워서 바로 먹는다 (가방에 넣지 않는다)
+  heart:   { emoji: '❤️', ko: '하트',   en: 'heart',   kind: 'heart', weight: 0 },
 };
+// 가방 판: 바꾸면 모든 가방을 비우고 새로 시작한다 (아이템 체계가 바뀌었을 때)
+const BAG_V = 2;
 
-// 무기 (power 가 클수록 강하다. 제일 센 무기를 자동으로 든다)
+// 무기 (power 가 클수록 강하다)
 const WEAPONS = {
   hand:  { emoji: '✋', ko: '손',   en: 'hand',  power: 1 },
-  // fix: 이모지가 놓인 방향 바로잡기 (flip: 좌우 뒤집기 → 도끼날이 앞으로, turn: 180도 → 칼날이 위로)
-  axe:   { emoji: '🪓', ko: '도끼', en: 'axe',   power: 2, fix: 'flip' },
-  bow:   { emoji: '🏹', ko: '활',   en: 'bow',   power: 3 },
-  sword: { emoji: '🗡️', ko: '칼',   en: 'sword', power: 4, fix: 'turn' },
+  axe:   { emoji: '🪓', ko: '도끼', en: 'axe',   power: 2, icon: 'AXE' },
+  bow:   { emoji: '🏹', ko: '활',   en: 'bow',   power: 3, icon: 'BOW' },
+  sword: { emoji: '🗡️', ko: '칼',   en: 'sword', power: 4, icon: 'SWORD' },
 };
 
 // 제작대 레시피 (1탄 집 안, 2탄 ⛺ 텐트, 3탄 ⚒️ 대장간). unlock: 몬스터를 이만큼 잡아야 열린다.
-// 무기/방패/옷은 한 번만, 블록/음식/물약은 몇 번이든 (count 개씩). 모든 재료/음식이 어딘가에 쓰인다
+// 무기/방패/옷은 한 번만, 블록/음식/물약은 몇 번이든 (count 개씩).
 // 줄(무기 → 옷 → 블록 → 음식 → 물약) 순서대로 적는다 (키보드로 고르는 번호가 화면 순서와 같게)
 const RECIPES = [
   { result: 'axe',    needs: { wood: 2, stone: 1 },            unlock: 0 },
@@ -168,24 +156,16 @@ const RECIPES = [
   { result: 'hat',    needs: { leather: 2 },                   unlock: 0 },
   { result: 'vest',   needs: { leather: 3, string: 1 },        unlock: 0 },
   { result: 'boots',  needs: { leather: 2, string: 1 },        unlock: 0 },
-  { result: 'cape',   needs: { string: 3, flower: 2 },         unlock: 0 },
-  { result: 'wreath', needs: { flower: 4 },                    unlock: 0 },
-  { result: 'crown',  needs: { gem: 2, clover: 1 },            unlock: 0 },
+  { result: 'crown',  needs: { gem: 3 },                       unlock: 0 },
   { result: 'brick',  needs: { stone: 2 },                     unlock: 0, count: 2 },
   { result: 'gate',   needs: { wood: 2 },                      unlock: 0, count: 1 },
   { result: 'bridge', needs: { wood: 1 },                      unlock: 0, count: 2 },
   { result: 'torch',  needs: { wood: 1, stone: 1 },            unlock: 0, count: 2 },
   { result: 'fence',  needs: { thorn: 2, wood: 1 },            unlock: 0, count: 2 },
-  { result: 'wood',   needs: { tree: 1 },                      unlock: 0, count: 3 }, // 캔 나무 → 통나무
-  { result: 'stone',  needs: { rock: 1 },                      unlock: 0, count: 3 }, // 캔 바위 → 돌
-  { result: 'cooked', needs: { meat: 1, wood: 1 },             unlock: 0, count: 1 },
-  { result: 'skewer', needs: { fishmeat: 2, wood: 1 },         unlock: 0, count: 1 },
-  { result: 'cake',   needs: { egg: 2, milk: 1 },              unlock: 0, count: 1 },
-  { result: 'pizza',  needs: { cheese: 2, wood: 1 },           unlock: 0, count: 1 },
-  { result: 'lunch',  needs: { cooked: 1, skewer: 1, apple: 1 }, unlock: 0, count: 1 },
-  { result: 'potion', needs: { apple: 1, grape: 1 },           unlock: 0, count: 1 },
-  { result: 'honeypot', needs: { honey: 1, milk: 1 },          unlock: 0, count: 1 },
-  { result: 'lovepot', needs: { heart: 1, clover: 1 },         unlock: 0, count: 1 },
+  { result: 'cake',   needs: { apple: 2, honey: 1 },           unlock: 0, count: 1 },
+  { result: 'redpot', needs: { apple: 1, honey: 1 },           unlock: 0, count: 1 },
+  { result: 'bluepot', needs: { clover: 1, honey: 1 },         unlock: 0, count: 1 },
+  { result: 'yellowpot', needs: { gem: 1, honey: 1 },          unlock: 0, count: 1 },
 ];
 // 제작대 줄: 무기(+방패) / 옷 / 블록(+재료) / 음식 / 물약
 const recipeGroup = r => {
@@ -220,7 +200,8 @@ const GROUND = {
 // 동물 (이름도 글자로 같이 보여준다. emoji 가 words.csv 와 같으면 잡은 뒤 그 단어 카드가 나온다)
 //   drops: 잡으면 나오는 것 (동물에 맞게: 사냥하는 짐승은 고기/가죽, 거미/양은 실, 고슴도치/복어/전갈은 가시, 벌은 꿀, 물고기/게는 생선)
 //   region: 사는 구역 (거기서 생기고, 쫓아가지 않을 때는 그 구역 안을 돌아다닌다), count: 몇 마리
-//   hunts: 육식동물 (사람과 초식동물을 쫓는다), calm: 먼저 공격하지 않고 다가가면 도망간다
+//   hunts: 육식동물 (사람과 초식동물을 쫓는다), calm: 먼저 공격하지 않고 다가가면 도망간다,
+//   likes: 좋아하는 음식 (그 음식이나 🎂 케이크를 맞으면 따라온다. 다른 음식은 고개를 젓는다)
 //   (먹이를 맞으면 그 사람을 따라다닌다), swim: 물에서만 다닌다, ghost: 반투명하게 떠다니는 그림
 const MONSTERS = {
   // 🌲 무서운 숲
@@ -229,25 +210,25 @@ const MONSTERS = {
   bear:     { emoji: '🐻', ko: '곰',     en: 'bear',     hp: 6, speed: 1.5, size: 28, drops: { meat: 2, leather: 1 }, region: REGION.FOREST, count: 2, hunts: true },
   tiger:    { emoji: '🐯', ko: '호랑이', en: 'tiger',    hp: 7, speed: 1.8, size: 28, drops: { meat: 2, leather: 2 }, region: REGION.FOREST, count: 2, hunts: true },
   // 🏞️ 호수
-  fish:     { emoji: '🐟', ko: '물고기', en: 'fish',     hp: 2, speed: 1.6, size: 22, drops: { fishmeat: 1 },      region: REGION.LAKE, count: 8, calm: true, swim: true },
+  fish:     { emoji: '🐟', ko: '물고기', en: 'fish',     hp: 2, speed: 1.6, size: 22, drops: { fish: 1 },           region: REGION.LAKE, count: 8, calm: true, swim: true },
   blowfish: { emoji: '🐡', ko: '복어',   en: 'blowfish', hp: 3, speed: 1.2, size: 22, drops: { thorn: 1 },         region: REGION.LAKE, count: 4, calm: true, swim: true },
   hippo:    { emoji: '🦛', ko: '하마',   en: 'hippo',    hp: 5, speed: 1.3, size: 28, drops: { meat: 2, leather: 1 }, region: REGION.LAKE, count: 2 },
-  crab:     { emoji: '🦀', ko: '게',     en: 'crab',     hp: 3, speed: 1.5, size: 22, drops: { fishmeat: 1 },      region: REGION.LAKE, count: 3 },
+  crab:     { emoji: '🦀', ko: '게',     en: 'crab',     hp: 3, speed: 1.5, size: 22, drops: { fish: 1 },           region: REGION.LAKE, count: 3 },
   // 🍄 어두운 늪
   spider:   { emoji: '🕷️', ko: '거미',   en: 'spider',   hp: 3, speed: 1.6, size: 24, drops: { string: 2 },        region: REGION.SWAMP, count: 4, hunts: true },
   scorpion: { emoji: '🦂', ko: '전갈',   en: 'scorpion', hp: 4, speed: 1.6, size: 24, drops: { thorn: 1 },         region: REGION.SWAMP, count: 2, hunts: true },
-  ant:      { emoji: '🐜', ko: '개미',   en: 'ant',      hp: 2, speed: 2.2, size: 20, drops: { egg: 1 },           region: REGION.SWAMP, count: 3 },
+  ant:      { emoji: '🐜', ko: '개미',   en: 'ant',      hp: 2, speed: 2.2, size: 20, drops: { apple: 1 },         region: REGION.SWAMP, count: 3 },
   bat:      { emoji: '🦇', ko: '박쥐',   en: 'bat',      hp: 2, speed: 2.4, size: 22, drops: { leather: 1 },       region: REGION.SWAMP, count: 3 },
   // 🌼 초원 (초식동물)
-  rabbit:   { emoji: '🐰', ko: '토끼',   en: 'rabbit',   hp: 2, speed: 2.6, size: 22, drops: { meat: 1 },          region: REGION.MEADOW, count: 3, calm: true },
-  sheep:    { emoji: '🐑', ko: '양',     en: 'sheep',    hp: 3, speed: 1.8, size: 26, drops: { string: 2 },        region: REGION.MEADOW, count: 3, calm: true },
-  cow:      { emoji: '🐄', ko: '소',     en: 'cow',      hp: 4, speed: 1.5, size: 28, drops: { milk: 2, leather: 1 }, region: REGION.MEADOW, count: 2, calm: true },
-  chicken:  { emoji: '🐔', ko: '닭',     en: 'hen',      hp: 2, speed: 2.0, size: 22, drops: { egg: 2 },           region: REGION.MEADOW, count: 3, calm: true },
-  pig:      { emoji: '🐖', ko: '돼지',   en: 'pig',      hp: 3, speed: 1.7, size: 26, drops: { meat: 2 },          region: REGION.MEADOW, count: 2, calm: true },
-  deer:     { emoji: '🦌', ko: '사슴',   en: 'deer',     hp: 3, speed: 2.6, size: 28, drops: { meat: 1, leather: 1 }, region: REGION.MEADOW, count: 2, calm: true },
+  rabbit:   { emoji: '🐰', ko: '토끼',   en: 'rabbit',   hp: 2, speed: 2.6, size: 22, drops: { meat: 1 },          region: REGION.MEADOW, count: 3, calm: true, likes: 'carrot' },
+  sheep:    { emoji: '🐑', ko: '양',     en: 'sheep',    hp: 3, speed: 1.8, size: 26, drops: { string: 2 },        region: REGION.MEADOW, count: 3, calm: true, likes: 'apple' },
+  cow:      { emoji: '🐄', ko: '소',     en: 'cow',      hp: 4, speed: 1.5, size: 28, drops: { meat: 1, leather: 1 }, region: REGION.MEADOW, count: 2, calm: true, likes: 'apple' },
+  chicken:  { emoji: '🐔', ko: '닭',     en: 'hen',      hp: 2, speed: 2.0, size: 22, drops: { meat: 1 },          region: REGION.MEADOW, count: 3, calm: true, likes: 'carrot' },
+  pig:      { emoji: '🐖', ko: '돼지',   en: 'pig',      hp: 3, speed: 1.7, size: 26, drops: { meat: 2 },          region: REGION.MEADOW, count: 2, calm: true, likes: 'apple' },
+  deer:     { emoji: '🦌', ko: '사슴',   en: 'deer',     hp: 3, speed: 2.6, size: 28, drops: { meat: 1, leather: 1 }, region: REGION.MEADOW, count: 2, calm: true, likes: 'apple' },
   // 🍀 2탄 클로버 들판. eats: 네잎클로버를 찾아가서 먹는다 (먹으면 세잎클로버가 된다). 먹이를 주면 따라다니며 네잎클로버를 찾아 준다
-  bunny:    { emoji: '🐇', ko: '토끼',   en: 'rabbit',   hp: 2, speed: 2.0, size: 24, drops: { meat: 1 },          region: REGION.CLOVER, count: 6, calm: true, eats: true },
-  snail:    { emoji: '🐌', ko: '달팽이', en: 'snail',    hp: 2, speed: 0.8, size: 22, drops: { egg: 1 },           region: REGION.CLOVER, count: 3, calm: true },
+  bunny:    { emoji: '🐇', ko: '토끼',   en: 'rabbit',   hp: 2, speed: 2.0, size: 24, drops: { meat: 1 },          region: REGION.CLOVER, count: 6, calm: true, eats: true, likes: 'carrot' },
+  snail:    { emoji: '🐌', ko: '달팽이', en: 'snail',    hp: 2, speed: 0.8, size: 22, drops: { stone: 1 },         region: REGION.CLOVER, count: 3, calm: true, likes: 'carrot' }, // 달팽이 껍데기 → 돌
   hedgehog: { emoji: '🦔', ko: '고슴도치', en: 'hedgehog', hp: 4, speed: 1.7, size: 24, drops: { thorn: 2 },         region: REGION.CLOVER, count: 4, hunts: true },
   snake:    { emoji: '🐍', ko: '뱀',     en: 'snake',    hp: 4, speed: 1.9, size: 26, drops: { leather: 1 },       region: REGION.CLOVER, count: 3, hunts: true },
   bee:      { emoji: '🐝', ko: '벌',     en: 'bee',      hp: 2, speed: 2.6, size: 20, drops: { honey: 1 },         region: REGION.CLOVER, count: 4 },
@@ -255,7 +236,7 @@ const MONSTERS = {
   eagle:    { emoji: '🦅', ko: '독수리', en: 'eagle',    hp: 12, speed: 1.6, size: 52, drops: {},                    region: REGION.CLOVER, count: 0, boss: true },
   // 🧭 3탄 절벽 미로: 어두운 미로에 사는 것들
   ghost:    { emoji: '👻', ko: '유령',   en: 'ghost',    hp: 4, speed: 1.5, size: 28, drops: { string: 1 },        region: REGION.MAZE, count: 5, hunts: true, ghost: true },
-  rat:      { emoji: '🐀', ko: '쥐',     en: 'rat',      hp: 2, speed: 2.4, size: 22, drops: { cheese: 1 },        region: REGION.MAZE, count: 5, hunts: true },
+  rat:      { emoji: '🐀', ko: '쥐',     en: 'rat',      hp: 2, speed: 2.4, size: 22, drops: { carrot: 1 },        region: REGION.MAZE, count: 5, hunts: true },
   lizard:   { emoji: '🦎', ko: '도마뱀', en: 'lizard',   hp: 3, speed: 2.0, size: 24, drops: { leather: 1 },       region: REGION.MAZE, count: 4 },
 };
 const BOSS = { emoji: '🐉', ko: '용', en: 'dragon', hp: 12, speed: 1.4, size: 56, drops: {}, boss: true };
@@ -340,7 +321,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 78;
+const GAME_V = 79;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -1285,6 +1266,14 @@ const Craft = {
     const card = (r, i) => {
       const w = WEAPONS[r.result] || ITEMS[r.result], weapon = !!WEAPONS[r.result];
       const owned = this.owned(r), ready = this.canMake(r), locked = !this.unlocked(r);
+      // 아직 한 번도 얻지 못한 재료가 들어가면 ??? (어디서 나오는지 찾아보게)
+      const secret = !owned && Object.keys(r.needs).some(t => !Game.seen.has(t));
+      if (secret) {
+        return `<div class="recipe secret" data-recipe="${i}">
+          <div class="recipe-result"><span class="e secret-icon">${iconHtml(w)}</span><span class="n">???</span></div>
+          <div class="recipe-needs">${Object.keys(r.needs).map(t => `<span class="need">${Game.seen.has(t) ? iconHtml(ITEMS[t]) : '❓'}</span>`).join('')}</div>
+        </div>`;
+      }
       const needs = locked
         ? `<span class="lock">👾 ${Game.kills}/${r.unlock}</span>`
         : Object.entries(r.needs).map(([type, n]) => {
@@ -1355,19 +1344,21 @@ const TILE = {
   THORN: 17, // 놓아서 생기는 가시 울타리 (막고, 부딪친 사나운 동물은 따끔)
   CLIFF: 18, CHEST: 19, // 3탄: 미로 벽 절벽 (캘 수 없다) / 미로 끝 보물 상자
   STATION: 20, // 2탄 ⛺ 텐트 / 3탄 ⚒️ 대장간 제작대 (부딪치면 제작대가 열린다. 그림은 칸 위로 크게)
+  SAPLING: 21, // 심은 묘목 (조금 지나면 나무로 자란다. 자라다가 사람이 끼지 않게 막는 칸)
 };
-const BLOCKING = new Set([TILE.TREE, TILE.WATER, TILE.ROCK, TILE.HOUSE, TILE.BRICK, TILE.TORCH, TILE.LOCK_TREE, TILE.GOLD_TREE, TILE.THORN, TILE.CLIFF, TILE.CHEST, TILE.STATION]);
+const BLOCKING = new Set([TILE.TREE, TILE.WATER, TILE.ROCK, TILE.HOUSE, TILE.BRICK, TILE.TORCH, TILE.LOCK_TREE, TILE.GOLD_TREE, TILE.THORN, TILE.CLIFF, TILE.CHEST, TILE.STATION, TILE.SAPLING]);
 const MONSTER_BLOCKING = new Set([...BLOCKING, TILE.GATE]); // 문은 몬스터만 막는다
 const ARROW_BLOCKING = new Set([TILE.TREE, TILE.ROCK, TILE.HOUSE, TILE.BRICK, TILE.GATE, TILE.TORCH, TILE.LOCK_TREE, TILE.GOLD_TREE, TILE.CLIFF, TILE.CHEST, TILE.STATION]);
 const CHUNK = 16; // 그림 조각 크기 (칸)
 const MINI_COLORS = ['#7ccf6f', '#2e7d32', '#3b8de0', '#e9d68f', '#8d939b', '#f48fb1', '#c0392b', '#c0392b', '#c8a06a',
   '#b5523b', '#8d5a2b', '#a0703f', '#ffb300',
-  '#5fbf4f', '#5fbf4f', '#2e7d32', '#ffd54f', '#33691e', '#5d4037', '#ffb300', '#e65100']; // 네잎클로버는 작은 지도에서 세잎클로버와 같은 색 (찾는 재미)
+  '#5fbf4f', '#5fbf4f', '#2e7d32', '#ffd54f', '#33691e', '#5d4037', '#ffb300', '#e65100', '#66bb6a']; // 네잎클로버는 작은 지도에서 세잎클로버와 같은 색 (찾는 재미)
 // 캐기: 칸 → 나오는 것, 맨손 횟수, 도구 횟수(tools 를 들었을 때), 캔 뒤 칸
 const DIG = {
   [TILE.FLOWER]: { gives: ['flower'], hand: 1 },
-  [TILE.TREE]: { gives: ['tree', 'wood'], hand: 'TREE_HITS', tool: 1, tools: ['axe'] },
-  [TILE.ROCK]: { gives: ['rock', 'stone'], hand: 'ROCK_HITS', tool: 'ROCK_HITS_TOOL', tools: ['axe', 'sword'] },
+  [TILE.TREE]: { gives: ['wood', 'wood', 'sapling'], hand: 'TREE_HITS', tool: 1, tools: ['axe'] }, // 통나무 2 + 묘목 (심으면 다시 나무)
+  [TILE.ROCK]: { gives: ['stone', 'stone'], hand: 'ROCK_HITS', tool: 'ROCK_HITS_TOOL', tools: ['axe', 'sword'] },
+  [TILE.SAPLING]: { gives: ['sapling'], hand: 1 },
   [TILE.BRICK]: { gives: ['brick'], hand: 'ROCK_HITS', tool: 'ROCK_HITS_TOOL', tools: ['axe', 'sword'] },
   [TILE.GATE]: { gives: ['gate'], hand: 'TREE_HITS', tool: 1, tools: ['axe'] },
   [TILE.BRIDGE]: { gives: ['bridge'], hand: 1, after: TILE.WATER },
@@ -1392,7 +1383,6 @@ const holdable = id => !!WEAPONS[id] || !!(ITEMS[id] && (ITEMS[id].tile || ['foo
 const WEAR_SLOTS = [
   { slot: 'head', ko: '머리', en: 'Head' },
   { slot: 'body', ko: '몸통', en: 'Body' },
-  { slot: 'back', ko: '등', en: 'Back' },
   { slot: 'feet', ko: '다리', en: 'Legs' },
 ];
 // 입은 옷 id 목록 (그림 / 다른 사람에게 보내기)
@@ -1409,8 +1399,41 @@ const PIXEL_ICONS = {
     colors: { w: '#f5f5f5', d: '#8d6e63', b: '#5d4037' } },
   // 물약: 코르크 마개 + 유리병 (물약마다 색)
   POTION_R: potionIcon('#e53935', '#ff8a80'),
-  POTION_G: potionIcon('#ffb300', '#ffe082'),
-  POTION_P: potionIcon('#ec407a', '#f8bbd0'),
+  POTION_B: potionIcon('#1e88e5', '#90caf9'),
+  POTION_Y: potionIcon('#fdd835', '#fff9c4'),
+  // 재료
+  LOG: { rows: ['........', '.kkbbbbb', 'kyykbbbd', 'kyrykbbd', 'kyykbbbd', '.kkbbbbb', '..dddddd', '........'],
+    colors: { k: '#6d4c41', y: '#e6c08a', r: '#a1887f', b: '#8d5a2b', d: '#5d3a1a' } },
+  STONE: { rows: ['........', '..ggg...', '.glggg..', 'gllgggg.', 'ggggggdg', '.gggddd.', '..dddd..', '........'],
+    colors: { l: '#e0e0e0', g: '#9e9e9e', d: '#616161' } },
+  SPOOL: { rows: ['.bbbbbb.', '..wwww..', '.wwwwww.', '.wlwwlw.', '.wwwwww.', '..wwww..', '.bbbbbb.', '........'],
+    colors: { b: '#8d6e63', w: '#f5f5f5', l: '#bdbdbd' } },
+  GEM: { rows: ['........', '.cccccc.', 'cllcccdc', '.cllccd.', '..cccd..', '...cd...', '........', '........'],
+    colors: { l: '#e1f5fe', c: '#4fc3f7', d: '#0277bd' } },
+  // 음식
+  APPLE: { rows: ['....s...', '..rrsll.', '.rrrrrr.', 'rwrrrrrr', 'rrrrrrrr', 'rrrrrrrd', '.rrrrrd.', '..rr.r..'],
+    colors: { s: '#6d4c41', l: '#43a047', w: '#ffcdd2', r: '#e53935', d: '#b71c1c' } },
+  CARROT: { rows: ['.....g.g', '....gggg', '....oog.', '...oooo.', '..oolo..', '.oooo...', '.oo.....', 'o.......'],
+    colors: { g: '#43a047', o: '#fb8c00', l: '#ffcc80' } },
+  MEAT: { rows: ['........', '...mmmm.', '..mmmmmm', '..mlmmmm', '..mmmmmd', '.wbmmmd.', 'ww.bb...', 'w.......'],
+    colors: { m: '#b5651d', l: '#e0a060', d: '#7b3f10', b: '#8d6e63', w: '#fafafa' } },
+  FISH: { rows: ['........', '........', '.bbbb..b', 'bwbbbbbb', 'bblllbbb', '.bbbb..b', '........', '........'],
+    colors: { b: '#42a5f5', l: '#bbdefb', w: '#0d47a1' } },
+  HONEY: { rows: ['..bbbb..', '.yyyyyy.', '.ylyyyy.', '.yyyyyy.', '.yybbyy.', '.yyyyyy.', '..yyyy..', '........'],
+    colors: { b: '#8d6e63', y: '#ffb300', l: '#ffe082' } },
+  CAKE: { rows: ['...r....', '...w....', '.pppppp.', '.wwwwww.', '.pppppp.', '.yyyyyy.', '.yyyyyy.', '........'],
+    colors: { r: '#e53935', w: '#fafafa', p: '#f48fb1', y: '#ffe0b2' } },
+  // 무기 / 방패 / 왕관
+  AXE: { rows: ['....ggg.', '...gggll', '...ggggl', '....bgg.', '...bb...', '..bb....', '.bb.....', 'bb......'],
+    colors: { g: '#90a4ae', l: '#eceff1', b: '#8d5a2b' } },
+  SWORD: { rows: ['......ww', '.....wwg', '....wwg.', '...wwg..', 'hhwwg...', '.hhg....', '.bhh....', 'b..h....'],
+    colors: { w: '#eceff1', g: '#90a4ae', h: '#fbc02d', b: '#6d4c41' } },
+  BOW: { rows: ['.bb.....', 'b..s....', 'b..s....', 'b..saaaw', 'b..s....', 'b..s....', '.bb.....', '........'],
+    colors: { b: '#8d5a2b', s: '#eeeeee', a: '#a1887f', w: '#90a4ae' } },
+  SHIELD: { rows: ['.bbbbbb.', 'bwwyywwb', 'bwwyywwb', 'byyyyyyb', 'bwwyywwb', '.bwyywb.', '..bwwb..', '...bb...'],
+    colors: { b: '#5d4037', w: '#a8723f', y: '#ffca28' } },
+  CROWN: { rows: ['........', 'y..yy..y', 'yy.yy.yy', 'yyyyyyyy', 'yryybyry', 'yyyyyyyy', '........', '........'],
+    colors: { y: '#fdd835', r: '#e53935', b: '#1e88e5' } },
   // 옷
   HAT: { rows: ['........', '..dddd..', '.dmmmmd.', '.mmmmmm.', '.bbbbbb.', 'dmmmmmmd', 'dddddddd', '........'],
     colors: { d: '#6d4321', m: '#a8723f', b: '#4e342e' } },
@@ -2050,6 +2073,14 @@ const World = {
         break;
       }
       case TILE.STATION: grass(); break; // 텐트/대장간 그림은 Render.drawStation (칸 위로 크게)
+      case TILE.SAPLING: {
+        // 묘목: 흙 둔덕 + 가는 줄기 + 잎 두 장
+        grass();
+        px(2.5, 6, '#6d4c41', 3, 1.2); px(3, 5.6, '#8d6e63', 2, 0.6);
+        px(3.75, 2.5, '#558b2f', 0.5, 3.4);
+        px(1.75, 2, '#66bb6a', 2, 1.2); px(4.25, 1.2, '#43a047', 2, 1.2); px(2.25, 2, '#a5d6a7', 0.75, 0.5);
+        break;
+      }
       case TILE.CHEST: {
         // 보물 상자: 나무 상자 + 금테 + 자물쇠, 반짝
         grass();
@@ -2163,6 +2194,7 @@ const Items = {
     for (const it of [...this.list]) {
       if (this.pending.has(it.id) || Math.hypot(it.x - Player.x, it.y - Player.y) >= r) continue;
       if (Buddy.on && Buddy.friend() && !Buddy.mayTake(it)) continue; // 🤝 놀아주기: 아이에게 양보
+      if (it.type === 'heart' && Game.hearts >= CONFIG.MAX_HEARTS) continue; // ❤️ 는 다쳤을 때만 줍는다
       if (Multi.isGuest) {
         this.pending.set(it.id, now);
         Multi.send('pick', 'H', it.id);
@@ -2355,6 +2387,14 @@ const Monsters = {
         const x = (i % World.w) * T + T / 2, y = Math.floor(i / World.w) * T + T / 2;
         if (World.tiles[i] === TILE.CLOVER && !Multi.nearPlayer(x, y, 5 * T)) Multi.editTile(i, TILE.CLOVER, TILE.LUCKY); // 보는 앞에서는 안 난다
       }
+    }
+    // 🌱 심은 묘목: 5초마다 하나씩 1/6 로 나무가 된다 (평균 30초쯤)
+    this.growT -= dt;
+    if (!(this.growT > 0)) {
+      this.growT = 5;
+      World.tiles.forEach((tt, i) => {
+        if (tt === TILE.SAPLING && Math.random() < 1 / 6) Multi.editTile(i, TILE.SAPLING, TILE.TREE);
+      });
     }
   },
 
@@ -2676,8 +2716,9 @@ const Monsters = {
         const target = !done && this.list.find(m => this.tameable(m) && (!m.owner || m.owner === Multi.sid) &&
           Math.hypot(m.x - a.x, m.y - (a.y + 8)) < this.radius(m) + 10);
         if (target) {
-          this.feed(target);
           this.arrows.splice(this.arrows.indexOf(a), 1);
+          if (this.likes(target, a.food)) this.feed(target);
+          else this.refuse(target, a);
         } else if (done) {
           this.arrows.splice(this.arrows.indexOf(a), 1);
           this.dropFood(a);
@@ -2689,6 +2730,21 @@ const Monsters = {
       else if (!done && Multi.hitPeers(a.x, a.y + 8, 8)) done = true;
       if (done) this.arrows.splice(this.arrows.indexOf(a), 1);
     }
+  },
+
+  // 좋아하는 음식인지 (🎂 케이크는 모두 좋아한다)
+  likes(m, food) { return food === 'cake' || !m.def.likes || m.def.likes === food; },
+
+  // 좋아하지 않는 음식: 고개를 젓고, 먹이는 그 자리에 떨어진다. 무엇을 좋아하는지 알려 준다
+  refuse(m, a) {
+    Sfx.soft();
+    Floaters.add(m.x, m.y - m.def.size * 0.6, '🙅', 16);
+    const like = ITEMS[m.def.likes];
+    if (Buddy.on) return this.dropFood(a);
+    const ko = `${josa(m.def.ko, '은', '는')} ${josa(like.ko, '을', '를')} 좋아해요`, en = `The ${m.def.en} likes ${like.en}`;
+    toast(`${m.def.emoji} ${tr(ko, en)} ${iconHtml(like)}`);
+    if (Store.settings.lang === 'en') Speech.speak(en, 'en'); else Speech.speak(ko, 'ko');
+    this.dropFood(a);
   },
 
   // 먹이가 동물에 맞음: 처음이면 따라오고, 내 동물이면 좋아한다. 손님 기기는 방장에게 알리고 답('tamed'/'yum')을 기다린다
@@ -2875,7 +2931,7 @@ const Player = {
     this.walkT += dt;
     if (Math.abs(v.x) > Math.abs(v.y)) this.dir = v.x < 0 ? 'left' : 'right';
     else this.dir = v.y < 0 ? 'up' : 'down';
-    const speed = CONFIG.PLAYER_SPEED * T;
+    const speed = CONFIG.PLAYER_SPEED * T * (Game.buffLeft('speed') > 0 ? 1.5 : 1); // 🏃 파란 물약
     const nx = this.x + v.x * speed * dt;
     if (this.canStand(nx, this.y)) this.x = nx;
     const ny = this.y + v.y * speed * dt;
@@ -3659,7 +3715,7 @@ const Render = {
   // 🍄 늪 / 🧭 미로에 들어가면 화면이 어두워지고 내 둘레와 🔥 횃불 둘레만 밝다 (천천히 바뀐다)
   drawSwampDark() {
     const home = Math.hypot(Player.x - (World.door.x * T + T / 2), Player.y - (World.door.y * T + T / 2)) < CONFIG.SAFE_RADIUS * T;
-    const want = Game.state !== 'title' && DARK_REGIONS.has(World.regionAtPx(Player.x, Player.y)) && !home ? 1 : 0; // 집 앞은 밝게
+    const want = Game.state !== 'title' && DARK_REGIONS.has(World.regionAtPx(Player.x, Player.y)) && !home && Game.buffLeft('light') <= 0 ? 1 : 0; // 집 앞, 💡 노란 물약은 밝게
     this.dark = (this.dark || 0) + (want - (this.dark || 0)) * 0.04;
     if (this.dark < 0.01) return;
     // 어둠은 따로 그린 다음 횃불 자리를 지워서 (destination-out) 화면에 얹는다
@@ -4042,8 +4098,6 @@ const Render = {
 
     const SKIN = '#f1c27d', { hair: HAIR, shirt: SHIRT, pants: PANTS } = look;
     const worn = new Set(wear), SHOE = worn.has('boots') ? '#6d4321' : '#555';
-    // 망토: 몸 뒤 (뒤로 돌면 등 전체, 앞에서는 어깨 옆과 아래로 살짝)
-    if (worn.has('cape') && dir !== 'up') { box(0, 5, 8, 6, '#9a1b1b'); box(0.5, 10.5, 7, 0.8, '#d32f2f'); }
     // 다리
     box(2, 9 + step, 2, 3, PANTS); box(2, 12 + step, 2, 1, SHOE);
     box(4, 9 - step, 2, 3, PANTS); box(4, 12 - step, 2, 1, SHOE);
@@ -4057,7 +4111,6 @@ const Render = {
       if (dir !== 'up') { box(3.5, 5, 1, 4, SHIRT); box(3.5, 6, 1, 0.4, '#e6c08a'); box(3.5, 7.4, 1, 0.4, '#e6c08a'); }
       box(1, 8.4, 6, 0.6, '#6d4321');
     }
-    if (worn.has('cape') && dir === 'up') { box(0.5, 5, 7, 6, '#d32f2f'); box(1, 5, 6, 0.6, '#fdd835'); }
     // 머리
     box(1, 0, 6, 5, SKIN);
     if (dir === 'up') {
@@ -4076,7 +4129,7 @@ const Render = {
         box(5.5, 3, 1, 1, '#1a237e');
       }
     }
-    const headWear = { crown: { type: 'crown' }, wreath: { type: 'wreath' }, hat: { type: 'leather' } }[wear.find(id => ITEMS[id].slot === 'head')];
+    const headWear = { crown: { type: 'crown' }, hat: { type: 'leather' } }[wear.find(id => ITEMS[id].slot === 'head')];
     const hat = headWear || look.hat;
     this.drawHat(box, hat, dir);
 
@@ -4102,10 +4155,8 @@ const Render = {
       ctx.textBaseline = 'middle';
       ctx.fillStyle = '#000';
       ctx.font = `15px ${FONT_EMOJI}`;
-      const block = ITEMS[held] && (ITEMS[held].tile || ITEMS[held].icon), fix = WEAPONS[held] && WEAPONS[held].fix;
+      const hd = WEAPONS[held] || ITEMS[held], block = hd && (hd.tile || hd.icon); // 픽셀 그림 (손은 이모지)
       ctx.translate(0, -4);
-      if (fix === 'flip') ctx.scale(-1, 1);
-      if (fix === 'turn') ctx.rotate(Math.PI);
       if (block) ctx.drawImage(tileIcon(block).canvas, -8, -8, 16, 16);
       else ctx.fillText(holdEmoji(held), 0, 0);
       ctx.restore();
@@ -4299,7 +4350,9 @@ const Game = {
   tapMode: false,
   tapReason: '',
   inventory: {},
-  equip: {}, // 입은 옷: 입는 곳 → 옷 id (가방 inventory 에는 없다)
+  equip: {}, // 입은 옷/방패: 입는 곳 → id (가방 inventory 에는 없다)
+  seen: new Set(), // 한 번이라도 얻은 아이템 (제작대에서 모르는 재료는 ??? 로)
+  buffs: { speed: 0, light: 0 }, // 물약 힘이 끝나는 시각 (performance.now)
   weapons: new Set(),
   picked: null, // 고른 것 (무기 또는 블록). 블록을 다 놓으면 lastWeapon 으로 돌아간다
   lastWeapon: null, // 마지막으로 고른 무기 (없으면 가진 무기 중 제일 센 것)
@@ -4474,11 +4527,14 @@ const Game = {
 
   // 가방 (아이템, 무기, 손에 든 것, 잡은 수) 을 지금 것으로 바꾼다
   applyBag(bag = {}) {
+    if (bag.v !== BAG_V) bag = {}; // 아이템 체계가 바뀌었다: 새 가방으로
     this.inventory = {};
     this.weapons = new Set();
     this.unlockShown = new Set();
     for (const [type, n] of Object.entries(bag.inventory || {})) if (ITEMS[type] && n > 0) this.inventory[type] = n;
     for (const id of bag.weapons || []) if (WEAPONS[id]) this.weapons.add(id);
+    this.seen = new Set((bag.seen || []).filter(id => ITEMS[id]));
+    for (const id of Object.keys(this.inventory)) this.seen.add(id);
     this.equip = {};
     for (const [slot, id] of Object.entries(bag.equip || {})) if (ITEMS[id] && ITEMS[id].slot === slot) this.equip[slot] = id;
     // 예전 가방 (입은 옷을 따로 적기 전): 가방의 옷을 빈 곳에 입힌다
@@ -4492,7 +4548,7 @@ const Game = {
   },
 
   bagItems() {
-    return { inventory: this.inventory, equip: this.equip, weapons: [...this.weapons], picked: this.picked, lastWeapon: this.lastWeapon, kills: this.kills };
+    return { v: BAG_V, inventory: this.inventory, equip: this.equip, seen: [...this.seen], weapons: [...this.weapons], picked: this.picked, lastWeapon: this.lastWeapon, kills: this.kills };
   },
 
   // 가방 + 누구 것인지(owner: 이름) + 마지막으로 바뀐 때(t). 바뀌었을 때만 t 를 새로
@@ -5303,9 +5359,8 @@ const Game = {
 
   // 가방에서 먹을 것 (하트 먼저)
   edible() {
-    return this.inventory.heart > 0 ? 'heart'
-      : Object.keys(ITEMS).find(type => ITEMS[type].kind === 'food' && this.inventory[type] > 0) ||
-        Object.keys(ITEMS).find(type => ITEMS[type].kind === 'potion' && this.inventory[type] > 0) || null;
+    return Object.keys(ITEMS).find(type => ITEMS[type].kind === 'food' && this.inventory[type] > 0) ||
+      (this.inventory.redpot > 0 ? 'redpot' : null);
   },
 
   // 하나 먹기 (💬 칸의 😋, 하트가 1 남았을 때 저절로, 🤝 놀아주기). 먹었으면 true
@@ -5314,10 +5369,9 @@ const Game = {
     if (!food || this.hearts >= CONFIG.MAX_HEARTS) return false;
     this.inventory[food]--;
     const def = ITEMS[food];
-    const heal = food === 'heart' ? CONFIG.HEART_HEAL : def.heal || 2;
-    if (def.shield) Player.invulnT = Math.max(Player.invulnT || 0, def.shield);
+    const heal = def.heal || 1;
     this.hearts = Math.min(CONFIG.MAX_HEARTS, this.hearts + heal);
-    toast(`${def.emoji} ${itemNames(def).main} ❤️+${heal}`);
+    toast(`${iconHtml(def)} ${itemNames(def).main} ❤️+${heal}`);
     Sfx.pickup();
     this.renderInventory();
     this.renderHearts();
@@ -5326,7 +5380,7 @@ const Game = {
 
   onPetGift(def) {
     Sfx.success();
-    toast(`🎁 ${def.emoji} ${itemNames(def).main}`);
+    toast(`🎁 ${iconHtml(def)} ${itemNames(def).main}`);
     if (Store.settings.lang === 'en') Speech.speak(`You got a ${def.en}!`, 'en');
     else Speech.speak(`${josa(def.ko, '을', '를')} 선물 받았어요!`, 'ko');
   },
@@ -5447,24 +5501,28 @@ const Game = {
   // 손에 든 것 (블록, 먹이, 물약 또는 무기)
   get held() { return this.heldBlock || this.heldFood || this.heldPotion || this.weapon; },
 
-  // 물약 마시기: 다쳤을 때만 (하트가 가득이면 아껴 둔다). 하트 물약은 잠깐 안 다친다
+  // 물약 마시기: 빨강 ❤️ (다쳤을 때만, 가득이면 아껴 둔다) / 파랑 🏃 빨리 달리기 / 노랑 💡 어두운 곳이 밝다
   drink(id) {
     const def = ITEMS[id];
-    if (this.hearts >= CONFIG.MAX_HEARTS) {
+    if (def.heal && this.hearts >= CONFIG.MAX_HEARTS) {
       Sfx.soft();
       toast(tr('❤️ 하트가 가득해요! 다치면 마셔요', '❤️ Hearts are full! Drink it when you get hurt'));
       return;
     }
     this.inventory[id]--;
     if (!this.inventory[id]) this.picked = this.lastWeapon;
-    this.hearts = Math.min(CONFIG.MAX_HEARTS, this.hearts + def.heal);
-    if (def.shield) Player.invulnT = Math.max(Player.invulnT || 0, def.shield);
+    if (def.heal) this.hearts = Math.min(CONFIG.MAX_HEARTS, this.hearts + def.heal);
+    if (def.speed) this.buffs.speed = performance.now() + def.speed * 1000;
+    if (def.light) this.buffs.light = performance.now() + def.light * 1000;
     Sfx.success();
-    for (let i = 0; i < 5; i++) Floaters.add(Player.x + randFloat(-14, 14), Player.y - randFloat(14, 36), i % 2 ? '✨' : '❤️', 14);
-    toast(`${iconHtml(def)} ${itemNames(def).main} ❤️+${def.heal}`);
+    const fx = def.heal ? '❤️' : def.speed ? '💨' : '💡';
+    for (let i = 0; i < 5; i++) Floaters.add(Player.x + randFloat(-14, 14), Player.y - randFloat(14, 36), i % 2 ? '✨' : fx, 14);
+    const what = def.heal ? `❤️+${def.heal}` : def.speed ? tr(`🏃 ${def.speed}초 빨리!`, `🏃 Fast for ${def.speed}s!`) : tr(`💡 ${def.light}초 환하게!`, `💡 Bright for ${def.light}s!`);
+    toast(`${iconHtml(def)} ${itemNames(def).main} ${what}`);
     this.renderInventory();
     this.renderHearts();
   },
+  buffLeft(kind) { return Math.max(0, (this.buffs[kind] - performance.now()) / 1000); },
 
   // 고르는 칸의 줄: 맨 위 👕 입은 것 (머리/몸통/등/다리, 빈 곳은 빈칸), 가방의 옷, 그리고 손에 들 것 (무기 / 블록 / 먹이 / 물약).
   // 빈 종류는 뺀다. 칸 id: 'slot:머리 등' (입은 곳), 'wear:옷' (가방의 옷), 나머지는 손에 들 것
@@ -5621,18 +5679,19 @@ const Game = {
 
   addItem(type) {
     const def = ITEMS[type];
-    if (def.kind === 'heart' && this.hearts < CONFIG.MAX_HEARTS) {
+    this.seen.add(type);
+    if (def.kind === 'heart') {
       this.hearts = Math.min(CONFIG.MAX_HEARTS, this.hearts + CONFIG.HEART_HEAL);
       Sfx.pickup();
-      toast(`${def.emoji} ${itemNames(def).main} ❤️+${CONFIG.HEART_HEAL}`);
+      toast(`❤️ +${CONFIG.HEART_HEAL}`);
       this.renderHearts();
       return;
     }
     // 다쳤을 때 음식을 주우면 바로 먹는다
     if (def.kind === 'food' && this.hearts < CONFIG.MAX_HEARTS) {
-      this.hearts++;
+      this.hearts = Math.min(CONFIG.MAX_HEARTS, this.hearts + (def.heal || 1));
       Sfx.pickup();
-      toast(`${def.emoji} ${itemNames(def).main} ❤️+1`);
+      toast(`${iconHtml(def)} ${itemNames(def).main} ❤️+${def.heal || 1}`);
       this.renderHearts();
       return;
     }
@@ -5662,16 +5721,15 @@ const Game = {
         `${sub ? `<span class="s">${sub}</span>` : ''}</span>`;
       inv.appendChild(slot);
     }
-    // 쓰임에 따라 모아서: 무기 / 옷 / 재료 / 블록 / 음식 / 물약 / 보물 (줄마다 왼쪽에 작은 그림)
+    // 쓰임에 따라 모아서: 무기 / 옷 / 재료 / 블록 / 음식 / 물약 (줄마다 왼쪽에 작은 그림)
     const has = type => this.inventory[type] > 0, kindIs = (...k) => type => k.includes(ITEMS[type].kind) && !ITEMS[type].tile;
     const groups = [
       { icon: '⚔️', ids: [...Object.keys(WEAPONS).filter(id => this.weapons.has(id)), ...Object.keys(ITEMS).filter(t => kindIs('gear')(t) && has(t))] },
       { icon: '👕', ids: Object.keys(ITEMS).filter(t => kindIs('wear')(t) && has(t)) },
       { icon: '🪵', ids: Object.keys(ITEMS).filter(t => kindIs('material')(t) && has(t)) },
       { icon: '🧱', ids: Object.keys(ITEMS).filter(t => ITEMS[t].tile && has(t)) },
-      { icon: '🍖', ids: Object.keys(ITEMS).filter(t => kindIs('food', 'heart')(t) && has(t)) },
+      { icon: '🍖', ids: Object.keys(ITEMS).filter(t => kindIs('food')(t) && has(t)) },
       { icon: '⚗️', ids: Object.keys(ITEMS).filter(t => kindIs('potion')(t) && has(t)) },
-      { icon: '💎', ids: Object.keys(ITEMS).filter(t => kindIs('luck')(t) && has(t)) },
     ].filter(g => g.ids.length);
     if (!groups.length) {
       if (!choices) inv.innerHTML = '<div class="inv-empty">🎒</div>';
@@ -5857,9 +5915,9 @@ const BUDDY_PROJECTS = {
   ] },
 };
 // 칸 글자 → 놓을 수 있는 블록 (앞에 있는 것부터)
-const BUDDY_CELL = { W: ['rock', 'brick', 'tree'], T: ['tree'], f: ['flower'], D: ['gate'] };
+const BUDDY_CELL = { W: ['brick', 'sapling'], T: ['sapling'], f: ['flower'], D: ['gate'] }; // 묘목은 자라서 나무
 // 캐서 얻는 블록 → 맵 칸
-const BUDDY_DIG = { tree: TILE.TREE, rock: TILE.ROCK, flower: TILE.FLOWER };
+const BUDDY_DIG = { sapling: TILE.TREE, flower: TILE.FLOWER }; // 나무를 캐면 묘목이 나온다
 
 // ============================================================
 // Buddy — 🤝 놀아주기: 내 캐릭터가 저절로 아이(가장 가까운 다른 사람) 곁에서 논다.
@@ -5957,7 +6015,7 @@ const Buddy = {
     // 아이가 다쳤으면 (하트 3개 이하) 내 물약/먹이를 갖다 준다
     this.eatT -= dt;
     if (this.eatT <= 0 && (!this.task || !['hunt', 'gift'].includes(this.task.kind))) {
-      const gift = f && f.hearts <= 3 && (Object.keys(ITEMS).find(id => ITEMS[id].kind === 'potion' && Game.inventory[id] > 0) ||
+      const gift = f && f.hearts <= 3 && ((Game.inventory.redpot > 0 && 'redpot') ||
         Object.keys(ITEMS).find(id => ITEMS[id].kind === 'food' && Game.inventory[id] > 0));
       if (gift) {
         this.eatT = 8;
@@ -6036,9 +6094,11 @@ const Buddy = {
 
     const choices = [];
     const myPets = Monsters.list.filter(m => m.owner === Multi.sid).length;
-    const food = Object.keys(ITEMS).find(id => ITEMS[id].kind === 'food' && Game.inventory[id] > 0);
-    const wild = Monsters.list.filter(m => Monsters.tameable(m) && !m.owner && this.dist(m, a) < 9 * T)
+    // 좋아하는 음식을 가진 동물만 (없으면 🎂 케이크)
+    const liked = m => [m.def.likes, 'cake'].find(id => id && Game.inventory[id] > 0);
+    const wild = Monsters.list.filter(m => Monsters.tameable(m) && !m.owner && this.dist(m, a) < 9 * T && liked(m))
       .sort((x, y) => this.dist(x, me) - this.dist(y, me))[0];
+    const food = wild && liked(wild);
     if (food && wild && myPets < 3) choices.push(['tame', { m: wild, food }, 12]);
     const dig = (Game.inventory.flower || 0) < 4 && this.findTile(a, [TILE.FLOWER], 6);
     if (dig) choices.push(['gather', { tx: dig.x, ty: dig.y, tile: TILE.FLOWER }, 10]);
@@ -6119,6 +6179,7 @@ const Buddy = {
     const pr = this.project;
     const done = c => {
       const tt = World.tile(c.x, c.y), want = BUDDY_CELL[c.ch].map(id => TILE[ITEMS[id].tile]);
+      if (want.includes(TILE.SAPLING)) want.push(TILE.TREE); // 다 자란 나무도 된 것
       return want.includes(tt) || c.tries >= 5;
     };
     const left = pr.cells.filter(c => !done(c));
@@ -6172,10 +6233,10 @@ const Buddy = {
     return pr && x >= pr.ox && x < pr.ox + pr.w && y >= pr.oy && y < pr.oy + pr.h;
   },
 
-  // 심을 블록: 꽃 > 나무 > (늪/미로처럼 어두우면) 횃불 > 벽돌
+  // 심을 블록: 꽃 > 묘목 > (늪/미로처럼 어두우면) 횃불 > 벽돌
   pickBlock() {
     const swamp = DARK_REGIONS.has(World.regionAtPx(Player.x, Player.y));
-    const order = swamp ? ['torch', 'flower', 'tree'] : ['flower', 'tree', 'torch', 'brick'];
+    const order = swamp ? ['torch', 'flower', 'sapling'] : ['flower', 'sapling', 'torch', 'brick'];
     return order.find(id => Game.inventory[id] > 0) || null;
   },
 

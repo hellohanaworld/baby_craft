@@ -100,6 +100,9 @@ body:not(.touch) .bag-btn::after {
 .inv-slot b { font-size: 22px; color: #d84315; }
 .inv-slot.bump { animation: bump .35s; }
 .inv-empty { font-size: 34px; opacity: .7; }
+/* 제작대: 아직 못 본 재료가 들어가는 것은 까만 그림자 + ??? */
+.recipe.secret { opacity: .75; }
+.recipe .secret-icon img { filter: brightness(0); opacity: .45; }
 /* 가방: 쓰임별 묶음 (무기 / 옷 / 재료 / 블록 / 음식 / 물약 / 보물) */
 .inv-group { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 3px 8px 3px 6px; border-radius: 18px; background: rgba(93, 64, 55, .35); }
 .inv-group-icon { font-size: 22px; line-height: 1; }
