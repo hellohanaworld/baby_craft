@@ -321,7 +321,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 79;
+const GAME_V = 80;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -1378,6 +1378,37 @@ function fixLand(i, v) {
   return LAND.has(base) ? base : TILE.GRASS;
 }
 // 손에 들 수 있는 것: 무기 또는 놓을 수 있는 블록
+// 아래 주머니 4칸: 손에 들 것을 종류마다 한 칸 (1~4 키)
+const POUCH = [
+  { key: 'weapon', icon: '⚔️', ko: '무기', en: 'Weapons' },
+  { key: 'block',  icon: '🧱', ko: '블록', en: 'Blocks' },
+  { key: 'food',   icon: '🍎', ko: '음식', en: 'Food' },
+  { key: 'potion', icon: '⚗️', ko: '물약', en: 'Potions' },
+];
+// 어느 주머니 칸에 들어가는지 (손에 들 수 없으면 null)
+const pouchOf = id => WEAPONS[id] ? 'weapon' : !ITEMS[id] ? null : ITEMS[id].tile ? 'block' : ['food', 'potion'].includes(ITEMS[id].kind) ? ITEMS[id].kind : null;
+
+// 가방에서 아이템을 누르면 나오는 한 줄 설명
+function itemDesc(id) {
+  const d = WEAPONS[id] || ITEMS[id];
+  if (WEAPONS[id]) return tr(`힘 ${'⭐'.repeat(d.power)} · 손에 들고 ✋ 로 휘둘러요`, `Power ${'⭐'.repeat(d.power)} · Hold it and press ✋`);
+  if (d.tile) return id === 'sapling' ? tr('땅에 심으면 나무로 자라요', 'Plant it and it grows into a tree')
+    : tr('손에 들고 ✋ 로 앞에 놓아요', 'Hold it and press ✋ to place it');
+  if (d.kind === 'food') {
+    const fans = [...new Set(Object.values(MONSTERS).filter(m => m.likes === id).map(m => m.emoji))].join('');
+    const who = id === 'cake' ? tr(' · 모든 동물이 좋아해요', ' · Every animal loves it') : fans ? tr(` · 좋아하는 동물 ${fans}`, ` · Loved by ${fans}`) : '';
+    return tr(`먹으면 ❤️ +${d.heal}`, `Eat: ❤️ +${d.heal}`) + who;
+  }
+  if (d.kind === 'potion') {
+    if (d.heal) return tr(`마시면 ❤️ +${d.heal}`, `Drink: ❤️ +${d.heal}`);
+    if (d.speed) return tr(`마시면 ${d.speed}초 동안 빨리 달려요 🏃`, `Drink: run fast for ${d.speed}s 🏃`);
+    return tr(`마시면 ${d.light}초 동안 어두운 곳이 밝아요 💡`, `Drink: bright for ${d.light}s 💡`);
+  }
+  if (d.kind === 'wear') return tr('입으면 캐릭터에 보여요', 'Wear it to show on your character');
+  if (d.kind === 'gear') return tr('가방에 있으면 두 번에 한 번 막아 줘요', 'Blocks every other hit while in your bag');
+  return tr('제작대에서 만들 때 써요', 'Used at the crafting table');
+}
+
 const holdable = id => !!WEAPONS[id] || !!(ITEMS[id] && (ITEMS[id].tile || ['food', 'potion'].includes(ITEMS[id].kind)));
 // 옷 입는 곳 (Q 고르는 칸 맨 위 줄). 입은 옷은 가방에서 빠지고, 벗으면 가방으로 돌아간다
 const WEAR_SLOTS = [
@@ -1428,7 +1459,7 @@ const PIXEL_ICONS = {
     colors: { g: '#90a4ae', l: '#eceff1', b: '#8d5a2b' } },
   SWORD: { rows: ['......ww', '.....wwg', '....wwg.', '...wwg..', 'hhwwg...', '.hhg....', '.bhh....', 'b..h....'],
     colors: { w: '#eceff1', g: '#90a4ae', h: '#fbc02d', b: '#6d4c41' } },
-  BOW: { rows: ['.bb.....', 'b..s....', 'b..s....', 'b..saaaw', 'b..s....', 'b..s....', '.bb.....', '........'],
+  BOW: { rows: ['..bb.s..', '.b...s..', 'b....s..', 'b.aaaaaw', 'b....s..', '.b...s..', '..bb.s..', '........'],
     colors: { b: '#8d5a2b', s: '#eeeeee', a: '#a1887f', w: '#90a4ae' } },
   SHIELD: { rows: ['.bbbbbb.', 'bwwyywwb', 'bwwyywwb', 'byyyyyyb', 'bwwyywwb', '.bwyywb.', '..bwwb..', '...bb...'],
     colors: { b: '#5d4037', w: '#a8723f', y: '#ffca28' } },
@@ -3531,17 +3562,20 @@ const Input = {
   init() {
     // e.code 를 써서 한글 입력 상태에서도 WASD 가 동작하게 한다
     addEventListener('keydown', e => {
-      if (Game.pickerOpen) { e.preventDefault(); if (!e.repeat || e.code.startsWith('Arrow')) Game.pickerKey(e.code); return; }
+      if (Game.bagOpen) { e.preventDefault(); if (!e.repeat || e.code.startsWith('Arrow')) Game.bagKey(e.code); return; }
       if (Game.helpOpen) { e.preventDefault(); if (['Escape', 'Slash', 'Enter', 'Space'].includes(e.code)) Game.setHelp(false); return; }
       if (e.code === 'Slash' && !e.repeat && Game.state === 'play') { e.preventDefault(); Game.setHelp(true); return; }
       if (Game.talkOpen) { e.preventDefault(); if (!e.repeat || e.code.startsWith('Arrow')) Game.talkKey(e.code); return; }
       if (e.code === 'KeyJ' && !e.repeat) Social.jump();
       if (e.code === 'KeyC' && !e.repeat) { Game.toggleTalk(); Sfx.click(); }
-      if (e.code === 'KeyB' && !e.repeat && Game.state === 'play') { Game.setBag($('#inventory').classList.contains('hidden')); Sfx.click(); }
+      if (e.code === 'KeyB' && !e.repeat && Game.state === 'play') { Game.setBag(true); Sfx.click(); }
+      // 1~4: 아래 주머니 칸 (무기 / 블록 / 음식 / 물약)
+      const digit = ['Digit1', 'Digit2', 'Digit3', 'Digit4'].indexOf(e.code);
+      if (digit >= 0 && !e.repeat && Game.state === 'play') Game.pouchTap(digit);
       if (e.code === 'KeyM' && !e.repeat) Game.setBigMap(!Game.bigMap);
       if (e.code === 'Escape' && Game.bigMap) Game.setBigMap(false);
       if (KEYMAP[e.code]) { this.keys.add(e.code); e.preventDefault(); }
-      if (e.code === 'KeyQ' && !e.repeat) { Game.toggleWeaponPicker(); Sfx.click(); }
+      if (e.code === 'KeyQ' && !e.repeat && Game.state === 'play') Game.pouchNext();
       // Enter: 놀고 있을 때는 💬 말풍선 칸을 열고 바로 ✏️ 쓰기 칸에 글자를 쓴다 (카드/시작 화면에서는 예전처럼 ✅ / 시작)
       if (e.code === 'Enter' && Game.state === 'play') {
         e.preventDefault();
@@ -3585,12 +3619,11 @@ const Input = {
     zone.addEventListener('lostpointercapture', end);
 
     $('#btn-action').addEventListener('pointerdown', e => { e.preventDefault(); Game.onAction(); });
-    $('#btn-weapon').addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); Game.toggleWeaponPicker(); });
     $('#btn-jump').addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); Social.jump(); });
     $('#btn-talk').addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); Game.toggleTalk(); });
-    // 고르는 칸 바깥을 누르면 닫는다
+    // 가방 / 말하기 칸 바깥을 누르면 닫는다
     addEventListener('pointerdown', e => {
-      if (!e.target.closest('#weapon-picker')) Game.closeWeaponPicker(!e.target.closest('button'));
+      if (!e.target.closest('#bag-panel')) Game.closeBag(!e.target.closest('button'));
       if (!e.target.closest('#talk-panel')) Game.closeTalk(!e.target.closest('button'));
     });
     addEventListener('contextmenu', e => e.preventDefault());
@@ -4356,8 +4389,6 @@ const Game = {
   weapons: new Set(),
   picked: null, // 고른 것 (무기 또는 블록). 블록을 다 놓으면 lastWeapon 으로 돌아간다
   lastWeapon: null, // 마지막으로 고른 무기 (없으면 가진 무기 중 제일 센 것)
-  pickRows: [], // 고르는 칸의 줄 (종류별)
-  pickPos: { r: 0, c: 0 }, // 고르는 칸에서 키보드로 가리키는 칸
   dig: { i: -1, n: 0 }, // 캐는 중인 칸과 친 횟수
   busy: false, // 칸 바꾸기 답을 기다리는 중
   hearts: CONFIG.MAX_HEARTS,
@@ -4731,7 +4762,7 @@ const Game = {
       back = this.state;
       this.state = 'menu';
       Input.reset();
-      this.closeWeaponPicker(false);
+      this.closeBag(false);
       this.closeTalk(false);
       // 지율 먼저, 그다음 지금 방에 있는 사람들
       names = [...new Set([BUDDY_DEFAULT, ...Multi.visiblePeers().map(p => p.name).filter(Boolean)])];
@@ -4782,7 +4813,7 @@ const Game = {
       back = this.state;
       this.state = 'menu';
       Input.reset();
-      this.closeWeaponPicker(false);
+      this.closeBag(false);
       $('#home-confirm-text').textContent = Store.settings.lang === 'en' ? 'Go back to the start?' : '처음 화면으로 갈까요?';
       sel = 1;
       mark();
@@ -5259,7 +5290,7 @@ const Game = {
     const panel = $('#talk-panel');
     if (this.talkOpen) return this.closeTalk(false);
     if (this.state !== 'play') return;
-    this.closeWeaponPicker(false);
+    this.closeBag(false);
     Input.reset();
     this.talk = { rows: this.talkRows(), r: 0, c: 0 };
     panel.innerHTML = '';
@@ -5427,19 +5458,20 @@ const Game = {
   setHelp(open) {
     const panel = $('#help-panel');
     if (open) {
-      this.closeWeaponPicker(false);
+      this.closeBag(false);
       this.closeTalk(false);
       Input.reset();
       const rows = [
         ['🚶', '움직이기', 'Move', 'WASD / ← ↑ → ↓', '왼쪽 아래 조이스틱', 'Joystick'],
         ['✋', '때리기 · 캐기 · 놓기 · 먹이 던지기', 'Hit · Dig · Place · Throw food', 'Space', '✋ 큰 버튼', 'Big ✋ button'],
-        ['🗡️', '손에 들 것 고르기', 'Choose what to hold', 'Q', '✋ 위 작은 버튼', 'Small button above ✋'],
+        ['🗡️', '손에 들 것 (무기 · 블록 · 음식 · 물약)', 'Hold (weapon · block · food · potion)', '1 / 2 / 3 / 4', '아래 주머니 4칸', '4 pockets at the bottom'],
+        ['🔁', '같은 칸의 다음 것', 'Next in the same pocket', 'Q', '같은 칸 한 번 더', 'Tap the pocket again'],
         ['🦘', '점프', 'Jump', 'J', '🦘 버튼', '🦘 button'],
         ['💬', '말하기 (✏️ 쓰기, 표정, 먹기, 주기)', 'Talk (write, faces, eat, give)', 'C / Enter', '💬 버튼', '💬 button'],
-        ['🎒', '가방 접기 · 펴기', 'Open / close bag', 'B', '하트 옆 🎒', '🎒 next to hearts'],
+        ['🎒', '가방 (옷 입고 벗기, 아이템 보기)', 'Bag (wear clothes, see items)', 'B', '하트 옆 🎒', '🎒 next to hearts'],
         ['🗺️', '지도 크게 보기 · 작게', 'Big map', 'M', '오른쪽 위 지도 누르기', 'Tap the map'],
         ['📖', '카드 다 읽었어요', 'Card done', 'Space / Enter', '✅ 버튼', '✅ button'],
-        ['🚪', '고르는 칸 · 말하기 칸 닫기', 'Close a panel', 'Esc', '바깥 누르기', 'Tap outside'],
+        ['🚪', '가방 · 말하기 칸 닫기', 'Close a panel', 'Esc', '바깥 누르기', 'Tap outside'],
         ['❓', '이 설명 열기 · 닫기', 'This help', '?', '? 버튼', '? button'],
       ];
       const touch = document.body.classList.contains('touch');
@@ -5453,17 +5485,12 @@ const Game = {
   },
 
   initBag() {
-    this.setBag(!document.body.classList.contains('touch'));
     $('#btn-bag').addEventListener('pointerdown', e => {
       e.preventDefault();
       e.stopPropagation();
-      this.setBag($('#inventory').classList.contains('hidden'));
+      this.setBag(!this.bagOpen);
+      Sfx.click();
     });
-  },
-
-  setBag(open) {
-    $('#inventory').classList.toggle('hidden', !open);
-    $('#btn-bag').classList.toggle('on', open);
   },
 
   renderHearts() {
@@ -5524,29 +5551,36 @@ const Game = {
   },
   buffLeft(kind) { return Math.max(0, (this.buffs[kind] - performance.now()) / 1000); },
 
-  // 고르는 칸의 줄: 맨 위 👕 입은 것 (머리/몸통/등/다리, 빈 곳은 빈칸), 가방의 옷, 그리고 손에 들 것 (무기 / 블록 / 먹이 / 물약).
-  // 빈 종류는 뺀다. 칸 id: 'slot:머리 등' (입은 곳), 'wear:옷' (가방의 옷), 나머지는 손에 들 것
-  pickGroups() {
-    const has = id => this.inventory[id] > 0;
-    return [
-      { icon: '👕', ko: '입은 것', en: 'Wearing', ids: WEAR_SLOTS.map(w => `slot:${w.slot}`) },
-      { icon: '🎽', ko: '옷 입기', en: 'Put on', ids: Object.keys(ITEMS).filter(id => ITEMS[id].kind === 'wear' && has(id)).map(id => `wear:${id}`) },
-      ...this.holdGroups(),
-    ].filter(g => g.ids.length);
+  // 주머니 칸 하나의 것 (무기는 맨손 + 가진 무기, 나머지는 가방에 있는 것)
+  pouchIds(key) {
+    if (key === 'weapon') return Object.keys(WEAPONS).filter(id => id === 'hand' || this.weapons.has(id));
+    return Object.keys(ITEMS).filter(id => pouchOf(id) === key && this.inventory[id] > 0);
+  },
+  pouchPick: {}, // 주머니 칸마다 마지막에 든 것
+
+  // 그 칸에서 지금 보여 줄 것 (들고 있으면 그것, 아니면 마지막에 든 것)
+  pouchShow(key) {
+    const ids = this.pouchIds(key), held = this.held;
+    if (pouchOf(held) === key) return held;
+    if (ids.includes(this.pouchPick[key])) return this.pouchPick[key];
+    return key === 'weapon' ? this.weapon : ids[0] || null;
   },
 
-  holdGroups() {
-    const has = id => this.inventory[id] > 0;
-    return [
-      { icon: '⚔️', ko: '무기', en: 'Weapons', ids: Object.keys(WEAPONS).filter(id => id === 'hand' || this.weapons.has(id)) },
-      { icon: '🧱', ko: '블록', en: 'Blocks', ids: Object.keys(ITEMS).filter(id => ITEMS[id].tile && has(id)) },
-      { icon: '🍎', ko: '먹이', en: 'Food', ids: Object.keys(ITEMS).filter(id => ITEMS[id].kind === 'food' && has(id)) },
-      { icon: '⚗️', ko: '물약', en: 'Potions', ids: Object.keys(ITEMS).filter(id => ITEMS[id].kind === 'potion' && has(id)) },
-    ].filter(g => g.ids.length);
+  // 주머니 칸을 눌렀다 (1~4 키): 그 칸의 것을 든다. 이미 그 칸의 것을 들고 있으면 같은 칸의 다음 것
+  pouchTap(k) {
+    const p = POUCH[k], ids = this.pouchIds(p.key), cur = this.held;
+    if (!ids.length) {
+      Sfx.soft();
+      toast(`${p.icon} ${tr(`${p.ko} 칸이 비어 있어요`, `No ${p.en.toLowerCase()} yet`)}`);
+      return;
+    }
+    const id = pouchOf(cur) === p.key ? ids[(ids.indexOf(cur) + 1) % ids.length] : this.pouchShow(p.key);
+    Sfx.click();
+    if (id !== cur) this.setWeapon(id);
   },
 
-  // 손에 들 수 있는 것 전부: 가진 무기 + 가방에 있는 블록, 먹이, 물약
-  ownedWeapons() { return this.holdGroups().flatMap(g => g.ids); },
+  // Q: 지금 든 칸의 다음 것
+  pouchNext() { this.pouchTap(Math.max(0, POUCH.findIndex(p => p.key === pouchOf(this.held)))); },
 
   // 옷 입기: 가방에서 꺼내 입는다 (그 곳에 입고 있던 것은 가방으로)
   wear(id, sound = true) {
@@ -5571,110 +5605,146 @@ const Game = {
     return true;
   },
 
-  // 고르는 칸에서 하나 골랐다: 입은 곳 → 벗기, 가방의 옷 → 입기 (칸은 열어 둔다), 나머지 → 손에 들기
-  pickAct(id) {
-    if (id.startsWith('slot:') || id.startsWith('wear:')) {
-      const ok = id.startsWith('slot:') ? this.takeOff(id.slice(5)) : (this.wear(id.slice(5)), true);
-      if (!ok) { Sfx.soft(); return; }
-      this.renderInventory();
-      this.renderPicker(id.startsWith('slot:') ? id : `slot:${ITEMS[id.slice(5)].slot}`);
-      return;
-    }
-    this.setWeapon(id);
-  },
-
   setWeapon(id) {
     this.picked = id;
     if (WEAPONS[id]) this.lastWeapon = id;
-    this.closeWeaponPicker(false);
+    if (pouchOf(id)) this.pouchPick[pouchOf(id)] = id;
+    this.closeBag(false);
     this.renderInventory();
     const def = WEAPONS[id] || ITEMS[id];
     toast(`${iconHtml(def)} ${itemNames(def).main}`);
   },
 
-  get pickerOpen() { return !$('#weapon-picker').classList.contains('hidden'); },
+  // ---------- 🎒 가방 (B / 하트 옆 🎒): 왼쪽 내 모습 + 입는 곳, 오른쪽 쓰임별 아이템. 누르면 아래에 설명과 버튼 하나 ----------
+  get bagOpen() { return !$('#bag-panel').classList.contains('hidden'); },
 
-  // 고르는 칸: 오른쪽 아래 작은 동그라미(또는 위 무기 칸, Q 키)를 누르면 열린다. 종류마다 한 줄
-  toggleWeaponPicker() {
-    if (this.pickerOpen) return this.closeWeaponPicker(false);
-    if (this.state !== 'play') return;
-    Input.reset();
-    this.renderPicker();
-    $('#weapon-picker').classList.remove('hidden');
+  setBag(open) {
+    if (open === this.bagOpen) return;
+    if (open) {
+      if (this.state !== 'play') return;
+      Input.reset();
+      this.closeTalk(false);
+      this.bagSel = null;
+      this.renderBag();
+    }
+    $('#bag-panel').classList.toggle('hidden', !open);
+    $('#btn-bag').classList.toggle('on', open);
   },
 
-  // at: 키보드로 가리킬 칸 id (없으면 손에 든 것)
-  renderPicker(at) {
-    const picker = $('#weapon-picker');
-    picker.innerHTML = '';
-    this.pickRows = this.pickGroups();
-    this.pickPos = { r: 0, c: 0 };
-    this.pickRows.forEach((g, r) => {
-      const row = document.createElement('div');
-      row.className = 'pick-row';
-      row.innerHTML = `<div class="pick-label"><span>${g.icon}</span>${itemNames(g).main}</div>`;
-      const items = document.createElement('div');
-      items.className = 'pick-items';
-      g.ids.forEach((id, c) => {
-        if (id === (at || this.held)) this.pickPos = { r, c };
-        const btn = document.createElement('button');
-        btn.dataset.pick = `${r},${c}`;
-        if (id.startsWith('slot:')) {
-          // 입은 곳: 입은 옷 그림 (누르면 벗는다), 빈 곳은 빈칸 + 이름
-          const w = WEAR_SLOTS.find(x => x.slot === id.slice(5)), on = this.equip[w.slot];
-          btn.className = `big-btn weapon-choice wear-slot${on ? ' on' : ' empty'}`;
-          btn.innerHTML = `${on ? iconHtml(ITEMS[on]) : ''}<i>${tr(w.ko, w.en)}</i>`;
-          btn.setAttribute('aria-label', w.en);
-        } else {
-          const item = id.startsWith('wear:') ? id.slice(5) : id, def = WEAPONS[item] || ITEMS[item];
-          btn.className = `big-btn weapon-choice${id === this.held ? ' on' : ''}`;
-          btn.innerHTML = ITEMS[item] ? `${iconHtml(def)}<b>${this.inventory[item]}</b>` : iconHtml(def);
-          btn.setAttribute('aria-label', def.en);
-        }
-        btn.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); this.pickAct(id); });
-        items.appendChild(btn);
-      });
-      row.appendChild(items);
-      picker.appendChild(row);
-    });
-    this.markPick();
-  },
-
-  // 키보드로 가리키는 칸 표시 (굵은 주황 테두리)
-  markPick() {
-    const at = `${this.pickPos.r},${this.pickPos.c}`;
-    $('#weapon-picker').querySelectorAll('.weapon-choice').forEach(b => b.classList.toggle('sel', b.dataset.pick === at));
-  },
-
-  // 고르는 칸이 열려 있을 때 키: ←→(A/D) 줄 안에서, ↑↓(W/S) 다른 종류 줄로, Enter/Space 들기, Q/Esc 닫기
-  pickerKey(code) {
-    const rows = this.pickRows, p = this.pickPos;
-    const dx = { ArrowLeft: -1, KeyA: -1, ArrowRight: 1, KeyD: 1 }[code];
-    const dy = { ArrowUp: -1, KeyW: -1, ArrowDown: 1, KeyS: 1 }[code];
-    if (dx) {
-      const n = rows[p.r].ids.length;
-      p.c = (p.c + dx + n) % n;
-    } else if (dy) {
-      p.r = (p.r + dy + rows.length) % rows.length;
-      p.c = Math.min(p.c, rows[p.r].ids.length - 1);
-    } else if (code === 'Enter' || code === 'Space') {
-      Sfx.click();
-      this.pickAct(rows[p.r].ids[p.c]);
-      return;
-    } else if (code === 'KeyQ' || code === 'Escape') {
-      this.closeWeaponPicker();
-      return;
-    } else return;
-    this.markPick();
-    Sfx.click();
-  },
-
-  // 버튼으로 닫을 때는 버튼 소리가 이미 나니까 sound=false
-  closeWeaponPicker(sound = true) {
-    const picker = $('#weapon-picker');
-    if (picker.classList.contains('hidden')) return;
-    picker.classList.add('hidden');
+  closeBag(sound = true) {
+    if (!this.bagOpen) return;
+    this.setBag(false);
     if (sound) Sfx.click();
+  },
+
+  renderBag() {
+    const panel = $('#bag-panel');
+    const has = t => this.inventory[t] > 0, of = kind => Object.keys(ITEMS).filter(t => ITEMS[t].kind === kind && !ITEMS[t].tile && has(t));
+    const groups = [
+      { icon: '⚔️', ko: '장비', en: 'Gear', ids: [...Object.keys(WEAPONS).filter(id => this.weapons.has(id)), ...of('gear'), ...of('wear')] },
+      { icon: '🪵', ko: '재료', en: 'Materials', ids: of('material') },
+      { icon: '🧱', ko: '블록', en: 'Blocks', ids: Object.keys(ITEMS).filter(t => ITEMS[t].tile && has(t)) },
+      { icon: '🍎', ko: '음식', en: 'Food', ids: of('food') },
+      { icon: '⚗️', ko: '물약', en: 'Potions', ids: of('potion') },
+    ];
+    this.bagCells = [...WEAR_SLOTS.map(w => `slot:${w.slot}`), ...groups.flatMap(g => g.ids)];
+    if (!this.bagCells.includes(this.bagSel)) this.bagSel = null;
+    const cell = id => {
+      const sel = id === this.bagSel ? ' sel' : '';
+      if (id.startsWith('slot:')) {
+        const w = WEAR_SLOTS.find(x => x.slot === id.slice(5)), on = this.equip[w.slot];
+        return `<button class="bag-cell wear-cell${on ? ' on' : ' empty'}${sel}" data-cell="${id}">${on ? iconHtml(ITEMS[on]) : ''}<i>${tr(w.ko, w.en)}</i></button>`;
+      }
+      const def = WEAPONS[id] || ITEMS[id];
+      return `<button class="bag-cell${sel}" data-cell="${id}">${iconHtml(def)}${ITEMS[id] ? `<b>${this.inventory[id]}</b>` : ''}<i>${itemNames(def).main}</i></button>`;
+    };
+    panel.innerHTML = `<div class="bag-head"><span>🎒 ${tr('가방', 'Bag')}</span><button class="bag-close" aria-label="close">✖</button></div>
+      <div class="bag-body">
+        <div class="bag-me"><canvas class="bag-look"></canvas><div class="bag-wear">${WEAR_SLOTS.map(w => cell(`slot:${w.slot}`)).join('')}</div></div>
+        <div class="bag-items">${groups.map(g => `<div class="bag-group"><div class="bag-group-label"><span>${g.icon}</span>${tr(g.ko, g.en)}</div>` +
+          `<div class="bag-cells">${g.ids.length ? g.ids.map(cell).join('') : '<span class="bag-none">·</span>'}</div></div>`).join('')}</div>
+      </div>
+      <div class="bag-info">${this.bagInfo()}</div>`;
+    panel.querySelectorAll('[data-cell]').forEach(b => b.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); this.bagSelect(b.dataset.cell); }));
+    panel.querySelectorAll('[data-act]').forEach(b => b.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); this.bagAct(b.dataset.act); }));
+    panel.querySelector('.bag-close').addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); this.closeBag(); });
+    // 내 모습 (입은 옷, 손에 든 것까지)
+    const c = panel.querySelector('.bag-look'), dpr = Math.min(window.devicePixelRatio || 1, 2), saved = Render.ctx;
+    c.width = 72 * dpr;
+    c.height = 104 * dpr;
+    Render.ctx = c.getContext('2d');
+    Render.ctx.setTransform(2.4 * dpr, 0, 0, 2.4 * dpr, 0, 0);
+    Render.drawCharacter({ x: 15, y: 34, dir: 'down', moving: false, walkT: 0, swingT: 0 }, Multi.myLook(), this.held, '', false, null, wornList(this.equip));
+    Render.ctx = saved;
+  },
+
+  // 고른 칸의 아이템 id (입는 곳이면 입은 옷, 비었으면 null)
+  bagItem() {
+    const sel = this.bagSel;
+    return !sel ? null : sel.startsWith('slot:') ? this.equip[sel.slice(5)] || null : sel;
+  },
+
+  // 아래 설명 줄: 큰 그림 + 이름 + 하는 일 + 버튼 (입기 / 벗기 / 들기 / 먹기 / 마시기)
+  bagInfo() {
+    const sel = this.bagSel, id = this.bagItem();
+    if (!sel) return `<p class="bag-hint">${tr('👆 아이템을 눌러 보세요', '👆 Tap an item')}</p>`;
+    if (!id) {
+      const w = WEAR_SLOTS.find(x => x.slot === sel.slice(5));
+      return `<p class="bag-hint">${tr(`${w.ko}: 비어 있어요. 옷을 누르고 👕 입기`, `${w.en}: empty. Tap clothes, then 👕 Put on`)}</p>`;
+    }
+    const def = WEAPONS[id] || ITEMS[id], { main, sub } = itemNames(def), acts = [];
+    if (sel.startsWith('slot:')) acts.push(['off', '👕', '벗기', 'Take off']);
+    else if (def.kind === 'wear') acts.push(['wear', '👕', '입기', 'Put on']);
+    if (!sel.startsWith('slot:') && pouchOf(id)) acts.push(['hold', '✋', '들기', 'Hold']);
+    if (def.kind === 'food') acts.push(['eat', '😋', '먹기', 'Eat']);
+    if (def.kind === 'potion') acts.push(['drink', '🧪', '마시기', 'Drink']);
+    return `<span class="bag-info-icon">${iconHtml(def)}</span>
+      <div class="bag-info-text"><b>${main}</b>${sub ? ` <small>${sub}</small>` : ''}<p>${itemDesc(id)}</p></div>
+      <div class="bag-acts">${acts.map(([act, icon, ko, en]) => `<button class="big-btn bag-act" data-act="${act}">${icon} ${tr(ko, en)}</button>`).join('')}</div>`;
+  },
+
+  // 가방에서 하나 눌렀다: 고르고 이름을 읽어 준다
+  bagSelect(id) {
+    this.bagSel = id;
+    Sfx.click();
+    const item = this.bagItem();
+    if (item) {
+      const def = WEAPONS[item] || ITEMS[item];
+      if (Store.settings.lang === 'en') Speech.speak(def.en, 'en'); else Speech.speak(def.ko, 'ko');
+    }
+    this.renderBag();
+  },
+
+  bagAct(act) {
+    const id = this.bagItem();
+    if (!id) return;
+    if (act === 'off') { this.takeOff(this.bagSel.slice(5)); this.bagSel = id; }
+    else if (act === 'wear') { this.wear(id); this.bagSel = `slot:${ITEMS[id].slot}`; }
+    else if (act === 'hold') { Sfx.click(); this.setWeapon(id); return; }
+    else if (act === 'drink') this.drink(id);
+    else if (act === 'eat') {
+      if (this.hearts >= CONFIG.MAX_HEARTS) { Sfx.soft(); toast(tr('❤️ 하트가 가득해요!', '❤️ Hearts are full!')); return; }
+      const def = ITEMS[id];
+      this.inventory[id]--;
+      if (!this.inventory[id]) delete this.inventory[id];
+      this.hearts = Math.min(CONFIG.MAX_HEARTS, this.hearts + def.heal);
+      toast(`${iconHtml(def)} ${itemNames(def).main} ❤️+${def.heal}`);
+      Sfx.pickup();
+      this.renderHearts();
+    }
+    this.renderInventory();
+  },
+
+  // 가방 키보드: ←→↑↓ 고르기, Enter/스페이스 첫 버튼, B/Esc 닫기
+  bagKey(code) {
+    const cells = this.bagCells || [], i = cells.indexOf(this.bagSel);
+    if (code === 'Escape' || code === 'KeyB') { this.closeBag(); return; }
+    if (['ArrowRight', 'ArrowDown', 'KeyD', 'KeyS'].includes(code)) this.bagSelect(cells[(i + 1) % cells.length]);
+    else if (['ArrowLeft', 'ArrowUp', 'KeyA', 'KeyW'].includes(code)) this.bagSelect(cells[(i - 1 + cells.length) % cells.length]);
+    else if (code === 'Enter' || code === 'Space') {
+      const btn = $('#bag-panel [data-act]');
+      if (btn) this.bagAct(btn.dataset.act); else Sfx.soft();
+    }
   },
 
   addItem(type) {
@@ -5702,53 +5772,25 @@ const Game = {
     this.renderInventory(type);
   },
 
+  // 손에 든 것이 바뀌거나 가방이 바뀌면: ✋ 버튼 그림, 아래 주머니 4칸, (열려 있으면) 가방
   renderInventory(bumpType) {
-    const inv = $('#inventory');
-    inv.innerHTML = '';
-    // 손에 든 것 (✋ 버튼 그림도 같이 바꾼다)
-    const w = WEAPONS[this.held] || ITEMS[this.held];
-    $('#btn-action').innerHTML = iconHtml(w);
-    $('#btn-weapon').innerHTML = iconHtml(w);
-    // 손에 들 것이 여럿이거나 옷이 있으면 고르는 칸 버튼 (옷 입고 벗기도 거기서)
-    const choices = this.ownedWeapons().length > 1 || wornList(this.equip).length > 0 || Object.keys(ITEMS).some(t => ITEMS[t].kind === 'wear' && this.inventory[t] > 0);
-    $('#btn-weapon').classList.toggle('hidden', !choices);
-    if (choices) {
-      const { main, sub } = itemNames(w);
-      const slot = document.createElement('div');
-      slot.className = 'inv-slot weapon';
-      slot.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); this.toggleWeaponPicker(); });
-      slot.innerHTML = `<span class="e">${iconHtml(w)}</span><span class="names"><span class="n">${main}</span>` +
-        `${sub ? `<span class="s">${sub}</span>` : ''}</span>`;
-      inv.appendChild(slot);
-    }
-    // 쓰임에 따라 모아서: 무기 / 옷 / 재료 / 블록 / 음식 / 물약 (줄마다 왼쪽에 작은 그림)
-    const has = type => this.inventory[type] > 0, kindIs = (...k) => type => k.includes(ITEMS[type].kind) && !ITEMS[type].tile;
-    const groups = [
-      { icon: '⚔️', ids: [...Object.keys(WEAPONS).filter(id => this.weapons.has(id)), ...Object.keys(ITEMS).filter(t => kindIs('gear')(t) && has(t))] },
-      { icon: '👕', ids: Object.keys(ITEMS).filter(t => kindIs('wear')(t) && has(t)) },
-      { icon: '🪵', ids: Object.keys(ITEMS).filter(t => kindIs('material')(t) && has(t)) },
-      { icon: '🧱', ids: Object.keys(ITEMS).filter(t => ITEMS[t].tile && has(t)) },
-      { icon: '🍖', ids: Object.keys(ITEMS).filter(t => kindIs('food')(t) && has(t)) },
-      { icon: '⚗️', ids: Object.keys(ITEMS).filter(t => kindIs('potion')(t) && has(t)) },
-    ].filter(g => g.ids.length);
-    if (!groups.length) {
-      if (!choices) inv.innerHTML = '<div class="inv-empty">🎒</div>';
-      return;
-    }
-    for (const g of groups) {
-      const box = document.createElement('div');
-      box.className = 'inv-group';
-      box.innerHTML = `<span class="inv-group-icon">${g.icon}</span>`;
-      for (const type of g.ids) {
-        const def = WEAPONS[type] || ITEMS[type], { main, sub } = itemNames(def);
-        const slot = document.createElement('div');
-        slot.className = `inv-slot${type === bumpType ? ' bump' : ''}`;
-        slot.innerHTML = `<span class="e">${iconHtml(def)}</span><span class="names"><span class="n">${main}</span>` +
-          `${sub ? `<span class="s">${sub}</span>` : ''}</span>${WEAPONS[type] ? '' : `<b>${this.inventory[type]}</b>`}`;
-        box.appendChild(slot);
-      }
-      inv.appendChild(box);
-    }
+    $('#btn-action').innerHTML = iconHtml(WEAPONS[this.held] || ITEMS[this.held]);
+    this.renderPouch(bumpType);
+    if (this.bagOpen) this.renderBag();
+  },
+
+  renderPouch(bump) {
+    const el = $('#pouch'), held = this.held;
+    el.innerHTML = '';
+    POUCH.forEach((p, k) => {
+      const ids = this.pouchIds(p.key), id = this.pouchShow(p.key), on = pouchOf(held) === p.key;
+      const btn = document.createElement('button');
+      btn.className = `pouch-slot${on ? ' on' : ''}${id ? '' : ' empty'}${ids.length > 1 ? ' more' : ''}${bump && pouchOf(bump) === p.key ? ' bump' : ''}`;
+      btn.setAttribute('aria-label', p.en);
+      btn.innerHTML = (id ? `${iconHtml(WEAPONS[id] || ITEMS[id])}${ITEMS[id] ? `<b>${this.inventory[id]}</b>` : ''}` : `<span class="pouch-empty">${p.icon}</span>`) + `<i>${k + 1}</i>`;
+      btn.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); this.pouchTap(k); });
+      el.appendChild(btn);
+    });
   },
 };
 
