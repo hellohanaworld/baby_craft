@@ -100,6 +100,9 @@ body:not(.touch) .bag-btn::after {
 .inv-slot b { font-size: 22px; color: #d84315; }
 .inv-slot.bump { animation: bump .35s; }
 .inv-empty { font-size: 34px; opacity: .7; }
+/* 가방: 쓰임별 묶음 (무기 / 옷 / 재료 / 블록 / 음식 / 물약 / 보물) */
+.inv-group { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 3px 8px 3px 6px; border-radius: 18px; background: rgba(93, 64, 55, .35); }
+.inv-group-icon { font-size: 22px; line-height: 1; }
 
 /* ---------- 터치 조작 ---------- */
 /* 버튼은 모든 기기에 보인다 (마우스로도 누를 수 있게). 조이스틱은 터치 기기에서만 */
@@ -202,6 +205,10 @@ body:not(.touch) #btn-talk::after { content: 'C'; }
 .pick-items { display: flex; flex-wrap: wrap; gap: 12px; padding: 8px; }
 .weapon-choice { width: 76px; height: 76px; border-radius: 50%; font-size: 40px; }
 .weapon-choice.on { border-color: #f9a825; background: #fff59d; }
+/* 👕 입은 곳: 아래에 이름, 빈 곳은 점선 빈칸 */
+.wear-slot i { position: absolute; left: 50%; bottom: -16px; transform: translateX(-50%); font: 900 12px/1 var(--font-ui); font-style: normal; color: #5d4037; white-space: nowrap; }
+.wear-slot.empty { background: rgba(255, 255, 255, .5); border-style: dashed; box-shadow: none; }
+.wear-slot.on { background: #e8f5e9; border-color: #43a047; }
 .weapon-choice { position: relative; }
 .weapon-choice.sel { outline: 6px solid #ff3d00; outline-offset: 3px; box-shadow: 0 0 14px 5px rgba(255, 61, 0, .55); }
 @media (max-height: 500px) {
