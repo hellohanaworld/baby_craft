@@ -280,6 +280,22 @@ function josa(word, withBatchim, without) {
   return word + ((c - 0xAC00) % 28 ? withBatchim : without);
 }
 
+// 색 밝기: k < 1 이면 어둡게 (곱하기), k > 1 이면 흰색 쪽으로 (#rgb / #rrggbb). 같은 색은 한 번만 계산
+const shadeCache = new Map();
+function shade(hex, k) {
+  const key = hex + k;
+  if (shadeCache.has(key)) return shadeCache.get(key);
+  let h = String(hex).replace('#', '');
+  if (h.length === 3) h = [...h].map(c => c + c).join('');
+  if (!/^[0-9a-f]{6}$/i.test(h)) return hex;
+  const out = '#' + [0, 2, 4].map(i => {
+    const c = parseInt(h.slice(i, i + 2), 16);
+    return Math.round(Math.min(255, k <= 1 ? c * k : c + (255 - c) * (k - 1))).toString(16).padStart(2, '0');
+  }).join('');
+  shadeCache.set(key, out);
+  return out;
+}
+
 // 별/반짝이 터지는 칭찬 연출
 function burst() {
   const layer = $('#stars');
@@ -322,7 +338,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 83;
+const GAME_V = 84;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -1387,7 +1403,6 @@ const Craft = {
 // World — 타일 맵 생성 + 픽셀 그림
 // ============================================================
 const T = CONFIG.TILE;
-const P = T / 8; // 픽셀 한 칸
 const TILE = {
   GRASS: 0, TREE: 1, WATER: 2, SAND: 3, ROCK: 4, FLOWER: 5, HOUSE: 6, DOOR: 7, PATH: 8,
   BRICK: 9, GATE: 10, BRIDGE: 11, TORCH: 12, // 놓아서 생기는 칸 (GATE 는 집 문(DOOR)과 다른 내가 놓는 문)
@@ -1535,22 +1550,42 @@ function potionIcon(liquid, light) {
 }
 
 // 맵 칸 그림 한 칸짜리 (블록 아이템 그림, 네잎클로버) 또는 픽셀 그림 (PIXEL_ICONS). 한 번 그려서 저장
+// 아이템 그림 크기: 24 (땅, 가방, 주머니) / 16 (손에 든 것, 던진 먹이). 1 칸 = 1 px 로 그려서 맵/캐릭터와 픽셀 크기가 같다.
+// 8x8 로 그린 그림을 Scale3x(24) / Scale2x(16) 로 다듬는다 (계단 모서리가 매끈해진다)
 const tileIcons = {};
-function tileIcon(name) {
-  if (!tileIcons[name]) {
-    const c = document.createElement('canvas');
-    c.width = c.height = T;
-    const g = c.getContext('2d'), pix = PIXEL_ICONS[name];
+function tileIcon(name, size = 24) {
+  const key = `${name}|${size}`;
+  if (!tileIcons[key]) {
+    const c = document.createElement('canvas'), pix = PIXEL_ICONS[name];
+    c.width = c.height = pix ? size : T;
+    const g = c.getContext('2d');
     if (pix) {
-      // 아이템 그림은 16x16 (8x8 로 그린 것을 Scale2x 로 다듬는다)
-      const rows = pix.rows.length === 8 ? scale2x(pix.rows) : pix.rows, u = T / rows.length;
+      const rows = size === 24 ? scale3x(pix.rows) : size === 16 ? scale2x(pix.rows) : pix.rows, u = size / rows.length;
       rows.forEach((row, y) => [...row].forEach((ch, x) => {
         if (pix.colors[ch]) { g.fillStyle = pix.colors[ch]; g.fillRect(x * u, y * u, u, u); }
       }));
+      // 아래/오른쪽 가장자리에 진한 테두리 한 줄 (땅 위에서 또렷하게)
+      outlinePixels(g, size);
     } else World.drawTile(g, 0, 0, TILE[name]);
-    tileIcons[name] = { canvas: c, url: c.toDataURL() };
+    tileIcons[key] = { canvas: c, url: c.toDataURL() };
   }
-  return tileIcons[name];
+  return tileIcons[key];
+}
+
+// 그림 둘레 빈칸에 옆 색을 아주 어둡게 한 테두리 (몬스터 그림과 같은 방식)
+function outlinePixels(g, n) {
+  const img = g.getImageData(0, 0, n, n), d = img.data, src = new Uint8ClampedArray(d);
+  const at = (x, y) => (x < 0 || y < 0 || x >= n || y >= n ? -1 : (y * n + x) * 4);
+  for (let y = 0; y < n; y++) {
+    for (let x = 0; x < n; x++) {
+      const i = at(x, y);
+      if (src[i + 3]) continue;
+      const nb = [at(x - 1, y), at(x + 1, y), at(x, y - 1), at(x, y + 1)].find(j => j >= 0 && src[j + 3]);
+      if (nb === undefined) continue;
+      d[i] = src[nb] * 0.3; d[i + 1] = src[nb + 1] * 0.3; d[i + 2] = src[nb + 2] * 0.3; d[i + 3] = 255;
+    }
+  }
+  g.putImageData(img, 0, 0);
 }
 
 // 화면(HTML)에 쓰는 아이템 그림: 블록은 맵 칸 그림, icon 이 있으면 그 그림, 나머지는 이모지
@@ -1571,6 +1606,34 @@ function scale2x(rows) {
       out[2 * y][2 * x + 1] = ok && a === b ? b : p;
       out[2 * y + 1][2 * x] = ok && d === c ? c : p;
       out[2 * y + 1][2 * x + 1] = ok && b === d ? d : p;
+    }
+  }
+  return out.map(r => r.join(''));
+}
+
+// 8x8 → 24x24 (Scale3x / AdvMAME3x)
+function scale3x(rows) {
+  const h = rows.length, w = rows[0].length, at = (x, y) => (x < 0 || y < 0 || x >= w || y >= h ? rows[Math.min(h - 1, Math.max(0, y))][Math.min(w - 1, Math.max(0, x))] : rows[y][x]);
+  const out = Array.from({ length: h * 3 }, () => []);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const A = at(x - 1, y - 1), B = at(x, y - 1), C = at(x + 1, y - 1), D = at(x - 1, y), E = rows[y][x], F = at(x + 1, y),
+        G = at(x - 1, y + 1), H = at(x, y + 1), I = at(x + 1, y + 1);
+      let e = [E, E, E, E, E, E, E, E, E];
+      if (B !== H && D !== F) {
+        e = [
+          D === B ? D : E,
+          (D === B && E !== C) || (B === F && E !== A) ? B : E,
+          B === F ? F : E,
+          (D === B && E !== G) || (D === H && E !== A) ? D : E,
+          E,
+          (B === F && E !== I) || (H === F && E !== C) ? F : E,
+          D === H ? D : E,
+          (D === H && E !== I) || (H === F && E !== G) ? H : E,
+          H === F ? F : E,
+        ];
+      }
+      for (let k = 0; k < 9; k++) out[y * 3 + Math.floor(k / 3)][x * 3 + (k % 3)] = e[k];
     }
   }
   return out.map(r => r.join(''));
@@ -2093,44 +2156,89 @@ const World = {
   },
 
   // region: 구역 땅 색 (없으면 기본 색. 블록 그림)
+  // 맵 칸 그림: 32 x 32 픽셀 (1 칸 = 1 px). 칸마다 hash 로 무늬가 조금씩 달라서 반복돼 보이지 않는다
   drawTile(g, x, y, type, region) {
     const gr = GROUND[region] || GROUND.DEFAULT;
-    const px = (gx, gy, color, w = 1, h = 1) => { g.fillStyle = color; g.fillRect(x * T + gx * P, y * T + gy * P, w * P, h * P); };
-    const fill = color => { g.fillStyle = color; g.fillRect(x * T, y * T, T, T); };
-    const specks = (n, colors, seed) => {
-      for (let i = 0; i < n; i++) {
-        px(Math.floor(hash(x, y, seed + i) * 8), Math.floor(hash(x, y, seed + i + 50) * 8),
-          colors[Math.floor(hash(x, y, seed + i + 99) * colors.length)]);
+    const X = x * T, Y = y * T;
+    const p = (gx, gy, color, w = 1, h = 1) => { g.fillStyle = color; g.fillRect(X + gx, Y + gy, w, h); };
+    const px8 = (gx, gy, color, w = 1, h = 1) => p(gx * 4, gy * 4, color, w * 4, h * 4); // 예전 8칸 좌표 (클로버, 자물쇠)
+    const fill = color => p(0, 0, color, T, T);
+    const r = k => hash(x, y, k);
+    const ri = (k, n) => Math.floor(hash(x, y, k) * n);
+    const nz = (i, j, k) => hash(x * 37 + i, y * 41 + j, k); // 픽셀마다 다른 값
+    const specks = (n, colors, seed, w = 1, h = 1) => {
+      for (let i = 0; i < n; i++) p(ri(seed + i, T - w + 1), ri(seed + i + 50, T - h + 1), colors[ri(seed + i + 99, colors.length)], w, h);
+    };
+    // 둥근 덩어리 (나무 잎, 바위, 덤불): f(dx, dy, d, i, j) 가 색을 돌려주면 칠한다
+    const blob = (cx, cy, rx, ry, rough, f, pow = 2) => {
+      for (let j = Math.max(0, Math.floor(cy - ry)); j < Math.min(T, Math.ceil(cy + ry)); j++) {
+        for (let i = Math.max(0, Math.floor(cx - rx)); i < Math.min(T, Math.ceil(cx + rx)); i++) {
+          const dx = (i + 0.5 - cx) / rx, dy = (j + 0.5 - cy) / ry;
+          const d = Math.abs(dx) ** pow + Math.abs(dy) ** pow + (nz(i, j, 3) - 0.5) * rough;
+          if (d < 1) { const col = f(dx, dy, d, i, j); if (col) p(i, j, col); }
+        }
       }
     };
-    const grass = () => { fill(gr.grass[0]); specks(6, gr.grass.slice(1), 1); };
+    const grass = () => {
+      const [g0, g1, g2] = gr.grass, dark = shade(g0, 0.84);
+      fill(g0);
+      specks(34, [g1, g2, g1], 1);
+      // 풀잎: 짙은 세로 줄 + 밝은 끝
+      for (let k = 0; k < 5; k++) {
+        const bx = ri(200 + k, 30) + 1, by = ri(210 + k, 26) + 3;
+        p(bx, by, dark, 1, 3); p(bx + 1, by + 1, dark, 1, 2); p(bx, by - 1, g2);
+      }
+    };
+    const waterBase = () => {
+      const [w0, w1] = gr.water;
+      fill(w0);
+      specks(14, [shade(w0, 0.9)], 140, 2, 1);
+      // 물결 (⌒ 모양 밝은 줄)
+      for (let k = 0; k < 3; k++) {
+        const wx = ri(150 + k, 24), wy = 3 + k * 10 + ri(160 + k, 5);
+        p(wx, wy + 1, w1); p(wx + 1, wy, w1, 4, 1); p(wx + 5, wy + 1, w1);
+      }
+      if (r(170) < 0.5) p(ri(171, 30), ri(172, 30), '#ffffff');
+    };
 
     switch (type) {
       case TILE.GRASS: grass(); break;
       case TILE.FLOWER: {
         grass();
-        const fx = 2 + Math.floor(hash(x, y, 7) * 4), fy = 2 + Math.floor(hash(x, y, 8) * 3);
-        const color = hash(x, y, 9) > 0.5 ? '#e74c3c' : '#f1c40f';
-        px(fx, fy + 1, '#2e7d32', 1, 2);
-        px(fx - 1, fy, color); px(fx + 1, fy, color); px(fx, fy - 1, color); px(fx, fy, '#fff59d');
+        const fx = 9 + ri(7, 13), fy = 8 + ri(8, 10);
+        const color = r(9) > 0.5 ? '#e74c3c' : '#f1c40f', dark = shade(color, 0.75);
+        p(fx + 1, fy + 3, '#2e7d32', 1, 7); p(fx + 2, fy + 7, '#43a047', 2, 1); p(fx - 1, fy + 6, '#43a047', 2, 1);
+        p(fx - 2, fy, color, 2, 2); p(fx + 2, fy, dark, 2, 2); p(fx, fy - 2, color, 2, 2); p(fx, fy + 2, dark, 2, 2);
+        p(fx, fy - 2, shade(color, 1.4)); p(fx, fy, '#fff59d', 2, 2); p(fx + 1, fy + 1, '#fbc02d');
         break;
       }
       case TILE.TREE:
       case TILE.LOCK_TREE: // 잠긴 나무는 다른 테두리 나무와 똑같이 보인다
       case TILE.GOLD_TREE: {
         const leaf = type === TILE.GOLD_TREE ? ['#f9a825', '#ffd54f', '#fff59d'] : gr.leaf;
+        const deep = shade(leaf[0], 0.74), edge = shade(leaf[0], 0.6);
         grass();
-        px(3, 5, '#795548', 2, 3);
-        px(1, 0, leaf[0], 6, 5);
-        px(0, 1, leaf[0], 8, 3);
-        for (let i = 0; i < 5; i++) px(1 + Math.floor(hash(x, y, 20 + i) * 6), Math.floor(hash(x, y, 30 + i) * 4) + 1, leaf[1]);
-        px(2, 1, leaf[2]);
-        if (type === TILE.GOLD_TREE) { px(6, 0, '#fff'); px(1, 3, '#fff'); px(5, 3, '#fffde7'); }
+        p(6, 28, 'rgba(0,0,0,.16)', 20, 3); p(9, 27, 'rgba(0,0,0,.12)', 14, 1);
+        // 줄기 (나뭇결)
+        p(13, 18, '#795548', 6, 11); p(13, 18, '#5d4037', 1, 11); p(18, 18, '#8d6e63', 1, 11);
+        p(12, 28, '#5d4037', 8, 1); p(15, 21 + ri(5, 4), '#5d4037', 1, 3);
+        // 잎: 위 왼쪽이 밝고 아래 오른쪽이 어둡다. 가장자리는 울퉁불퉁
+        blob(16, 11.5, 15.5, 11.5, 0.22, (dx, dy, d, i, j) => {
+          const v = dx * 0.55 + dy * 0.85 + (nz(i, j, 5) - 0.5) * 0.3;
+          if (d > 0.84 && dy > -0.2) return edge;
+          return v > 0.45 ? deep : v < -0.55 ? leaf[2] : v < -0.1 ? leaf[1] : leaf[0];
+        });
+        // 잎 뭉치 무늬
+        for (let k = 0; k < 6; k++) {
+          const lx = 5 + ri(20 + k, 22), ly = 4 + ri(30 + k, 13);
+          p(lx, ly, deep, 3, 1); p(lx + 1, ly - 1, leaf[1], 2, 1);
+        }
+        if (type === TILE.GOLD_TREE) { p(24, 2, '#fff'); p(5, 12, '#fff'); p(20, 13, '#fffde7'); p(11, 5, '#fff', 2, 2); }
         if (type === TILE.LOCK_TREE) {
           // 자물쇠 (용을 잡으면 열린다): 회색 고리 + 노란 몸통 + 열쇠 구멍
-          px(2.5, 3, '#424242', 3, 0.5); px(2.5, 3, '#424242', 0.5, 2); px(5, 3, '#424242', 0.5, 2);
-          px(2, 4.5, '#5d4037', 4, 3.5); px(2.5, 5, '#fbc02d', 3, 2.5); px(2.5, 5, '#fff59d', 3, 0.5);
-          px(3.75, 5.75, '#3e2723', 0.5, 1.25);
+          px8(2.5, 3, '#424242', 3, 0.5); px8(2.5, 3, '#424242', 0.5, 2); px8(5, 3, '#424242', 0.5, 2);
+          px8(2, 4.5, '#5d4037', 4, 3.5); px8(2.5, 5, '#fbc02d', 3, 2.5); px8(2.5, 5, '#fff59d', 3, 0.5);
+          px8(3.75, 5.75, '#3e2723', 0.5, 1.25);
         }
         break;
       }
@@ -2152,9 +2260,9 @@ const World = {
           for (const [k, ch] of cells) {
             const [rx, ry] = k.split(',').map(Number);
             const color = ch === 'l' ? light : cells.has(`${rx},${ry + 1}`) ? mid : dark;
-            px(cx + rx * 0.5, cy + ry * 0.5, color, 0.5, 0.5);
+            px8(cx + rx * 0.5, cy + ry * 0.5, color, 0.5, 0.5);
           }
-          px(cx, cy, dark, 0.5, 0.5);
+          px8(cx, cy, dark, 0.5, 0.5);
         };
         const UP = [0, -1], DOWN = [0, 1], LEFT = [-1, 0], RIGHT = [1, 0];
         // 밭처럼: 구석에 작은 세잎 하나
@@ -2165,99 +2273,140 @@ const World = {
         const LEAF = ['.mm.mm.', 'mlmmmmm', 'mmmmmmm', '.mmmmm.', '..mmm..', '...m...'];
         const lucky = type === TILE.LUCKY;
         // 줄기: 세잎은 아래로, 네잎은 아래 잎에 가려서 옆으로 비스듬히
-        if (lucky) { px(cx + 1.5, cy + 1.5, '#2e7d32', 0.5, 0.5); px(cx + 2, cy + 2, '#2e7d32', 0.5, 0.5); }
-        else { px(cx, cy + 0.5, '#2e7d32', 0.5, 1.5); px(cx + 0.5, cy + 2, '#2e7d32', 0.5, 1.5); }
+        if (lucky) { px8(cx + 1.5, cy + 1.5, '#2e7d32', 0.5, 0.5); px8(cx + 2, cy + 2, '#2e7d32', 0.5, 0.5); }
+        else { px8(cx, cy + 0.5, '#2e7d32', 0.5, 1.5); px8(cx + 0.5, cy + 2, '#2e7d32', 0.5, 1.5); }
         clover(cx, cy, LEAF, lucky ? [UP, RIGHT, DOWN, LEFT] : [UP, LEFT, RIGHT], 1, '#43a047', '#2e7d32', '#a5d6a7');
         // 가끔 흰 토끼풀 꽃 (세잎클로버 칸에만)
         if (!lucky && hash(x, y, 21) < 0.15) {
           const fx = hash(x, y, 22) > 0.5 ? 6.5 : 0.5, fy = 6;
-          px(fx - 0.5, fy, '#f5f5f5', 1.5, 1); px(fx, fy - 0.5, '#f5f5f5', 0.5, 2); px(fx, fy + 0.5, '#f8bbd0', 0.5, 0.5);
+          px8(fx - 0.5, fy, '#f5f5f5', 1.5, 1); px8(fx, fy - 0.5, '#f5f5f5', 0.5, 2); px8(fx, fy + 0.5, '#f8bbd0', 0.5, 0.5);
         }
         break;
       }
-      case TILE.WATER:
-        fill(gr.water[0]);
-        for (let i = 0; i < 2; i++) px(Math.floor(hash(x, y, 40 + i) * 6), Math.floor(hash(x, y, 45 + i) * 8), gr.water[1], 2, 1);
+      case TILE.WATER: waterBase(); break;
+      case TILE.SAND: {
+        const [s0, s1, s2] = gr.sand;
+        fill(s0);
+        specks(40, [s1, s2, s1], 60);
+        specks(3, [shade(s0, 0.8)], 64, 2, 1);
         break;
-      case TILE.SAND: fill(gr.sand[0]); specks(5, gr.sand.slice(1), 60); break;
-      case TILE.ROCK:
+      }
+      case TILE.ROCK: {
         grass();
-        px(0, 1, '#8d939b', 8, 7);
-        px(0, 1, '#a7adb5', 8, 1);
-        specks(6, ['#6f757d', '#7d838b'], 70);
-        break;
-      case TILE.PATH: fill('#c8a06a'); specks(5, ['#b48a55', '#d6b07c'], 80); break;
-      case TILE.BRICK:
-        fill('#b5523b');
-        for (let r = 0; r < 4; r++) {
-          px(0, r * 2 + 1, '#e8d5b0', 8, 0.5);
-          const off = r % 2 ? 0 : 2;
-          px(off, r * 2, '#e8d5b0', 0.5, 1); px(off + 4, r * 2, '#e8d5b0', 0.5, 1);
+        p(3, 28, 'rgba(0,0,0,.18)', 26, 3);
+        blob(16, 17, 15, 13, 0.12, (dx, dy, d) => {
+          const v = dx * 0.5 + dy * 0.85;
+          if (d > 0.78 && dy > 0.1) return '#5a6068';
+          return v < -0.5 ? '#bcc2c9' : v < -0.05 ? '#a2a8b0' : v < 0.5 ? '#8d939b' : '#737981';
+        }, 4);
+        // 금
+        const cx = 8 + ri(70, 10), cy = 10 + ri(71, 6);
+        for (let k = 0; k < 5; k++) p(cx + k, cy + Math.floor(k / 2), '#62686f');
+        for (let k = 0; k < 8; k++) {
+          const sx = 4 + ri(72 + k, 24), sy = 8 + ri(82 + k, 18);
+          p(sx, sy, k % 2 ? '#7d838b' : '#9aa0a8');
         }
-        specks(4, ['#a1452f', '#c4644a'], 90);
         break;
+      }
+      case TILE.PATH:
+        fill('#c8a06a');
+        specks(40, ['#b48a55', '#d6b07c', '#bf955f'], 80);
+        for (let k = 0; k < 3; k++) { const sx = ri(185 + k, 29), sy = ri(188 + k, 29); p(sx, sy, '#a8865a', 3, 2); p(sx, sy, '#e0c08f'); }
+        break;
+      case TILE.BRICK: {
+        fill('#d9c5a0');
+        for (let row = 0; row < 4; row++) {
+          const by = row * 8, off = row % 2 ? 0 : 8;
+          for (let bx = off - 16; bx < T; bx += 16) {
+            const base = shade('#b5523b', 0.9 + hash(x * 7 + bx, y * 5 + row, 91) * 0.2);
+            const x0 = Math.max(0, bx + 1), x1 = Math.min(T, bx + 16);
+            if (x1 <= x0) continue;
+            p(x0, by, base, x1 - x0, 7);
+            p(x0, by, shade(base, 1.18), x1 - x0, 1);
+            p(x0, by + 6, shade(base, 0.8), x1 - x0, 1);
+          }
+        }
+        specks(6, ['#a1452f', '#c4644a'], 90);
+        break;
+      }
       case TILE.GATE:
         grass();
-        px(1, 0, '#5d3a1a', 6, 8);
-        px(1.5, 0.5, '#8d5a2b', 5, 7.5);
-        px(3.9, 0.5, '#6d4321', 0.3, 7.5);
-        px(1.5, 3, '#6d4321', 5, 0.4);
-        px(5.2, 4, '#f1c40f', 0.8, 0.8);
+        p(4, 0, '#5d3a1a', 24, 32);
+        for (const [gx, w] of [[5, 7], [13, 7], [21, 6]]) {
+          p(gx, 1, '#8d5a2b', w, 30); p(gx, 1, '#a86d36', 1, 30); p(gx + w - 1, 1, '#6d4321', 1, 30);
+        }
+        for (const by of [5, 23]) { p(5, by, '#6d4321', 22, 3); p(5, by, '#7d4f27', 22, 1); p(7, by + 1, '#bdbdbd'); p(24, by + 1, '#bdbdbd'); }
+        p(21, 14, '#f1c40f', 2, 3); p(21, 14, '#fff59d');
         break;
       case TILE.BRIDGE:
-        fill(gr.water[0]);
-        px(0, 0.5, '#5d4037', 8, 1);
-        px(0, 6.5, '#5d4037', 8, 1);
-        for (let k = 0; k < 4; k++) px(k * 2, 1.5, '#a0703f', 1.6, 5);
+        waterBase();
+        for (let k = 0; k < 4; k++) {
+          const bx = k * 8;
+          p(bx, 5, '#a0703f', 7, 22); p(bx, 5, '#c08a50', 1, 22); p(bx + 6, 5, '#7a5230', 1, 22);
+          p(bx + 1, 7, '#3e2723'); p(bx + 5, 7, '#3e2723'); p(bx + 1, 24, '#3e2723'); p(bx + 5, 24, '#3e2723');
+        }
+        for (const by of [1, 27]) { p(0, by, '#5d4037', 32, 4); p(0, by, '#795548', 32, 1); }
         break;
       case TILE.TORCH:
         grass();
-        px(3.5, 3.5, '#6d4c41', 1, 4);
-        px(3, 1.5, '#ff9800', 2, 2);
-        px(3.5, 0.5, '#ffeb3b', 1, 2);
-        px(3.25, 2.5, '#fff59d', 0.5, 0.5);
+        p(12, 29, 'rgba(0,0,0,.18)', 8, 2);
+        p(14, 14, '#6d4c41', 4, 16); p(14, 14, '#8d6e63', 1, 16);
+        p(13, 12, '#5d4037', 6, 4); p(13, 13, '#4e342e', 6, 1);
+        p(12, 6, '#ff9800', 8, 7); p(13, 4, '#ff9800', 6, 2); p(14, 2, '#ff9800', 4, 2); p(15, 1, '#ffb74d', 2, 1);
+        p(14, 6, '#ffeb3b', 4, 6); p(15, 4, '#ffeb3b', 2, 2);
+        p(15, 8, '#fffde7', 2, 3);
         break;
       case TILE.THORN: {
         // 가시 울타리: 짙은 가시덤불 + 하얀 가시
         grass();
-        px(1, 2, '#33691e', 6, 5); px(0, 3, '#33691e', 8, 3); px(2, 1, '#33691e', 4, 1);
-        px(2, 3, '#558b2f', 2, 1); px(5, 4, '#558b2f', 1, 1); px(3, 5, '#558b2f', 2, 1);
-        for (const [tx, ty] of [[1.5, 1.5], [6, 1.5], [0, 2.5], [7.5, 3], [-0.25, 5.5], [7.5, 6], [2, 7], [5.5, 7]]) px(tx, ty, '#f5f5f5', 0.5, 0.5);
-        for (const [tx, ty] of [[3, 2.5], [5.5, 3], [1.5, 4.5], [4, 4.5], [6, 5.5]]) px(tx, ty, '#d7ccc8', 0.5, 0.5);
+        p(2, 28, 'rgba(0,0,0,.16)', 28, 3);
+        blob(16, 17, 15.5, 12.5, 0.3, (dx, dy, d, i, j) => (dy > 0.55 ? '#1b5e20' : dx + dy < -0.5 && nz(i, j, 7) > 0.4 ? '#558b2f' : '#33691e'));
+        const clampPx = v => Math.min(31, Math.max(0, v));
+        for (let k = 0; k < 14; k++) {
+          const a = k / 14 * Math.PI * 2 + r(110) * 0.4, tx = clampPx(Math.round(16 + Math.cos(a) * 15)), ty = clampPx(Math.round(17 + Math.sin(a) * 12));
+          p(tx, ty, '#f5f5f5'); p(tx, clampPx(ty + 1), '#d7ccc8');
+        }
+        for (let k = 0; k < 7; k++) p(6 + ri(120 + k, 20), 10 + ri(130 + k, 14), '#d7ccc8');
         break;
       }
       case TILE.CLIFF: {
         // 절벽: 위는 울퉁불퉁한 바위 땅, 아래가 길이면 깎아지른 절벽 면 (어두운 줄무늬)
         fill('#8d7b6b');
-        specks(7, ['#7a6a5b', '#a1907f', '#6f6052'], 41);
+        specks(36, ['#7a6a5b', '#a1907f', '#6f6052'], 41);
+        specks(4, ['#7a6a5b'], 46, 3, 1);
         const open = v => v !== TILE.CLIFF && v !== TILE.TREE;
-        if (open(this.tile(x, y - 1))) px(0, 0, '#b3a291', 8, 1);
+        if (open(this.tile(x, y - 1))) { p(0, 0, '#b3a291', 32, 3); p(0, 3, '#9c8b7a', 32, 1); }
         if (open(this.tile(x, y + 1))) {
-          px(0, 5, '#5d4037', 8, 3);
-          px(0, 5, '#795548', 8, 0.5);
-          for (let i = 0; i < 3; i++) px(Math.floor(hash(x, y, 60 + i) * 8), 5.5, '#3e2723', 0.5, 2.5);
+          p(0, 20, '#5d4037', 32, 12);
+          p(0, 20, '#795548', 32, 2);
+          for (let i = 0; i < 6; i++) p(ri(60 + i, 32), 22 + ri(66 + i, 3), '#3e2723', 1, 9);
+          for (let i = 0; i < 5; i++) p(ri(172 + i, 32), 22 + ri(178 + i, 10), '#6d4c41');
         }
-        if (open(this.tile(x - 1, y))) px(0, 0, '#6f6052', 0.5, 8);
-        if (open(this.tile(x + 1, y))) px(7.5, 0, '#6f6052', 0.5, 8);
+        if (open(this.tile(x - 1, y))) p(0, 0, '#6f6052', 2, 32);
+        if (open(this.tile(x + 1, y))) p(30, 0, '#6f6052', 2, 32);
         break;
       }
       case TILE.STATION: grass(); break; // 텐트/대장간 그림은 Render.drawStation (칸 위로 크게)
       case TILE.SAPLING: {
         // 묘목: 흙 둔덕 + 가는 줄기 + 잎 두 장
         grass();
-        px(2.5, 6, '#6d4c41', 3, 1.2); px(3, 5.6, '#8d6e63', 2, 0.6);
-        px(3.75, 2.5, '#558b2f', 0.5, 3.4);
-        px(1.75, 2, '#66bb6a', 2, 1.2); px(4.25, 1.2, '#43a047', 2, 1.2); px(2.25, 2, '#a5d6a7', 0.75, 0.5);
+        blob(16, 27, 8, 3.5, 0, (dx, dy) => (dy < -0.3 ? '#8d6e63' : '#6d4c41'));
+        p(15, 10, '#558b2f', 2, 16); p(15, 10, '#7cb342', 1, 16);
+        blob(11, 12, 4.5, 2.5, 0, (dx, dy) => (dy < -0.2 && dx < 0.3 ? '#a5d6a7' : '#66bb6a'));
+        blob(21, 8, 4.5, 2.5, 0, (dx, dy) => (dy < -0.2 && dx > -0.3 ? '#81c784' : '#43a047'));
         break;
       }
       case TILE.CHEST: {
         // 보물 상자: 나무 상자 + 금테 + 자물쇠, 반짝
         grass();
-        px(1, 6.5, 'rgba(0,0,0,.2)', 6, 1);
-        px(1, 3, '#8d5a2b', 6, 4); px(1, 2, '#a86d36', 6, 1.5); px(1.5, 1.5, '#a86d36', 5, 0.5);
-        px(1, 3.5, '#ffca28', 6, 0.5); px(1, 2, '#ffca28', 0.5, 5); px(6.5, 2, '#ffca28', 0.5, 5);
-        px(3.5, 3, '#fff59d', 1, 1.5); px(3.75, 3.75, '#5d4037', 0.5, 0.5);
-        px(6, 0.5, '#fff'); px(0.5, 1.5, '#fffde7', 0.5, 0.5);
+        p(4, 27, 'rgba(0,0,0,.22)', 25, 3);
+        p(4, 13, '#8d5a2b', 24, 15); p(5, 13, '#a06a35', 1, 15);
+        p(4, 19, '#6d4321', 24, 1); p(4, 24, '#6d4321', 24, 1);
+        p(5, 6, '#a86d36', 22, 1); p(4, 7, '#a86d36', 24, 6); p(5, 7, '#c08a50', 22, 1);
+        p(4, 12, '#ffca28', 24, 2); p(4, 6, '#ffca28', 2, 22); p(26, 6, '#ffca28', 2, 22);
+        p(5, 6, '#fff59d', 1, 22); p(27, 6, '#f9a825', 1, 22);
+        p(14, 11, '#f9a825', 5, 7); p(15, 12, '#fff59d', 3, 5); p(16, 14, '#5d4037', 1, 2);
+        p(25, 2, '#fff'); p(24, 3, '#fff', 3, 1); p(25, 4, '#fff'); p(2, 6, '#fffde7');
         break;
       }
       default: break; // HOUSE, DOOR 는 drawHouse 에서 한 번에 그린다
@@ -2266,35 +2415,36 @@ const World = {
 
   drawHouse(g) {
     const X = this.house.x * T, Y = this.house.y * T, W3 = 3 * T;
-    // 벽 (나무 판자)
-    g.fillStyle = '#b5793f';
-    g.fillRect(X, Y + T * 0.7, W3, T * 2.3);
-    g.fillStyle = '#8e5a2b';
-    for (let yy = Y + T * 0.7; yy < Y + 3 * T; yy += P * 2) g.fillRect(X, yy, W3, P / 2);
-    // 지붕
-    g.fillStyle = '#c0392b';
-    g.fillRect(X - P, Y, W3 + 2 * P, T * 0.85);
-    g.fillStyle = '#e74c3c';
-    g.fillRect(X - P, Y, W3 + 2 * P, P);
-    g.fillStyle = '#962d22';
-    for (let i = 0; i < W3 + 2 * P; i += P * 2) g.fillRect(X - P + i, Y + T * 0.85 - P, P, P);
-    // 창문
-    for (const wx of [X + P * 1.5, X + 2 * T + P * 1.5]) {
-      g.fillStyle = '#5d4037';
-      g.fillRect(wx, Y + T * 1.15, P * 5, P * 5);
-      g.fillStyle = '#9ad7ff';
-      g.fillRect(wx + P / 2, Y + T * 1.15 + P / 2, P * 4, P * 4);
-      g.fillStyle = '#5d4037';
-      g.fillRect(wx + P * 2.25, Y + T * 1.15, P / 2, P * 5);
+    const p = (gx, gy, color, w = 1, h = 1) => { g.fillStyle = color; g.fillRect(X + gx, Y + gy, w, h); };
+    // 벽 (나무 판자: 4px 마다 이음매, 위가 밝고 아래가 어둡다)
+    p(0, 22, '#b5793f', W3, 74);
+    for (let yy = 22; yy < 96; yy += 4) { p(0, yy, '#c88a4c', W3, 1); p(0, yy + 3, '#8e5a2b', W3, 1); }
+    for (let k = 0; k < 14; k++) p(Math.floor(hash(this.house.x, k, 5) * (W3 - 2)), 24 + Math.floor(hash(k, this.house.y, 6) * 18) * 4, '#9a6533', 2, 1);
+    p(0, 22, '#7a4a22', 2, 74); p(W3 - 2, 22, '#7a4a22', 2, 74);
+    // 지붕 (기와 줄, 처마 그림자)
+    p(-4, 0, '#c0392b', W3 + 8, 27);
+    for (let row = 0; row < 4; row++) {
+      const yy = 2 + row * 6, off = row % 2 ? 0 : 4;
+      p(-4, yy + 5, '#962d22', W3 + 8, 1);
+      for (let xx = -4 + off; xx < W3 + 4; xx += 8) p(xx, yy, '#a93226', 1, 5);
     }
-    // 문
-    const dx = X + T, dy = Y + 2 * T;
-    g.fillStyle = '#4e342e';
-    g.fillRect(dx + P, dy - T * 0.3, T - 2 * P, T * 1.3);
-    g.fillStyle = '#6d4321';
-    g.fillRect(dx + P * 1.5, dy - T * 0.3 + P / 2, T - 3 * P, T * 1.3 - P / 2);
-    g.fillStyle = '#f1c40f';
-    g.fillRect(dx + T - P * 3, dy + T * 0.3, P, P);
+    p(-4, 0, '#e74c3c', W3 + 8, 2); p(-4, 2, '#d94435', W3 + 8, 1);
+    p(-4, 27, '#7b241c', W3 + 8, 2); p(0, 29, 'rgba(0,0,0,.18)', W3, 3);
+    // 창문 (나무 틀 + 십자 + 유리 반짝)
+    for (const wx of [6, 2 * T + 6]) {
+      p(wx, 37, '#5d4037', 20, 20);
+      p(wx + 2, 39, '#9ad7ff', 16, 16);
+      p(wx + 2, 39, '#c8ecff', 16, 3); p(wx + 3, 43, '#e3f6ff', 2, 3);
+      p(wx + 9, 37, '#5d4037', 2, 20); p(wx, 46, '#5d4037', 20, 2);
+      p(wx - 1, 57, '#795548', 22, 2);
+    }
+    // 문 (판자 + 손잡이)
+    const dx = T, dy = 2 * T;
+    p(dx + 4, dy - 10, '#4e342e', T - 8, 42);
+    p(dx + 6, dy - 8, '#6d4321', T - 12, 40);
+    for (const k of [0, 1, 2]) p(dx + 6 + k * 7, dy - 8, '#5d3a1a', 1, 40);
+    p(dx + 7, dy - 8, '#7d4f27', 1, 40);
+    p(dx + T - 11, dy + 10, '#f1c40f', 3, 3); p(dx + T - 11, dy + 10, '#fff59d');
   },
 };
 
@@ -3847,8 +3997,55 @@ const Render = {
     this.camY = mapH <= viewH ? (mapH - viewH) / 2 : clamp(Player.y - viewH / 2, 0, mapH - viewH);
 
     const s = this.scale * this.dpr;
-    ctx.setTransform(s, 0, 0, s, -this.camX * s, -this.camY * s);
-    ctx.imageSmoothingEnabled = false;
+    // 세상은 "1 월드 px = 1 픽셀" 인 작은 캔버스(lo)에 먼저 그리고 화면 크기로 키운다:
+    // 맵, 캐릭터, 몬스터, 아이템, 텐트, 휘두르기까지 모두 같은 크기의 픽셀이 된다.
+    // 글자(이름표, 말풍선)와 이모지는 this.later 로 미뤄서 화면 해상도로 또렷하게 그린다
+    const ox = Math.floor(this.camX), oy = Math.floor(this.camY);
+    const lo = this.lo || (this.lo = document.createElement('canvas'));
+    const lw = Math.ceil(viewW) + 2, lh = Math.ceil(viewH) + 2;
+    if (lo.width !== lw || lo.height !== lh) { lo.width = lw; lo.height = lh; }
+    const main = ctx, lctx = this.lctx || (this.lctx = lo.getContext('2d'));
+    lctx.setTransform(1, 0, 0, 1, 0, 0);
+    lctx.fillStyle = '#2e7d32';
+    lctx.fillRect(0, 0, lw, lh);
+    lctx.setTransform(1, 0, 0, 1, -ox, -oy);
+    lctx.imageSmoothingEnabled = false;
+    this.ctx = lctx;
+    this.deferred = [];
+    try { this.drawWorld(time, viewW, viewH, mapW, mapH); } finally { this.ctx = main; }
+    main.imageSmoothingEnabled = false;
+    main.setTransform(s, 0, 0, s, (ox - this.camX) * s, (oy - this.camY) * s);
+    main.drawImage(lo, 0, 0);
+    main.setTransform(s, 0, 0, s, -this.camX * s, -this.camY * s);
+    const later = this.deferred;
+    this.deferred = null;
+    for (const fn of later) { main.save(); fn(main); main.restore(); }
+    this.drawFloaters();
+
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    this.drawSwampDark();
+    this.drawEdgeArrow(World.door.x * T + T / 2, World.door.y * T, '🏠', Craft.canMakeAny() ? '🔨' : '');
+    const peers = Multi.visiblePeers();
+    const boss = Monsters.bossIn(World.stageAtPx(Player.x, Player.y));
+    if (boss) this.drawEdgeArrow(boss.x, boss.y, boss.def.emoji, '');
+    const stNow = World.stageAtPx(Player.x, Player.y), bench = World.stationIn(stNow);
+    if (bench) this.drawEdgeArrow(bench.x * T + T / 2, bench.y * T, STATION_EMOJI[bench.kind], Craft.canMakeAny() ? '🔨' : '');
+    for (const g of World.stageGates || []) {
+      if (World.tile(g.x, g.y) === TILE.GOLD_TREE && World.stageAt(g.x, g.y) === stNow) this.drawEdgeArrow(g.x * T + T / 2, g.y * T, '✨', '🌳');
+    }
+    for (const p of peers) this.drawEdgeArrow(p.x, p.y, '🧑', '', p.name);
+    this.drawMinimap(peers, boss);
+  },
+
+  // 글자/이모지는 세상 그림(작은 캔버스) 위에 화면 해상도로 (세상을 그리는 중이 아니면 바로)
+  later(fn) {
+    if (this.deferred) this.deferred.push(fn);
+    else { this.ctx.save(); fn(this.ctx); this.ctx.restore(); }
+  },
+
+  // 세상 그림: 맵 조각, 앞칸 표시, 아이템/몬스터/사람/제작대 (y 순서), 화살
+  drawWorld(time, viewW, viewH, mapW, mapH) {
+    const ctx = this.ctx;
     // 화면에 보이는 그림 조각만
     const span = CHUNK * T;
     for (let cy = Math.max(0, Math.floor(this.camY / span)); cy * span < Math.min(mapH, this.camY + viewH); cy++) {
@@ -3879,21 +4076,7 @@ const Render = {
     drawables.sort((a, b) => a.y - b.y).forEach(d => d.draw());
     Monsters.arrows.forEach(a => this.drawArrow(a));
     for (const p of peers) p.arrows.forEach(a => this.drawArrow(a));
-    this.drawFloaters();
     this.drawCraftHint(time);
-
-    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    this.drawSwampDark();
-    this.drawEdgeArrow(World.door.x * T + T / 2, World.door.y * T, '🏠', Craft.canMakeAny() ? '🔨' : '');
-    const boss = Monsters.bossIn(World.stageAtPx(Player.x, Player.y));
-    if (boss) this.drawEdgeArrow(boss.x, boss.y, boss.def.emoji, '');
-    const stNow = World.stageAtPx(Player.x, Player.y), bench = World.stationIn(stNow);
-    if (bench) this.drawEdgeArrow(bench.x * T + T / 2, bench.y * T, STATION_EMOJI[bench.kind], Craft.canMakeAny() ? '🔨' : '');
-    for (const g of World.stageGates || []) {
-      if (World.tile(g.x, g.y) === TILE.GOLD_TREE && World.stageAt(g.x, g.y) === stNow) this.drawEdgeArrow(g.x * T + T / 2, g.y * T, '✨', '🌳');
-    }
-    for (const p of peers) this.drawEdgeArrow(p.x, p.y, '🧑', '', p.name);
-    this.drawMinimap(peers, boss);
   },
 
   // 🍄 늪 / 🧭 미로에 들어가면 화면이 어두워지고 내 둘레와 🔥 횃불 둘레만 밝다 (천천히 바뀐다)
@@ -4079,12 +4262,14 @@ const Render = {
     }
     // 제작대 표시: 🔨 (새 무기/옷을 만들 수 있으면 통통 뛴다)
     const ready = Craft.canMakeAny(), hop = ready ? Math.abs(Math.sin(time * 4)) * 5 : Math.sin(time * 2) * 1.5;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = '#000';
-    ctx.font = `${ready ? 16 : 12}px ${FONT_EMOJI}`;
-    ctx.fillText('🔨', cx, by - T * (st.kind === 'tent' ? 1.95 : 1.65) - hop);
     ctx.restore();
+    this.later(ctx => {
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#000';
+      ctx.font = `${ready ? 16 : 12}px ${FONT_EMOJI}`;
+      ctx.fillText('🔨', cx, by - T * (st.kind === 'tent' ? 1.95 : 1.65) - hop);
+    });
   },
 
   drawMonster(m, time) {
@@ -4102,11 +4287,11 @@ const Render = {
     if (m.faceRight) ctx.scale(-1, 1); // 이모지는 대부분 왼쪽을 본다
     if (m.def.ghost) { ctx.globalAlpha = 0.72; ctx.translate(0, Math.sin(time * 2.5 + m.phase) * 4); } // 유령: 반투명, 둥실둥실
     if (m.hitT > 0 && Math.floor(m.hitT * 20) % 2) ctx.globalAlpha = 0.35;
-    const spr = PixelSprite.get(m.def.emoji, m.def.boss ? 24 : 16);
+    const spr = PixelSprite.get(m.def.emoji, s); // 크기 그대로 1:1 (토끼 22, 용 56)
     if (spr) {
       ctx.imageSmoothingEnabled = false;
-      const w = s * spr.scale;
-      ctx.drawImage(spr.canvas, -w / 2, -w / 2, w, w);
+      const w = spr.canvas.width;
+      ctx.drawImage(spr.canvas, -Math.round(w / 2), -Math.round(w / 2));
     } else {
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
@@ -4125,6 +4310,12 @@ const Render = {
       ctx.fillStyle = i >= hp ? '#e0e0e0' : m.owner ? '#43a047' : '#e53935';
       ctx.fillRect(left + i * cw, top, cw - 2, ch);
     }
+    this.later(ctx => this.drawMonsterLabel(m, left, w, top, ch));
+  },
+
+  // 몬스터 머리 위 그림 / 💕 / 이름표 (화면 해상도 글자)
+  drawMonsterLabel(m, left, w, top, ch) {
+    const ctx = this.ctx, s = m.def.size;
     // 머리 위 그림 (💕 🎵 😍): 떠오르며 사라진다
     if (m.emoteT > 0 && m.emote) {
       const k = Math.min(1, m.emoteT / 0.4);
@@ -4174,7 +4365,7 @@ const Render = {
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       const fd = ITEMS[a.food];
-      if (fd && fd.icon) { ctx.imageSmoothingEnabled = false; ctx.drawImage(tileIcon(fd.icon).canvas, -8, -8, 16, 16); }
+      if (fd && fd.icon) { ctx.imageSmoothingEnabled = false; ctx.drawImage(tileIcon(fd.icon, 16).canvas, -8, -8); }
       else { ctx.font = `14px ${FONT_EMOJI}`; ctx.fillText(fd ? fd.emoji : '🍎', 0, 0); }
       ctx.restore();
       return;
@@ -4220,29 +4411,39 @@ const Render = {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = '#000'; // 반투명 색이 남아 있으면 이모지도 흐려진다
-    ctx.font = `22px ${FONT_EMOJI}`;
-    if (def.icon) ctx.drawImage(tileIcon(def.icon).canvas, it.x - 11, it.y - 15 + bob, 22, 22);
-    else ctx.fillText(def.emoji, it.x, it.y - 4 + bob);
+    // 아이템 그림은 24x24 를 1:1 로 (블록은 맵 칸 그림을 반으로, 하트 등은 이모지 픽셀 그림)
+    const ix = Math.round(it.x), iy = Math.round(it.y - 4 + bob);
+    if (def.icon) ctx.drawImage(tileIcon(def.icon, 24).canvas, ix - 12, iy - 12);
+    else if (def.tile) ctx.drawImage(tileIcon(def.tile).canvas, ix - 8, iy - 8, 16, 16);
+    else {
+      const spr = PixelSprite.get(def.emoji, 20);
+      if (spr) ctx.drawImage(spr.canvas, ix - 11, iy - 11);
+      else { ctx.font = `22px ${FONT_EMOJI}`; ctx.fillText(def.emoji, it.x, iy); }
+    }
 
     // 반짝임
     const a = (Math.sin(time * 4 + it.phase) + 1) / 2;
     this.sparkle(it.x + 10, it.y - 14 + bob, 3 + a * 2, 0.4 + a * 0.6);
 
     // 이름표
-    const { main, sub } = itemNames(def);
-    ctx.lineJoin = 'round';
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = 'rgba(255,255,255,.95)';
-    ctx.fillStyle = '#222';
-    ctx.font = `800 10px ${FONT_UI}`;
-    ctx.strokeText(main, it.x, it.y + 16);
-    ctx.fillText(main, it.x, it.y + 16);
-    if (sub) {
-      ctx.font = `700 7px ${FONT_UI}`;
-      ctx.fillStyle = '#555';
-      ctx.strokeText(sub, it.x, it.y + 25);
-      ctx.fillText(sub, it.x, it.y + 25);
-    }
+    this.later(ctx => {
+      const { main, sub } = itemNames(def);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.lineJoin = 'round';
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(255,255,255,.95)';
+      ctx.fillStyle = '#222';
+      ctx.font = `800 10px ${FONT_UI}`;
+      ctx.strokeText(main, it.x, it.y + 16);
+      ctx.fillText(main, it.x, it.y + 16);
+      if (sub) {
+        ctx.font = `700 7px ${FONT_UI}`;
+        ctx.fillStyle = '#555';
+        ctx.strokeText(sub, it.x, it.y + 25);
+        ctx.fillText(sub, it.x, it.y + 25);
+      }
+    });
   },
 
   sparkle(x, y, r, alpha) {
@@ -4264,21 +4465,26 @@ const Render = {
     ctx.restore();
   },
 
-  // 8칸 x 13칸 픽셀 캐릭터. e: 위치/방향/걷기/휘두르기 상태, look: 옷 색, held: 손에 든 것 (무기/블록),
+  // 20칸 x 32칸 픽셀 캐릭터 (1 칸 = 1 px). e: 위치/방향/걷기/휘두르기 상태, look: 옷 색, held: 손에 든 것 (무기/블록),
   // label: 머리 위 이름, mine: 내 캐릭터면 이름을 파란색으로
   // wear: 입은 옷 id 목록 (wornList)
   drawCharacter(e, look, held, label, mine, hearts, wear = []) {
     // 점프: 몸만 위로 (그림자는 땅에)
     const jumpH = e.jumpT > 0 ? Math.sin(Math.PI * (1 - e.jumpT / JUMP_SEC)) * 14 : 0;
-    const ctx = this.ctx, { dir } = e, y = e.y - jumpH;
-    const u = 2.5;
+    const ctx = this.ctx, { dir } = e, y = Math.round(e.y - jumpH);
     // 맞은 순간: 좌우로 흔들리며 빨갛게 번쩍인다
     const hitT = e.hitT || 0;
-    const x = e.x + (hitT > 0 ? Math.sin(hitT * 80) * 2.5 : 0);
+    const x = Math.round(e.x + (hitT > 0 ? Math.sin(hitT * 80) * 2.5 : 0));
     const flash = hitT > 0 && Math.floor(hitT * 20) % 2 === 0;
-    const left = x - 4 * u, top = y + 6 - 13 * u;
-    const step = e.moving ? Math.sin(e.walkT * 12) * 0.6 : 0;
-    const box = (gx, gy, w, h, color) => { ctx.fillStyle = flash ? '#ff5252' : color; ctx.fillRect(left + gx * u, top + gy * u, w * u, h * u); };
+    // 20 x 32 픽셀 캐릭터 (1 칸 = 1 월드 px, 맵 칸과 같은 픽셀 크기). 왼쪽 보기를 그리고 오른쪽은 거울로
+    const left = x - 10, top = y + 6 - 32;
+    const mirror = dir === 'right';
+    const step = e.moving ? Math.round(Math.sin(e.walkT * 12) * 1.4) : 0;
+    const box = (gx, gy, w, h, color) => {
+      ctx.fillStyle = flash ? '#ff5252' : color;
+      ctx.fillRect(left + (mirror ? 20 - gx - w : gx), top + gy, w, h);
+    };
+    const side = dir === 'left' || dir === 'right';
     // 다친 뒤 무적 시간에는 깜빡인다
     ctx.save();
     if (hitT <= 0 && e.invulnT > 0 && Math.floor(e.invulnT * 10) % 2) ctx.globalAlpha = 0.4;
@@ -4288,37 +4494,66 @@ const Render = {
     ctx.ellipse(x, e.y + 6, 9 - jumpH * 0.2, 3, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    const SKIN = '#f1c27d', { hair: HAIR, shirt: SHIRT, pants: PANTS } = look;
-    const worn = new Set(wear), SHOE = worn.has('boots') ? '#6d4321' : '#555';
-    // 다리
-    box(2, 9 + step, 2, 3, PANTS); box(2, 12 + step, 2, 1, SHOE);
-    box(4, 9 - step, 2, 3, PANTS); box(4, 12 - step, 2, 1, SHOE);
-    if (worn.has('boots')) { box(2, 11 + step, 2, 1, '#8d5a2b'); box(4, 11 - step, 2, 1, '#8d5a2b'); }
-    // 몸통 + 팔 (가죽 옷: 몸통과 소매가 가죽, 가운데 끈)
-    const BODY = worn.has('vest') ? '#a8723f' : SHIRT;
-    box(1, 5, 6, 4, BODY);
-    box(0, 5 - step * 0.5, 1, 3, BODY); box(0, 8 - step * 0.5, 1, 1, SKIN);
-    box(7, 5 + step * 0.5, 1, 3, BODY); box(7, 8 + step * 0.5, 1, 1, SKIN);
-    if (worn.has('vest')) {
-      if (dir !== 'up') { box(3.5, 5, 1, 4, SHIRT); box(3.5, 6, 1, 0.4, '#e6c08a'); box(3.5, 7.4, 1, 0.4, '#e6c08a'); }
-      box(1, 8.4, 6, 0.6, '#6d4321');
-    }
-    // 머리
-    box(1, 0, 6, 5, SKIN);
+    const SKIN = '#f1c27d', SKIN_D = '#d9a066', { hair: HAIR, shirt: SHIRT, pants: PANTS } = look;
+    const HAIR_L = shade(HAIR, 1.45), HAIR_D = shade(HAIR, 0.7);
+    const worn = new Set(wear), boots = worn.has('boots'), vest = worn.has('vest');
+    const SHOE = boots ? '#6d4321' : '#4a4a4a', SHOE_L = boots ? '#8d5a2b' : '#6a6a6a';
+    const BODY = vest ? '#a8723f' : SHIRT, BODY_D = shade(BODY, 0.75), BODY_L = shade(BODY, 1.2);
+    const PANTS_D = shade(PANTS, 0.72);
+    // 다리 (걸으면 번갈아 올라간다)
+    const leg = (lx, off, back) => {
+      box(lx, 23 + off, 4, 5, back ? PANTS_D : PANTS);
+      box(lx + 3, 23 + off, 1, 5, PANTS_D);
+      if (boots) { box(lx, 26 + off, 4, 2, '#8d5a2b'); box(lx, 26 + off, 4, 1, '#a8723f'); }
+      box(lx - (side ? 1 : 0), 28 + off, side ? 5 : 4, 3, SHOE);
+      box(lx - (side ? 1 : 0), 28 + off, side ? 5 : 4, 1, SHOE_L);
+    };
+    if (side) { leg(9, -step, true); leg(7, step, false); }
+    else { leg(5, step, false); leg(11, -step, false); }
+    box(5, 22, 10, 2, PANTS); // 엉덩이
+    // 몸통
+    box(5, 13, 10, 10, BODY);
+    box(5, 13, 10, 1, BODY_L);
+    box(14, 13, 1, 10, BODY_D);
+    box(5, 22, 10, 1, BODY_D);
+    if (vest) {
+      if (dir !== 'up') {
+        box(side ? 6 : 9, 13, 2, 9, SHIRT);
+        for (const ly of [15, 17, 19]) box(side ? 6 : 9, ly, 2, 1, '#e6c08a');
+      }
+      box(5, 21, 10, 1, '#6d4321');
+    } else if (dir === 'down') box(8, 13, 4, 1, SKIN_D); // 목
+    // 팔 (걸으면 앞뒤로)
+    const arm = (ax, off, back) => {
+      box(ax, 13 + off, 2, 7, back ? BODY_D : BODY);
+      box(ax, 20 + off, 2, 2, back ? SKIN_D : SKIN);
+    };
+    if (side) arm(8, -step, false);
+    else { arm(3, -step, false); arm(15, step, false); }
+    // 머리 (14 x 12, 모서리는 둥글게)
+    box(4, 1, 12, 11, SKIN);
+    box(3, 2, 14, 9, SKIN);
+    box(4, 11, 12, 1, SKIN_D);
     if (dir === 'up') {
-      box(1, 0, 6, 5, HAIR);
+      box(4, 0, 12, 11, HAIR); box(3, 1, 14, 9, HAIR);
+      box(4, 10, 12, 1, HAIR_D); box(6, 1, 4, 1, HAIR_L);
     } else {
-      box(1, 0, 6, 2, HAIR);
+      box(4, 0, 12, 4, HAIR); box(3, 1, 14, 3, HAIR);
+      box(6, 1, 4, 1, HAIR_L);
       if (dir === 'down') {
-        box(1, 2, 1, 1, HAIR); box(6, 2, 1, 1, HAIR);
-        box(2, 3, 1, 1, '#fff'); box(5, 3, 1, 1, '#fff');
-        box(2.5, 3, 0.5, 1, '#1a237e'); box(5, 3, 0.5, 1, '#1a237e');
-      } else if (dir === 'left') {
-        box(5, 2, 2, 2, HAIR);
-        box(1.5, 3, 1, 1, '#1a237e');
+        box(3, 4, 2, 4, HAIR); box(15, 4, 2, 4, HAIR); // 옆머리
+        box(5, 4, 3, 1, HAIR); box(12, 4, 3, 1, HAIR); // 앞머리
+        box(6, 6, 2, 3, '#fff'); box(12, 6, 2, 3, '#fff');
+        box(7, 7, 1, 2, '#1a237e'); box(12, 7, 1, 2, '#1a237e');
+        box(5, 9, 2, 1, '#f6a5a0'); box(13, 9, 2, 1, '#f6a5a0'); // 볼
+        box(9, 10, 2, 1, '#c0645a');
       } else {
-        box(1, 2, 2, 2, HAIR);
-        box(5.5, 3, 1, 1, '#1a237e');
+        // 옆모습 (왼쪽 보기): 뒤통수 머리카락, 앞쪽 눈 하나
+        box(10, 3, 7, 6, HAIR); box(11, 9, 5, 1, HAIR_D);
+        box(10, 6, 2, 2, SKIN_D); // 귀
+        box(4, 6, 2, 3, '#fff'); box(4, 7, 1, 2, '#1a237e');
+        box(5, 9, 2, 1, '#f6a5a0');
+        box(3, 10, 2, 1, '#c0645a');
       }
     }
     const headWear = { crown: { type: 'crown' }, hat: { type: 'leather' } }[wear.find(id => ITEMS[id]?.slot === 'head')];
@@ -4340,7 +4575,7 @@ const Render = {
       const side = dir === 'left' ? -1 : 1;
       const swing = e.swingT > 0 ? 1 - e.swingT / 0.25 : 0;
       ctx.save();
-      ctx.translate(x + side * 11, y - 9);
+      ctx.translate(x + side * 10, y - 1); // 손 높이 (얼굴을 가리지 않게)
       ctx.rotate(side * (-0.5 + swing * 1.8));
       ctx.scale(side, 1);
       ctx.textAlign = 'center';
@@ -4349,12 +4584,13 @@ const Render = {
       ctx.font = `15px ${FONT_EMOJI}`;
       const hd = WEAPONS[held] || ITEMS[held], block = hd && (hd.tile || hd.icon); // 픽셀 그림 (손은 이모지)
       ctx.translate(0, -4);
-      if (block) ctx.drawImage(tileIcon(block).canvas, -8, -8, 16, 16);
+      if (hd && hd.icon) ctx.drawImage(tileIcon(hd.icon, 16).canvas, -8, -8);
+      else if (block) ctx.drawImage(tileIcon(block).canvas, -8, -8, 16, 16);
       else ctx.fillText(holdEmoji(held), 0, 0);
       ctx.restore();
     }
 
-    if (label) {
+    if (label) this.later(ctx => {
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.lineJoin = 'round';
@@ -4388,7 +4624,7 @@ const Render = {
       }
       // 💬 말풍선 (맨 위)
       if (e.sayT > 0 && e.sayText) this.drawSay(x, ly - (hearts != null ? 30 : 22) - (e.emoteT > 0 && e.emote ? 26 : 0), e.sayText, e.sayT);
-    }
+    });
     ctx.restore();
   },
 
@@ -4417,34 +4653,35 @@ const Render = {
   },
 
   // 모자 (box 는 drawCharacter 의 픽셀 격자 그리기 함수)
+  // 모자 (1 칸 = 1 px, 머리는 x 3~16, y 0~11). 옆모습은 왼쪽 보기 기준 (오른쪽은 box 가 거울로)
   drawHat(box, hat, dir) {
     if (!hat) return;
+    const side = dir === 'left' || dir === 'right';
     if (hat.type === 'cap') {
-      box(1, -1, 6, 1.6, hat.color);
-      if (dir === 'down') box(0.5, 0.4, 7, 0.6, hat.color);
-      else if (dir === 'left') box(-1, 0.4, 3, 0.6, hat.color);
-      else if (dir === 'right') box(6, 0.4, 3, 0.6, hat.color);
+      const c = hat.color, d = shade(c, 0.72);
+      box(4, -2, 12, 2, c); box(3, 0, 14, 3, c); box(6, -2, 3, 1, shade(c, 1.3));
+      if (dir === 'down') box(2, 3, 16, 1, d);
+      else if (side) box(0, 3, 9, 1, d);
     } else if (hat.type === 'band') {
-      box(1, 0.8, 6, 0.8, hat.color);
+      box(3, 3, 14, 2, hat.color); box(3, 4, 14, 1, shade(hat.color, 0.75));
     } else if (hat.type === 'beanie') {
-      box(1, -1.2, 6, 2.2, hat.color);
-      box(1, 0.6, 6, 0.4, '#fff');
-      box(3.5, -2, 1, 1, '#fff');
+      const c = hat.color;
+      box(4, -3, 12, 3, c); box(3, 0, 14, 3, c); box(5, -3, 3, 1, shade(c, 1.3));
+      box(3, 3, 14, 2, '#f5f5f5'); box(3, 4, 14, 1, '#d6d6d6');
+      box(8, -6, 4, 3, '#fff'); box(9, -6, 2, 1, '#f0f0f0');
     } else if (hat.type === 'leather') {
       // 가죽 모자: 넓은 챙 + 진한 띠
-      box(-0.5, 0, 9, 1, '#6d4321');
-      box(1.5, -2, 5, 2, '#a8723f');
-      box(1.5, -0.6, 5, 0.6, '#4e342e');
+      box(-1, 3, 22, 2, '#6d4321'); box(-1, 4, 22, 1, '#4e342e');
+      box(5, -4, 10, 7, '#a8723f'); box(4, -2, 12, 5, '#a8723f'); box(6, -4, 4, 1, '#c8935a');
+      box(4, 1, 12, 2, '#4e342e');
     } else if (hat.type === 'wreath') {
       // 꽃 화관: 초록 줄기 + 꽃
-      box(0.8, 0.4, 6.4, 0.8, '#43a047');
-      box(1, -0.2, 1, 1, '#f06292'); box(3.5, -0.4, 1, 1, '#fdd835'); box(6, -0.2, 1, 1, '#f06292');
+      box(3, 2, 14, 2, '#43a047'); box(3, 3, 14, 1, '#2e7d32');
+      for (const [fx, col] of [[4, '#f06292'], [9, '#fdd835'], [14, '#f06292']]) { box(fx, 0, 2, 2, col); box(fx, 0, 1, 1, '#fff'); }
     } else if (hat.type === 'crown') {
-      box(1.5, -1.4, 5, 1.4, '#fdd835');
-      box(1.5, -2.2, 1, 0.8, '#fdd835');
-      box(3.5, -2.2, 1, 0.8, '#fdd835');
-      box(5.5, -2.2, 1, 0.8, '#fdd835');
-      box(3.5, -1.1, 1, 0.7, '#e53935');
+      box(5, -2, 10, 4, '#fdd835'); box(5, -2, 10, 1, '#fff59d'); box(5, 1, 10, 1, '#f9a825');
+      box(5, -5, 2, 3, '#fdd835'); box(9, -6, 2, 4, '#fdd835'); box(13, -5, 2, 3, '#fdd835');
+      box(9, -1, 2, 2, '#e53935'); box(6, -1, 1, 1, '#1e88e5'); box(13, -1, 1, 1, '#1e88e5');
     }
   },
 
@@ -4463,19 +4700,22 @@ const Render = {
 
   // 다른 사람이 카드/제작/기절 중이면 머리 위(이름표 위)에 표시
   drawStatus(e, icon, time) {
-    const ctx = this.ctx;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = '#000';
-    ctx.font = `18px ${FONT_EMOJI}`;
-    ctx.fillText(icon, e.x, e.y - 66 + Math.sin(time * 4) * 2);
+    this.later(ctx => {
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#000';
+      ctx.font = `18px ${FONT_EMOJI}`;
+      ctx.fillText(icon, e.x, e.y - 66 + Math.sin(time * 4) * 2);
+    });
   },
 
   // 만들 수 있는 무기가 있으면 집 위에 🔨 가 통통 튄다
   drawCraftHint(time) {
     if (!Craft.canMakeAny()) return;
-    const ctx = this.ctx;
     const x = World.door.x * T + T / 2, y = World.house.y * T - 10 + Math.sin(time * 5) * 4;
+    this.later(ctx => this.drawHammer(ctx, x, y));
+  },
+  drawHammer(ctx, x, y) {
     ctx.fillStyle = 'rgba(255,255,255,.9)';
     ctx.beginPath();
     ctx.arc(x, y, 13, 0, Math.PI * 2);
