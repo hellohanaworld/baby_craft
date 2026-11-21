@@ -338,7 +338,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 84;
+const GAME_V = 85;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -1550,26 +1550,337 @@ function potionIcon(liquid, light) {
 }
 
 // 맵 칸 그림 한 칸짜리 (블록 아이템 그림, 네잎클로버) 또는 픽셀 그림 (PIXEL_ICONS). 한 번 그려서 저장
+// ============================================================
+// 아이템 그림 (24 칸 기준 좌표로 그리고, 실제 크기(24 / 16)의 픽셀마다 계산한다 → 어느 크기든 1 칸 = 1 px, 늘린 그림이 아니다)
+//   d.rect / d.ell / d.line / d.poly / d.fill(fn): 색 또는 fn(nx, ny, u, v) → 색. 빛은 위 왼쪽에서
+// ============================================================
+function iconPainter(g, n) {
+  const k = n / 24;
+  const fill = (test, col) => {
+    for (let j = 0; j < n; j++) {
+      for (let i = 0; i < n; i++) {
+        const u = (i + 0.5) / k, v = (j + 0.5) / k, r = test(u, v);
+        if (r === false || r == null) continue;
+        const c = typeof col === 'function' ? col(r, u, v) : col;
+        if (c) { g.fillStyle = c; g.fillRect(i, j, 1, 1); }
+      }
+    }
+  };
+  const segDist = (u, v, x0, y0, x1, y1) => {
+    const dx = x1 - x0, dy = y1 - y0, l = dx * dx + dy * dy || 1;
+    const t = Math.max(0, Math.min(1, ((u - x0) * dx + (v - y0) * dy) / l));
+    return { d: Math.hypot(u - x0 - t * dx, v - y0 - t * dy), t };
+  };
+  const inPoly = (u, v, pts) => {
+    let inside = false;
+    for (let a = 0, b = pts.length - 1; a < pts.length; b = a++) {
+      const [xa, ya] = pts[a], [xb, yb] = pts[b];
+      if ((ya > v) !== (yb > v) && u < (xb - xa) * (v - ya) / (yb - ya) + xa) inside = !inside;
+    }
+    return inside;
+  };
+  return {
+    fill,
+    // 사각형: col 이 함수면 (상자 안 위치 0~1) 을 받는다
+    rect: (x, y, w, h, col) => fill((u, v) => (u >= x && u < x + w && v >= y && v < y + h ? [(u - x) / w, (v - y) / h] : null), typeof col === 'function' ? r => col(r[0], r[1]) : col),
+    // 타원: col 이 함수면 (nx, ny: -1~1, d: 0~1 가운데에서 거리)
+    ell: (cx, cy, rx, ry, col) => fill((u, v) => {
+      const nx = (u - cx) / rx, ny = (v - cy) / ry, d = nx * nx + ny * ny;
+      return d <= 1 ? [nx, ny, d] : null;
+    }, typeof col === 'function' ? r => col(r[0], r[1], r[2]) : col),
+    // 굵은 선: col 이 함수면 (t: 0~1 선 따라, s: -1~1 가로질러)
+    line: (x0, y0, x1, y1, w, col) => fill((u, v) => {
+      const { d, t } = segDist(u, v, x0, y0, x1, y1);
+      if (d > w / 2) return null;
+      const side = Math.sign((x1 - x0) * (v - y0) - (y1 - y0) * (u - x0)) || 1;
+      return [t, side * d / (w / 2)];
+    }, typeof col === 'function' ? r => col(r[0], r[1]) : col),
+    poly: (pts, col) => fill((u, v) => (inPoly(u, v, pts) ? [u, v] : null), typeof col === 'function' ? r => col(r[0], r[1]) : col),
+    // 공 모양 명암 (밝음 / 보통 / 어두움)
+    ball: (nx, ny, [l, m, d], hi) => {
+      const s = nx * 0.55 + ny * 0.8;
+      if (hi && (nx + 0.38) ** 2 + (ny + 0.42) ** 2 < 0.045) return hi;
+      return s < -0.48 ? l : s > 0.42 ? d : m;
+    },
+  };
+}
+
+const ICON_ART = {
+  LOG: d => {
+    d.rect(3, 7, 16, 11, (x, y) => (y < 0.18 ? '#b07a45' : y > 0.82 ? '#5d3a1a' : '#8d5a2b'));
+    for (const [x, y, w] of [[5, 10, 7], [9, 13, 8], [4, 15, 5], [12, 9, 5]]) d.rect(x, y, w, 1, '#6d4321');
+    d.ell(3.5, 12.5, 1.6, 5.5, '#6d4321');
+    d.ell(19, 12.5, 3.6, 5.6, '#6d4c41');
+    d.ell(19, 12.5, 2.9, 4.8, (nx, ny, r) => (r > 0.55 && r < 0.75 ? '#c8935a' : r < 0.12 ? '#a1887f' : '#e6c08a'));
+  },
+  STONE: d => {
+    d.ell(12, 14, 9.5, 7.5, (nx, ny) => d.ball(nx, ny, ['#e0e0e0', '#a8a8a8', '#6e6e6e']));
+    d.poly([[6, 12], [11, 8], [16, 9], [12, 13]], '#c9c9c9');
+    d.line(13, 13, 17, 17, 1, '#7a7a7a');
+  },
+  SPOOL: d => {
+    d.rect(7, 6, 10, 12, (x, y) => (Math.floor((x * 10 + y * 12) / 3) % 2 ? '#e8e8e8' : x > 0.8 ? '#bdbdbd' : '#fafafa'));
+    for (const y of [3, 18]) { d.rect(5, y, 14, 3, '#8d6e63'); d.rect(5, y, 14, 1, '#a1887f'); d.rect(5, y + 2, 14, 1, '#6d4c41'); }
+    d.line(17, 14, 21, 21, 1, '#f5f5f5');
+  },
+  GEM: d => {
+    d.poly([[4, 9], [8, 4], [16, 4], [20, 9], [12, 21]], '#29b6f6');
+    d.poly([[4, 9], [8, 4], [12, 9]], '#b3e5fc');
+    d.poly([[8, 4], [16, 4], [12, 9]], '#e1f5fe');
+    d.poly([[16, 4], [20, 9], [12, 9]], '#4fc3f7');
+    d.poly([[4, 9], [12, 9], [12, 21]], '#4fc3f7');
+    d.poly([[12, 9], [20, 9], [12, 21]], '#0277bd');
+    d.rect(9, 6, 1, 1, '#ffffff');
+  },
+  APPLE: d => {
+    d.ell(8.5, 14, 6.5, 7.5, (nx, ny) => d.ball(nx, ny, ['#ff8a80', '#e53935', '#b71c1c']));
+    d.ell(15.5, 14, 6.5, 7.5, (nx, ny) => d.ball(nx * 0.6 + 0.3, ny, ['#ff8a80', '#e53935', '#b71c1c']));
+    d.ell(12, 7.5, 2, 1.2, '#8e1b1b');
+    d.line(12, 8, 13, 2.5, 1.6, '#6d4c41');
+    d.ell(16.5, 4.5, 3.2, 1.7, (nx, ny) => (ny < 0 ? '#66bb6a' : '#2e7d32'));
+    d.ell(7.5, 11, 1.4, 2.2, '#ffcdd2');
+  },
+  CARROT: d => {
+    d.poly([[12.5, 5.5], [19, 12], [6, 21.5], [3.5, 19.5]], (u, v) => ((u - v) < -9 ? '#ffb74d' : (u - v) > -3 ? '#e65100' : '#fb8c00'));
+    for (const [x, y] of [[8, 15], [11, 12], [6, 18.5], [13, 15]]) d.line(x, y, x + 2, y + 2, 1, '#d84315');
+    for (const [x, y] of [[19.5, 1.5], [22, 4], [22.5, 8]]) d.line(16, 8, x, y, 2, '#43a047');
+    d.line(16, 8, 20.5, 3, 1, '#2e7d32');
+  },
+  MEAT: d => {
+    d.line(10, 14, 4.5, 19.5, 3, '#f5f5f5');
+    d.ell(3.5, 18.5, 2, 2, '#fafafa'); d.ell(5.5, 20.8, 2, 2, '#e0e0e0');
+    d.ell(14, 10, 8, 6.8, (nx, ny) => d.ball(nx, ny, ['#e8a868', '#b5651d', '#7b3f10'], '#ffd7a8'));
+    d.line(10, 7, 17, 9, 1, '#8d4a16'); d.line(11, 11, 18, 12.5, 1, '#8d4a16');
+  },
+  FISH: d => {
+    d.poly([[17, 12], [23, 6.5], [22, 12], [23, 17.5]], '#1e88e5');
+    d.ell(11, 12, 8.5, 5.5, (nx, ny) => (ny > 0.35 ? '#bbdefb' : ny < -0.45 ? '#90caf9' : '#42a5f5'));
+    d.poly([[9, 7], [14, 6.5], [12, 8.5]], '#1e88e5');
+    d.line(7.5, 9, 7.5, 15, 1, '#1565c0');
+    d.ell(5, 11, 1.4, 1.4, '#ffffff'); d.rect(4.5, 10.5, 1, 1, '#0d47a1');
+    d.rect(10, 11, 1, 1, '#90caf9'); d.rect(13, 13, 1, 1, '#90caf9'); d.rect(15, 11, 1, 1, '#90caf9');
+  },
+  HONEY: d => {
+    d.ell(12, 15, 8.5, 7, (nx, ny) => d.ball(nx, ny, ['#ffe082', '#ffb300', '#e08600'], '#fff8e1'));
+    d.rect(6.5, 6, 11, 3.5, '#8d6e63'); d.rect(6.5, 6, 11, 1, '#a1887f'); d.rect(6.5, 8.5, 11, 1, '#6d4c41');
+    d.rect(10.5, 3, 3, 3, '#6d4c41');
+    d.line(9, 9.5, 9, 13, 2, '#ffca28');
+    d.rect(10, 14, 6, 4, '#fff3e0'); d.rect(10, 17, 6, 1, '#e0c9a6');
+  },
+  CAKE: d => {
+    d.ell(12, 21, 10.5, 1.8, '#cfd8dc');
+    d.rect(3.5, 11, 17, 9.5, (x, y) => (y > 0.38 && y < 0.55 ? '#f48fb1' : x > 0.85 ? '#f2cf9f' : '#ffe0b2'));
+    d.ell(12, 11, 8.5, 2.8, '#fafafa');
+    for (const x of [5, 9, 14, 18]) d.ell(x, 13.5, 1, 1.8, '#fafafa');
+    d.rect(11, 3.5, 2, 6.5, (x, y) => (Math.floor(y * 6.5) % 2 ? '#ffffff' : '#e53935'));
+    d.ell(12, 2.2, 1.2, 1.8, '#ffca28');
+    d.rect(7, 10, 1, 1, '#e53935'); d.rect(16, 10, 1, 1, '#e53935');
+  },
+  AXE: d => {
+    d.line(5, 21, 14.5, 5, 2.6, (t, sd) => (sd < -0.2 ? '#a86d36' : '#7a4a22'));
+    // 도끼 머리: 자루에 꽂힌 쐐기 + 둥근 날 (날 끝이 밝다)
+    d.poly([[11, 4.5], [15, 2.5], [19, 1.5], [22, 4], [22.5, 9], [20, 12], [16, 11], [12, 8.5]],
+      (u, v) => (u > 19.5 ? '#eceff1' : v < 5 ? '#b0bec5' : v > 9.5 ? '#607d8b' : '#90a4ae'));
+    d.rect(11.5, 4, 3, 5, '#546e7a');
+    d.rect(16, 4, 1, 1, '#eceff1');
+  },
+  SWORD: d => {
+    d.line(7, 17, 20.5, 3.5, 3.8, (t, s) => (s < -0.25 ? '#ffffff' : s > 0.35 ? '#90a4ae' : '#cfd8dc'));
+    d.line(8.5, 15.5, 19, 5, 0.9, '#b0bec5');
+    d.line(3.5, 13, 11, 20.5, 2.6, '#fbc02d');
+    d.line(5.5, 18.5, 2.5, 21.5, 2.6, '#6d4c41');
+    d.ell(2.2, 21.8, 1.6, 1.6, '#fbc02d');
+  },
+  BOW: d => {
+    d.fill((u, v) => {
+      const r = Math.hypot(u - 2, v - 12), a = Math.atan2(v - 12, u - 2);
+      return Math.abs(r - 14) < 1.4 && Math.abs(a) < 1.05 ? r : null;
+    }, r => (r < 14 ? '#a86d36' : '#6d4321'));
+    d.line(9, 0.5, 9, 23.5, 0.8, '#eeeeee');
+    d.line(3, 12, 21, 12, 1.2, '#a1887f');
+    d.poly([[23.5, 12], [19.5, 9.5], [19.5, 14.5]], '#90a4ae');
+    d.poly([[3, 12], [5.5, 9.5], [6.5, 12], [5.5, 14.5]], '#e53935');
+  },
+  SHIELD: d => {
+    const shape = [[3, 3], [21, 3], [21, 12], [12, 22.5], [3, 12]];
+    d.poly(shape, '#4e342e');
+    d.poly([[4.5, 4.5], [19.5, 4.5], [19.5, 11.5], [12, 20.5], [4.5, 11.5]], (u) => (Math.floor((u - 4.5) / 3.75) % 2 ? '#a8723f' : '#93612f'));
+    d.rect(4.5, 4.5, 15, 1, '#c8935a');
+    d.ell(12, 11, 3.4, 3.4, (nx, ny) => d.ball(nx, ny, ['#fff59d', '#ffca28', '#e09b00']));
+  },
+  CROWN: d => {
+    d.poly([[3, 19], [3, 6], [8, 11], [12, 4], [16, 11], [21, 6], [21, 19]], (u, v) => (v > 16 ? '#e0a800' : u < 8 ? '#fff176' : '#fdd835'));
+    d.rect(3, 15, 18, 1, '#f9a825');
+    d.ell(12, 13, 1.9, 1.9, '#e53935'); d.ell(6.5, 13.5, 1.3, 1.3, '#1e88e5'); d.ell(17.5, 13.5, 1.3, 1.3, '#1e88e5');
+    for (const [x, y] of [[3, 5], [12, 3], [21, 5]]) d.ell(x, y, 1.5, 1.5, '#fff59d');
+  },
+  HAT: d => {
+    d.ell(12, 16.5, 11, 3.6, (nx, ny) => (ny < -0.2 ? '#8d5a2b' : '#6d4321'));
+    d.fill((u, v) => {
+      const nx = (u - 12) / 6.8, ny = (v - 10.5) / 6.5;
+      return nx * nx + ny * ny <= 1 && v < 16.5 ? [nx, ny] : null;
+    }, ([nx, ny]) => d.ball(nx, ny, ['#c8935a', '#a8723f', '#7a5230']));
+    d.rect(5.3, 13, 13.4, 2.4, '#4e342e');
+    d.line(10, 5, 12, 7, 1, '#7a5230'); d.line(14, 5, 12, 7, 1, '#7a5230');
+  },
+  VEST: d => {
+    d.poly([[4, 4], [9, 4], [12, 10], [15, 4], [20, 4], [22, 9], [19.5, 10.5], [19.5, 21], [4.5, 21], [4.5, 10.5], [2, 9]],
+      (u) => (u < 7 ? '#c8935a' : u > 17 ? '#8d5a2b' : '#a8723f'));
+    d.line(12, 10, 12, 21, 1, '#6d4321');
+    for (const y of [13, 16, 19]) d.rect(10.5, y, 3, 1, '#e6c08a');
+    d.rect(4.5, 19.5, 15, 1.5, '#6d4321');
+    d.rect(8, 4, 1, 4, '#e6c08a'); d.rect(15, 4, 1, 4, '#e6c08a');
+  },
+  BOOTS: d => {
+    const boot = (ox, dark) => {
+      const c = dark ? ['#6d4321', '#5d3a1a'] : ['#8d5a2b', '#a8723f'];
+      d.rect(ox, 4, 6, 13, (x) => (x < 0.25 ? c[1] : c[0]));
+      d.ell(ox + 6, 17.5, 4, 3.2, c[0]);
+      d.rect(ox, 14.5, 7, 6, c[0]);
+      d.rect(ox - 0.5, 3, 7, 2.5, dark ? '#c8a272' : '#e6c08a');
+      d.rect(ox, 20, 10, 1.6, '#3e2723');
+    };
+    boot(12, true);
+    boot(2, false);
+  },
+  LEATHER: d => {
+    for (const [x, y] of [[4.5, 5], [19.5, 5], [4.5, 19], [19.5, 19]]) d.ell(x, y, 2.8, 2.6, '#8d5a2b');
+    d.ell(12, 12, 9.3, 8.3, (nx, ny) => d.ball(nx, ny, ['#c8935a', '#a8723f', '#7a5230']));
+    d.fill((u, v) => {
+      const nx = (u - 12) / 7, ny = (v - 12) / 6, r = nx * nx + ny * ny;
+      return Math.abs(r - 1) < 0.12 && Math.floor(Math.atan2(ny, nx) * 4) % 2 === 0;
+    }, '#e6c08a');
+    d.ell(10, 10, 1.6, 1.1, '#d6a56b'); d.ell(14.5, 14, 1.4, 1, '#d6a56b');
+  },
+  THORN: d => {
+    d.rect(2, 19, 20, 3, '#5d4037'); d.rect(2, 19, 20, 1, '#6d4c41');
+    for (const [x0, top, x1] of [[3, 7, 9], [8, 2, 16], [15, 8, 21]]) {
+      const mid = (x0 + x1) / 2;
+      d.poly([[x0, 19.5], [mid, top], [x1, 19.5]], (u) => (u < mid - 0.5 ? '#a1887f' : u > mid + 1 ? '#5d4037' : '#8d6e63'));
+      d.poly([[mid - 0.9, top + 2.6], [mid, top], [mid + 0.9, top + 2.6]], '#f5f5f5');
+    }
+  },
+  LUCKY: d => {
+    d.line(12, 12, 16, 22.5, 1.6, '#2e7d32');
+    // 하트 잎 네 장 (잎마다 동그라미 두 개 + 가운데로 모이는 끝)
+    for (const [dx, dy] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
+      const cx = 12 + dx * 5.6, cy = 11.5 + dy * 5.6, px = -dy, py = dx;
+      const col = (nx, ny) => (nx * 0.5 + ny * 0.8 < -0.35 ? '#81c784' : nx * 0.5 + ny * 0.8 > 0.55 ? '#2e7d32' : '#43a047');
+      d.poly([[cx + px * 4.2 + dx * 0.6, cy + py * 4.2 + dy * 0.6], [cx - px * 4.2 + dx * 0.6, cy - py * 4.2 + dy * 0.6], [12 + dx * 1.2, 11.5 + dy * 1.2]], '#43a047');
+      for (const sg of [-1, 1]) d.ell(cx + px * 2.1 * sg + dx * 0.9, cy + py * 2.1 * sg + dy * 0.9, 2.4, 2.4, col);
+    }
+    d.ell(12, 11.5, 1.2, 1.2, '#2e7d32');
+  },
+};
+for (const [name, liquid, light] of [['POTION_R', '#e53935', '#ff8a80'], ['POTION_B', '#1e88e5', '#90caf9'], ['POTION_Y', '#fdd835', '#fff9c4']]) {
+  ICON_ART[name] = d => {
+    d.rect(9.5, 1.5, 5, 3.2, '#8d6e63'); d.rect(9.5, 1.5, 5, 1, '#a1887f');
+    d.rect(10, 4.5, 4, 5, '#b3e5fc');
+    d.ell(12, 15.5, 8, 7.5, '#b3e5fc');
+    d.ell(12, 15.5, 6.8, 6.3, (nx, ny) => (ny < -0.25 ? '#e1f5fe' : d.ball(nx, ny, [light, liquid, shade(liquid, 0.7)])));
+    d.ell(8.3, 13, 1, 2.6, '#ffffff');
+    d.rect(13, 16, 1, 1, light); d.rect(14, 13.5, 1, 1, light);
+  };
+}
+
+// 블록 아이템 그림 (가방/주머니/손/땅에 떨어진 것). 맵에 놓은 칸 그림은 World.drawTile
+Object.assign(ICON_ART, {
+  BLOCK_FLOWER: d => {
+    d.line(12, 11, 12, 22, 1.6, '#2e7d32');
+    d.ell(8.5, 18, 3.2, 1.4, '#43a047'); d.ell(15.5, 16, 3.2, 1.4, '#66bb6a');
+    for (const [dx, dy] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
+      d.ell(12 + dx * 3.4, 8 + dy * 3.4, 3.1, 3.1, (nx, ny) => d.ball(nx, ny, ['#ff8a80', '#e74c3c', '#b03a2e']));
+    }
+    d.ell(12, 8, 2, 2, (nx, ny) => (nx + ny < -0.6 ? '#fffde7' : '#fdd835'));
+  },
+  BLOCK_SAPLING: d => {
+    d.ell(12, 20.5, 7.5, 2.8, (nx, ny) => (ny < -0.3 ? '#8d6e63' : '#6d4c41'));
+    d.line(12, 20, 12, 8, 1.7, (t, sd) => (sd < 0 ? '#7cb342' : '#558b2f'));
+    d.ell(7.5, 10.5, 4.4, 2.2, (nx, ny) => (ny < -0.2 ? '#a5d6a7' : '#66bb6a'));
+    d.ell(16.5, 7, 4.4, 2.2, (nx, ny) => (ny < -0.2 ? '#81c784' : '#43a047'));
+  },
+  BLOCK_BRICK: d => {
+    d.rect(2, 3, 20, 18, '#d9c5a0');
+    for (let row = 0; row < 4; row++) {
+      const y = 3 + row * 4.5, off = row % 2 ? 0 : 5;
+      for (let x = 2 - off; x < 22; x += 10) {
+        const x0 = Math.max(2, x + 0.5), x1 = Math.min(22, x + 9.5);
+        if (x1 - x0 < 1) continue;
+        d.rect(x0, y, x1 - x0, 3.7, (bx, by) => (by < 0.28 ? '#c96a50' : by > 0.72 ? '#8f3f2c' : '#b5523b'));
+      }
+    }
+  },
+  BLOCK_GATE: d => {
+    d.rect(4, 1.5, 16, 21, '#5d3a1a');
+    for (const [x, w] of [[5, 4.6], [9.8, 4.6], [14.6, 4.4]]) d.rect(x, 2.5, w, 19, (bx) => (bx < 0.2 ? '#a86d36' : bx > 0.8 ? '#6d4321' : '#8d5a2b'));
+    for (const y of [5, 17]) { d.rect(5, y, 14, 2.2, '#6d4321'); d.rect(6, y + 0.6, 1, 1, '#bdbdbd'); d.rect(17, y + 0.6, 1, 1, '#bdbdbd'); }
+    d.rect(16, 11, 1.8, 2.2, '#f1c40f');
+  },
+  BLOCK_BRIDGE: d => {
+    for (let x = 2.5; x < 21; x += 4.6) d.rect(x, 6, 3.8, 12, (bx) => (bx < 0.25 ? '#c08a50' : bx > 0.75 ? '#7a5230' : '#a0703f'));
+    for (const y of [4, 17]) { d.rect(1.5, y, 21, 3, '#5d4037'); d.rect(1.5, y, 21, 1, '#795548'); }
+    for (const x of [2, 21]) d.rect(x, 2, 1.8, 18, '#4e342e');
+  },
+  BLOCK_TORCH: d => {
+    d.line(12, 22.5, 12, 11, 3, (t, sd) => (sd < 0 ? '#8d6e63' : '#6d4c41'));
+    d.rect(9.8, 9, 4.4, 3.2, '#5d4037'); d.rect(9.8, 11, 4.4, 1, '#4e342e');
+    d.ell(12, 5.8, 4.2, 5.2, (nx, ny) => (ny < -0.5 ? '#ffb74d' : '#ff9800'));
+    d.ell(12, 6.8, 2.4, 3.4, '#ffeb3b');
+    d.ell(12, 7.8, 1.1, 1.7, '#fffde7');
+  },
+  BLOCK_THORN: d => {
+    d.ell(12, 13.5, 10, 8.5, (nx, ny) => (ny > 0.55 ? '#1b5e20' : nx * 0.55 + ny * 0.8 < -0.4 ? '#558b2f' : '#33691e'));
+    for (let k = 0; k < 10; k++) {
+      const a = k / 10 * Math.PI * 2 + 0.3, x = 12 + Math.cos(a) * 10, y = 13.5 + Math.sin(a) * 8.5;
+      d.line(12 + Math.cos(a) * 8, 13.5 + Math.sin(a) * 6.8, x + Math.cos(a) * 1.6, y + Math.sin(a) * 1.6, 1, '#f5f5f5');
+    }
+    for (const [x, y] of [[9, 10], [15, 12], [11, 16], [16, 16.5], [7, 14]]) d.rect(x, y, 1, 1, '#d7ccc8');
+  },
+});
+
 // 아이템 그림 크기: 24 (땅, 가방, 주머니) / 16 (손에 든 것, 던진 먹이). 1 칸 = 1 px 로 그려서 맵/캐릭터와 픽셀 크기가 같다.
 // 8x8 로 그린 그림을 Scale3x(24) / Scale2x(16) 로 다듬는다 (계단 모서리가 매끈해진다)
 const tileIcons = {};
 function tileIcon(name, size = 24) {
   const key = `${name}|${size}`;
   if (!tileIcons[key]) {
-    const c = document.createElement('canvas'), pix = PIXEL_ICONS[name];
-    c.width = c.height = pix ? size : T;
+    const c = document.createElement('canvas');
+    c.width = c.height = size;
     const g = c.getContext('2d');
-    if (pix) {
-      const rows = size === 24 ? scale3x(pix.rows) : size === 16 ? scale2x(pix.rows) : pix.rows, u = size / rows.length;
+    if (ICON_ART[name]) {
+      // 24 칸 기준 그림을 이 크기로 바로 그린다 (늘리지 않는다)
+      ICON_ART[name](iconPainter(g, size));
+      outlinePixels(g, size);
+    } else if (PIXEL_ICONS[name]) {
+      const pix = PIXEL_ICONS[name], rows = size === 24 ? scale3x(pix.rows) : size === 16 ? scale2x(pix.rows) : pix.rows, u = size / rows.length;
       rows.forEach((row, y) => [...row].forEach((ch, x) => {
         if (pix.colors[ch]) { g.fillStyle = pix.colors[ch]; g.fillRect(x * u, y * u, u, u); }
       }));
-      // 아래/오른쪽 가장자리에 진한 테두리 한 줄 (땅 위에서 또렷하게)
       outlinePixels(g, size);
-    } else World.drawTile(g, 0, 0, TILE[name]);
+    } else {
+      // 블록: 맵 칸 그림(32x32)을 땅 없이 그려서 그림이 있는 곳을 이 크기만큼 잘라 낸다 (1:1, 줄이지 않는다)
+      const t = document.createElement('canvas');
+      t.width = t.height = T;
+      const tg = t.getContext('2d', { willReadFrequently: true });
+      World.drawTile(tg, 0, 0, TILE[name], undefined, true);
+      const d = tg.getImageData(0, 0, T, T).data;
+      let x0 = T, y0 = T, x1 = -1, y1 = -1;
+      for (let y = 0; y < T; y++) for (let x = 0; x < T; x++) if (d[(y * T + x) * 4 + 3] > 40) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+      if (x1 < 0) { x0 = y0 = 0; x1 = y1 = T - 1; }
+      // 칸 크기(32)면 칸 그대로 (놓을 자리 미리보기), 작으면 그림이 있는 곳 가운데 (키가 크면 위쪽부터)
+      const full = size >= T, sx = full ? 0 : Math.round((x0 + x1 + 1) / 2 - size / 2), sy = full ? 0 : y1 - y0 + 1 > size ? y0 : Math.round((y0 + y1 + 1) / 2 - size / 2);
+      g.drawImage(t, sx, sy, size, size, 0, 0, size, size);
+      if (!full) outlinePixels(g, size);
+    }
     tileIcons[key] = { canvas: c, url: c.toDataURL() };
   }
   return tileIcons[key];
+}
+
+// 아이템/무기 정의 → 그림 (블록은 BLOCK_ 그림, 없으면 맵 칸을 잘라 낸 것)
+function itemIcon(def, size = 24) {
+  if (def.icon) return tileIcon(def.icon, size);
+  return tileIcon(ICON_ART[`BLOCK_${def.tile}`] ? `BLOCK_${def.tile}` : def.tile, size);
 }
 
 // 그림 둘레 빈칸에 옆 색을 아주 어둡게 한 테두리 (몬스터 그림과 같은 방식)
@@ -1590,7 +1901,7 @@ function outlinePixels(g, n) {
 
 // 화면(HTML)에 쓰는 아이템 그림: 블록은 맵 칸 그림, icon 이 있으면 그 그림, 나머지는 이모지
 function iconHtml(def) {
-  if (def.tile || def.icon) return `<img class="tile-icon" src="${tileIcon(def.tile || def.icon).url}" alt="">`;
+  if (def.tile || def.icon) return `<img class="tile-icon" src="${itemIcon(def).url}" alt="">`;
   return def.fix ? `<span class="emo-${def.fix}">${def.emoji}</span>` : def.emoji;
 }
 
@@ -2157,7 +2468,8 @@ const World = {
 
   // region: 구역 땅 색 (없으면 기본 색. 블록 그림)
   // 맵 칸 그림: 32 x 32 픽셀 (1 칸 = 1 px). 칸마다 hash 로 무늬가 조금씩 달라서 반복돼 보이지 않는다
-  drawTile(g, x, y, type, region) {
+  // bare: 땅(풀/물) 없이 그 위의 것만 (블록 아이템 그림)
+  drawTile(g, x, y, type, region, bare = false) {
     const gr = GROUND[region] || GROUND.DEFAULT;
     const X = x * T, Y = y * T;
     const p = (gx, gy, color, w = 1, h = 1) => { g.fillStyle = color; g.fillRect(X + gx, Y + gy, w, h); };
@@ -2180,6 +2492,7 @@ const World = {
       }
     };
     const grass = () => {
+      if (bare) return;
       const [g0, g1, g2] = gr.grass, dark = shade(g0, 0.84);
       fill(g0);
       specks(34, [g1, g2, g1], 1);
@@ -2190,6 +2503,7 @@ const World = {
       }
     };
     const waterBase = () => {
+      if (bare) return;
       const [w0, w1] = gr.water;
       fill(w0);
       specks(14, [shade(w0, 0.9)], 140, 2, 1);
@@ -4143,7 +4457,7 @@ const Render = {
     if (!color) return;
     if (block && spot) {
       ctx.globalAlpha = 0.6;
-      ctx.drawImage(tileIcon(ITEMS[block].tile).canvas, t.x * T, t.y * T);
+      ctx.drawImage(tileIcon(ITEMS[block].tile, T).canvas, t.x * T, t.y * T);
       ctx.globalAlpha = 1;
     }
     ctx.strokeStyle = color;
@@ -4413,8 +4727,7 @@ const Render = {
     ctx.fillStyle = '#000'; // 반투명 색이 남아 있으면 이모지도 흐려진다
     // 아이템 그림은 24x24 를 1:1 로 (블록은 맵 칸 그림을 반으로, 하트 등은 이모지 픽셀 그림)
     const ix = Math.round(it.x), iy = Math.round(it.y - 4 + bob);
-    if (def.icon) ctx.drawImage(tileIcon(def.icon, 24).canvas, ix - 12, iy - 12);
-    else if (def.tile) ctx.drawImage(tileIcon(def.tile).canvas, ix - 8, iy - 8, 16, 16);
+    if (def.icon || def.tile) ctx.drawImage(itemIcon(def, 24).canvas, ix - 12, iy - 12);
     else {
       const spr = PixelSprite.get(def.emoji, 20);
       if (spr) ctx.drawImage(spr.canvas, ix - 11, iy - 11);
@@ -4584,8 +4897,7 @@ const Render = {
       ctx.font = `15px ${FONT_EMOJI}`;
       const hd = WEAPONS[held] || ITEMS[held], block = hd && (hd.tile || hd.icon); // 픽셀 그림 (손은 이모지)
       ctx.translate(0, -4);
-      if (hd && hd.icon) ctx.drawImage(tileIcon(hd.icon, 16).canvas, -8, -8);
-      else if (block) ctx.drawImage(tileIcon(block).canvas, -8, -8, 16, 16);
+      if (block) ctx.drawImage(itemIcon(hd, 16).canvas, -8, -8);
       else ctx.fillText(holdEmoji(held), 0, 0);
       ctx.restore();
     }

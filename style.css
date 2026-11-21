@@ -93,7 +93,7 @@ body:not(.touch) .bag-btn::after {
 }
 .inv-slot .e { font-size: 30px; line-height: 1; }
 /* 블록 아이템 그림 (맵 칸 그림 그대로, 글자 크기에 맞춤) */
-.tile-icon { width: 1em; height: 1em; image-rendering: pixelated; vertical-align: -0.12em; border-radius: 4px; }
+.tile-icon { width: 1em; height: 1em; image-rendering: pixelated; vertical-align: -0.12em; border-radius: 0; } /* 아이템 그림 24x24 (24 의 배수 크기에서 픽셀이 고르다) */
 .inv-slot .names { display: flex; flex-direction: column; line-height: 1.05; }
 .inv-slot .n { font-size: 20px; font-weight: 800; color: var(--ink); }
 .inv-slot .s { font-size: 14px; color: #666; font-family: var(--font-en); }
@@ -692,7 +692,7 @@ body.playing .help-btn { display: block; }
   border: 4px solid #5d4037; background: rgba(255, 255, 255, .88); box-shadow: 0 4px 0 rgba(0, 0, 0, .25);
   display: flex; align-items: center; justify-content: center; font-size: 34px; cursor: pointer;
 }
-.pouch-slot .tile-icon { width: 44px; height: 44px; }
+.pouch-slot .tile-icon { width: 48px; height: 48px; }
 .pouch-slot.on { border-color: #f9a825; background: #fff59d; transform: translateY(-6px); }
 .pouch-slot.empty { opacity: .45; }
 .pouch-slot.bump { animation: bump .35s; }
@@ -701,7 +701,7 @@ body.playing .help-btn { display: block; }
 .pouch-slot.more::after { content: '▸'; position: absolute; right: 4px; top: 1px; font: 900 13px/1 var(--font-ui); color: #8d6e63; }
 .pouch-empty { filter: grayscale(1); font-size: 26px; }
 body:not(.touch) .pouch-slot i { color: #5d4037; }
-@media (max-width: 700px) { .pouch-slot { width: 54px; height: 54px; } .pouch-slot .tile-icon { width: 34px; height: 34px; } .pouch { gap: 6px; } }
+@media (max-width: 700px) { .pouch-slot { width: 54px; height: 54px; } .pouch-slot .tile-icon { width: 36px; height: 36px; } .pouch { gap: 6px; } }
 
 /* ---------- 🎒 가방 ---------- */
 .bag-panel {
@@ -728,7 +728,7 @@ body:not(.touch) .pouch-slot i { color: #5d4037; }
   border: 3px solid #8d6e63; background: #fff; cursor: pointer; font-size: 30px;
   display: flex; align-items: center; justify-content: center;
 }
-.bag-cell .tile-icon { width: 36px; height: 36px; }
+.bag-cell .tile-icon { width: 36px; height: 36px; /* 24 의 1.5배 */ }
 .bag-cell i { position: absolute; left: 0; right: 0; bottom: 2px; font: 800 11px/1 var(--font-ui); font-style: normal; color: #5d4037; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .bag-cell b { position: absolute; right: 3px; top: 2px; font: 900 13px/1 var(--font-ui); color: #c62828; }
 .bag-cell.sel { border-color: #f9a825; background: #fff59d; box-shadow: 0 0 0 3px #f9a825; }
@@ -737,7 +737,7 @@ body:not(.touch) .pouch-slot i { color: #5d4037; }
 .wear-cell.sel { border-color: #f9a825; background: #fff59d; }
 .bag-info { display: flex; align-items: center; gap: 12px; min-height: 76px; padding: 8px 12px; border-radius: 18px; background: #fff; }
 .bag-info-icon { font-size: 46px; line-height: 1; }
-.bag-info-icon .tile-icon { width: 60px; height: 60px; }
+.bag-info-icon .tile-icon { width: 72px; height: 72px; }
 .bag-info-text { flex: 1; }
 .bag-info-text b { font: 900 22px/1.2 var(--font-ui); }
 .bag-info-text p { margin: 4px 0 0; font: 700 15px/1.3 var(--font-ui); }
