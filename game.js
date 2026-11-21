@@ -71,6 +71,7 @@ const CONFIG = {
   MAX_ALTERNATIVES: 5,
   HINT_DELAY_MS: 5000,    // 이 시간 동안 시도가 없으면 🔊 반짝임
   MAX_TRIES: 3,           // 이만큼 틀리면 "따라 읽어봐!" 모드
+  SENTENCE_EVERY_SEC: 60, // 놀고 있는 시간이 이만큼 지나면 📝 문장 읽기 ("계속하려면 읽어요!")
   LISTEN_START_DELAY_MS: 100,  // 카드가 뜨자마자 바로 듣기
   TTS_TAIL_MS: 300,       // TTS 가 끝난 뒤 마이크를 다시 켜기까지 여유
   QUICK_END_MS: 400,      // 인식이 이보다 빨리 끝나면 "고장" 의심
@@ -321,7 +322,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 82;
+const GAME_V = 83;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -519,6 +520,57 @@ const Words = {
   },
 
   remember(w) { this.lastId = w.id; return w; },
+};
+
+// ============================================================
+// Sentences — 📝 문장 읽기 (1분마다 "계속하려면 읽어요!"). 띄어쓰기 빼고 8글자까지, 게임과 상관없는 한글 공부 문장.
+//             정해 둔 문장 + 낱말 조각을 맞춰 만든 문장 중에서 아무거나 (최근 것은 다시 안 나오게)
+// ============================================================
+const SENTENCE_MAX = 8;
+const SENTENCE_FIXED = [
+  '엄마 아빠 사랑해요', '안녕하세요', '고맙습니다', '잘 먹겠습니다', '잘 자요', '좋은 아침이에요',
+  '나는 할 수 있어', '우리 같이 놀자', '사이좋게 놀아요', '하늘이 파래요', '꽃이 예뻐요', '해가 떴어요',
+  '비가 와요', '눈이 와요', '바람이 불어요', '별이 반짝반짝', '달님 안녕', '밥을 먹어요', '손을 씻어요',
+  '이를 닦아요', '책을 읽어요', '물을 마셔요', '신발을 신어요', '옷을 입어요', '그림을 그려요',
+  '노래를 불러요', '새가 날아요', '물고기가 헤엄쳐요', '나비가 날아요', '사과가 맛있어요', '우유를 마셔요',
+  '오늘은 즐거워', '나는 멋진 아이', '같이 가요', '내가 도와줄게', '미안해 괜찮아', '참 잘했어요',
+];
+const SENTENCE_PARTS = {
+  people: ['엄마', '아빠', '할머니', '할아버지', '친구', '선생님', '형', '누나', '언니', '오빠', '동생'],
+  animals: ['강아지', '고양이', '토끼', '오리', '병아리', '곰', '사자', '돼지', '하마'],
+  // 사람 + 하는 일 ("엄마가 웃어요"), 사람에게 하는 말 ("아빠 고마워요"), 함께 ("친구랑 놀아요")
+  doing: ['웃어요', '노래해요', '춤춰요', '책을 읽어요', '밥을 먹어요', '잠을 자요', '안아 줘요'],
+  toYou: ['사랑해요', '고마워요', '안녕', '최고예요', '보고 싶어요'],
+  together: ['놀아요', '걸어요', '같이 가요', '노래해요'],
+  animalDoing: ['뛰어요', '자요', '먹어요', '놀아요', '귀여워요', '하품해요'],
+};
+const SENTENCE_EN = ['I love you', 'Good morning', 'Thank you', 'I am happy', 'Let us play', 'I can do it', 'The sky is blue', 'Good night'];
+
+const Sentences = {
+  recent: [],
+
+  all() {
+    const P = SENTENCE_PARTS, out = [...SENTENCE_FIXED];
+    for (const w of P.people) {
+      for (const d of P.doing) out.push(`${josa(w, '이', '가')} ${d}`);
+      for (const d of P.toYou) out.push(`${w} ${d}`);
+      for (const d of P.together) out.push(`${josa(w, '이랑', '랑')} ${d}`);
+    }
+    for (const a of P.animals) for (const d of P.animalDoing) out.push(`${josa(a, '이', '가')} ${d}`);
+    return [...new Set(out)].filter(s => s.replace(/\s/g, '').length <= SENTENCE_MAX);
+  },
+
+  // 카드에 보여 줄 문장 (Card.show 가 받는 단어 모양)
+  pick() {
+    const en = Store.settings.lang === 'en';
+    if (!this.pool) this.pool = this.all();
+    // 정해 둔 문장 반, 맞춰 만든 문장 반 (만든 것이 훨씬 많아서 섞기만 하면 정해 둔 문장이 잘 안 나온다)
+    const pool = en ? SENTENCE_EN : Math.random() < 0.5 ? SENTENCE_FIXED : this.pool.filter(x => !SENTENCE_FIXED.includes(x));
+    const choices = pool.filter(s => !this.recent.includes(s));
+    const text = choices[Math.floor(Math.random() * choices.length)] || pool[0];
+    this.recent = [text, ...this.recent].slice(0, Math.min(20, pool.length - 1));
+    return { id: `s:${text}`, word: text, lang: en ? 'en' : 'ko', emoji: '📝', level: 0, alts: [] };
+  },
 };
 
 // ============================================================
@@ -1490,8 +1542,10 @@ function tileIcon(name) {
     c.width = c.height = T;
     const g = c.getContext('2d'), pix = PIXEL_ICONS[name];
     if (pix) {
-      pix.rows.forEach((row, y) => [...row].forEach((ch, x) => {
-        if (pix.colors[ch]) { g.fillStyle = pix.colors[ch]; g.fillRect(x * P, y * P, P, P); }
+      // 아이템 그림은 16x16 (8x8 로 그린 것을 Scale2x 로 다듬는다)
+      const rows = pix.rows.length === 8 ? scale2x(pix.rows) : pix.rows, u = T / rows.length;
+      rows.forEach((row, y) => [...row].forEach((ch, x) => {
+        if (pix.colors[ch]) { g.fillStyle = pix.colors[ch]; g.fillRect(x * u, y * u, u, u); }
       }));
     } else World.drawTile(g, 0, 0, TILE[name]);
     tileIcons[name] = { canvas: c, url: c.toDataURL() };
@@ -1504,6 +1558,90 @@ function iconHtml(def) {
   if (def.tile || def.icon) return `<img class="tile-icon" src="${tileIcon(def.tile || def.icon).url}" alt="">`;
   return def.fix ? `<span class="emo-${def.fix}">${def.emoji}</span>` : def.emoji;
 }
+
+// 8x8 그림을 16x16 으로 (Scale2x: 계단 모서리를 반 칸씩 다듬어 해상도가 두 배인 픽셀 그림처럼)
+function scale2x(rows) {
+  const h = rows.length, w = rows[0].length, at = (x, y) => (x < 0 || y < 0 || x >= w || y >= h ? null : rows[y][x]);
+  const out = Array.from({ length: h * 2 }, () => []);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const p = rows[y][x], a = at(x, y - 1) ?? p, b = at(x + 1, y) ?? p, c = at(x - 1, y) ?? p, d = at(x, y + 1) ?? p;
+      const ok = a !== d && c !== b;
+      out[2 * y][2 * x] = ok && c === a ? a : p;
+      out[2 * y][2 * x + 1] = ok && a === b ? b : p;
+      out[2 * y + 1][2 * x] = ok && d === c ? c : p;
+      out[2 * y + 1][2 * x + 1] = ok && b === d ? d : p;
+    }
+  }
+  return out.map(r => r.join(''));
+}
+
+// ============================================================
+// PixelSprite — 몬스터 그림: 이모지를 작은 칸(16x16, 용은 24x24)으로 줄여 색을 단순하게 하고 까만 테두리를 둘러
+//               픽셀 그림처럼 만든다. 이모지마다 한 번만 만들어 둔다 (글꼴을 다 받기 전에는 이모지 그대로)
+// ============================================================
+const PixelSprite = {
+  cache: new Map(),
+  ready: false,
+
+  init() {
+    try {
+      Promise.all([document.fonts.ready, document.fonts.load(`20px "Noto Color Emoji"`, EMOJI_FALLBACK).catch(() => {})])
+        .then(() => { this.ready = true; this.cache.clear(); });
+      // 웹 글꼴이 늦게 오면 (옛 윈도우 이모지) 다시 만든다
+      document.fonts.addEventListener('loadingdone', () => this.cache.clear());
+    } catch { this.ready = true; }
+  },
+
+  get(emoji, n) {
+    if (!this.ready) return null;
+    const key = `${emoji}|${n}`;
+    if (!this.cache.has(key)) this.cache.set(key, this.make(emoji, n));
+    return this.cache.get(key);
+  },
+
+  make(emoji, n) {
+    const K = 4, S = n * K; // 크게 그린 다음 K x K 칸씩 평균
+    const src = document.createElement('canvas');
+    src.width = src.height = S;
+    const g = src.getContext('2d', { willReadFrequently: true });
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.font = `${S * 0.86}px ${FONT_EMOJI}`;
+    g.fillText(emoji, S / 2, S / 2 + S * 0.04);
+    const data = g.getImageData(0, 0, S, S).data;
+    const M = n + 2, px = new Array(M * M).fill(null); // 둘레 1칸은 테두리 자리
+    for (let y = 0; y < n; y++) {
+      for (let x = 0; x < n; x++) {
+        let r = 0, gg = 0, b = 0, a = 0;
+        for (let dy = 0; dy < K; dy++) for (let dx = 0; dx < K; dx++) {
+          const i = ((y * K + dy) * S + x * K + dx) * 4, al = data[i + 3];
+          r += data[i] * al; gg += data[i + 1] * al; b += data[i + 2] * al; a += al;
+        }
+        if (a / (K * K) < 110) continue; // 반쯤 비면 빈칸 (가장자리가 또렷하게)
+        const q = v => Math.min(255, Math.round(v / a / 28) * 28); // 색을 몇 단계로만
+        px[(y + 1) * M + x + 1] = [q(r), q(gg), q(b)];
+      }
+    }
+    const out = document.createElement('canvas');
+    out.width = out.height = M;
+    const o = out.getContext('2d');
+    const img = o.createImageData(M, M);
+    for (let y = 0; y < M; y++) {
+      for (let x = 0; x < M; x++) {
+        const i = y * M + x, c = px[i], j = i * 4;
+        if (c) { img.data[j] = c[0]; img.data[j + 1] = c[1]; img.data[j + 2] = c[2]; img.data[j + 3] = 255; continue; }
+        // 빈칸인데 옆에 그림이 있으면 테두리 (옆 색을 아주 어둡게)
+        const nb = [px[i - 1], px[i + 1], px[i - M], px[i + M]].find(Boolean);
+        if (!nb) continue;
+        img.data[j] = nb[0] * 0.25; img.data[j + 1] = nb[1] * 0.25; img.data[j + 2] = nb[2] * 0.25; img.data[j + 3] = 255;
+      }
+    }
+    o.putImageData(img, 0, 0);
+    return { canvas: out, scale: M / n };
+  },
+};
+PixelSprite.init();
 
 const World = {
   recent: [], // 최근에 바뀐 칸 { i, from, to, at, mine } (🤝 놀아주기가 본다)
@@ -3964,11 +4102,18 @@ const Render = {
     if (m.faceRight) ctx.scale(-1, 1); // 이모지는 대부분 왼쪽을 본다
     if (m.def.ghost) { ctx.globalAlpha = 0.72; ctx.translate(0, Math.sin(time * 2.5 + m.phase) * 4); } // 유령: 반투명, 둥실둥실
     if (m.hitT > 0 && Math.floor(m.hitT * 20) % 2) ctx.globalAlpha = 0.35;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = '#000';
-    ctx.font = `${s}px ${FONT_EMOJI}`;
-    ctx.fillText(m.def.emoji, 0, 0);
+    const spr = PixelSprite.get(m.def.emoji, m.def.boss ? 24 : 16);
+    if (spr) {
+      ctx.imageSmoothingEnabled = false;
+      const w = s * spr.scale;
+      ctx.drawImage(spr.canvas, -w / 2, -w / 2, w, w);
+    } else {
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#000';
+      ctx.font = `${s}px ${FONT_EMOJI}`;
+      ctx.fillText(m.def.emoji, 0, 0);
+    }
     ctx.restore();
 
     // 체력 막대: 처음엔 빨간 칸이 가득, 맞을 때마다 오른쪽 칸부터 비어 회색이 된다
@@ -4028,8 +4173,9 @@ const Render = {
       ctx.rotate(performance.now() / 80);
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.font = `14px ${FONT_EMOJI}`;
-      ctx.fillText(ITEMS[a.food].emoji, 0, 0);
+      const fd = ITEMS[a.food];
+      if (fd && fd.icon) { ctx.imageSmoothingEnabled = false; ctx.drawImage(tileIcon(fd.icon).canvas, -8, -8, 16, 16); }
+      else { ctx.font = `14px ${FONT_EMOJI}`; ctx.fillText(fd ? fd.emoji : '🍎', 0, 0); }
       ctx.restore();
       return;
     }
@@ -4924,6 +5070,7 @@ const Game = {
   update(dt) {
     const playing = this.state === 'play';
     if (playing && Buddy.on) Buddy.update(dt);
+    if (playing) this.tickQuiz(dt);
     if (playing) Player.update(dt);
     else Player.moving = false;
     // 세상(아이템, 몬스터)은 방장/혼자 기기가 돌린다. 혼자 할 때는 카드/제작 중에 멈추고,
@@ -5209,6 +5356,29 @@ const Game = {
     for (let i = 0; i < n; i++) {
       await Card.show(Words.pick(i === 0 && emoji ? { emoji } : {}));
     }
+    this.quizT = 0; // 방금 카드를 읽었으니 문장 읽기는 1분 뒤부터 다시
+  },
+
+  // ---------- 📝 1분마다 문장 읽기: "계속하려면 문장을 읽어요!" (놀고 있는 시간만 센다) ----------
+  quizT: 0,
+  tickQuiz(dt) {
+    if (!Social.wordsOn || Buddy.on || SERVER_CH || Card.active) { this.quizT = 0; return; }
+    this.quizT += dt;
+    if (this.quizT >= CONFIG.SENTENCE_EVERY_SEC) this.sentenceQuiz();
+  },
+
+  async sentenceQuiz() {
+    this.quizT = 0;
+    this.closeBag(false);
+    this.closeTalk(false);
+    this.state = 'card';
+    Input.reset();
+    const en = Store.settings.lang === 'en';
+    toast(tr('📝 계속하려면 문장을 읽어요!', '📝 Read the sentence to keep playing!'));
+    Speech.speak(en ? 'Read the sentence to keep playing!' : '계속하려면 문장을 읽어 봐요!', en ? 'en' : 'ko');
+    await Card.show(Sentences.pick());
+    this.quizT = 0;
+    if (this.state === 'card') this.state = 'play';
   },
 
   // 한 번에 여러 마리를 잡아도 카드가 겹치지 않게 차례대로 처리한다
