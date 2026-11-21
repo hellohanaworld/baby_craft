@@ -6121,12 +6121,20 @@ const Buddy = {
       return;
     }
     // 아이가 멀어지면 하던 일 (캐기/짓기/꼬시기)은 두고 따라간다 (술래잡기/숨바꼭질은 빼고)
-    if (t && !['follow', 'tag', 'hide'].includes(t.kind) && a !== this.home && this.dist(a, me) > 8 * T) {
+    if (t && !['follow', 'tag', 'hide', 'guide'].includes(t.kind) && a !== this.home && this.dist(a, me) > 8 * T) {
       this.done();
       this.start('follow', {}, 4);
       return;
     }
     if (t && t.kind !== 'follow') return;
+    // 3탄 🧭 미로: 아이가 미로 안에 있으면 "따라와!" 하고 앞장서서 보물 상자까지 길을 알려 준다
+    const kid = this.friend();
+    if (kid && World.mazeGoal && this.inMaze(kid) && (this.reactAt.guide || 0) < performance.now()) {
+      this.start('guide', {}, 120);
+      this.emote('🧭');
+      this.talk('guide', [['따라와! 길 알려 줄게', "Follow me! I'll show you the way"]], 20);
+      return;
+    }
     // 아이 곁에 붙어 있는다 (짓는 중에는 재료를 캐러 조금 더 멀리까지)
     if (this.dist(a, me) > (this.project ? 7 : 4) * T || this.restT > 0) { if (!t) this.start('follow', {}, 4); return; }
 
@@ -6694,6 +6702,52 @@ const Buddy = {
       Social.jump();
       this.done('🙌');
     }
+  },
+
+  inMaze(p) { return World.regionAtPx(p.x, p.y) === REGION.MAZE; },
+
+  // ---------- 🧭 미로 길 안내: 아이 자리에서 보물 상자까지 길을 찾아, 아이보다 몇 칸 앞에 서서 부른다 ----------
+  // 아이가 막다른 길로 가도 길은 아이 자리에서 다시 찾으니까, 나는 언제나 맞는 길 쪽에서 "이쪽이야!" 한다
+  guide(t) {
+    const f = this.friend(), goal = World.mazeGoal, now = performance.now();
+    if (!f || !goal || !this.inMaze(f)) { this.done(); return; }
+    // 다 왔다: 상자는 아이가 열게
+    if (Math.hypot(f.x - (goal.x * T + T / 2), f.y - (goal.y * T + T / 2)) < 2.5 * T) {
+      Social.say(tr('보물 상자다! 열어 봐!', 'Treasure! Open it!'), false);
+      Social.jump();
+      this.reactAt.guide = now + 60000; // 입구로 돌아간 뒤 잠깐은 혼자 해 보게
+      this.done('🎉');
+      return;
+    }
+    // 아이 자리 → 보물 상자 옆 칸까지 길 (아이가 칸을 옮기거나 1초마다 다시)
+    const fx = Math.floor(f.x / T), fy = Math.floor(f.y / T), key = `${fx},${fy}`;
+    if (key !== t.key || now > (t.routeAt || 0)) {
+      const end = this.standNear(goal.x, goal.y) || goal;
+      t.route = this.findPath(fx, fy, end.x, end.y);
+      t.key = key;
+      t.routeAt = now + 1000;
+    }
+    if (!t.route.length) { this.done(); return; }
+    const calls = [['따라와!', 'Follow me!'], ['이쪽이야!', 'This way!'], ['여기야 여기!', 'Over here!']];
+    const d = this.dist(f, Player);
+    // 내가 아이 길 위에 있는지 (벽은 1칸이라 바로 옆 칸이면 같은 길)
+    const bx = Math.floor(Player.x / T), by = Math.floor(Player.y / T);
+    const onRoute = t.route.some(c => Math.abs(c.x - bx) + Math.abs(c.y - by) <= 1);
+    // 너무 앞섰다: 멈춰서 아이를 보며 부른다
+    if (onRoute && d > 5 * T) {
+      this.vec = { x: 0, y: 0 };
+      this.face(f.x, f.y);
+      this.talk('call', calls, 6);
+      if (Player.emoteT <= 0) this.emote('👋');
+      return;
+    }
+    // 아이보다 4칸 앞 길 위로
+    const n = t.route[Math.min(4, t.route.length - 1)];
+    if (this.goTo(n.x * T + T / 2, n.y * T + T / 2, 6)) {
+      this.vec = { x: 0, y: 0 };
+      this.face(f.x, f.y);
+    }
+    if (d > 2.5 * T) this.talk('call', calls, 6);
   },
 
   // ---------- 숨바꼭질: 지어 둔 미로 안쪽에 숨어서 기다린다 ----------
