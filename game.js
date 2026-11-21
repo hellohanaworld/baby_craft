@@ -160,6 +160,8 @@ const recipeGroup = r => (WEAPONS[r.result] || ITEMS[r.result].kind === 'gear' ?
 
 // 지도 네 구역 (집은 가운데, 경계는 구불구불하게 이어진다). 구역마다 땅 색과 사는 동물이 다르다
 const REGION = { FOREST: 0, LAKE: 1, SWAMP: 2, MEADOW: 3, CLOVER: 4, MAZE: 5 };
+// 어두운 구역: 🍄 늪, 🧭 절벽 미로 (내 둘레와 🔥 횃불 둘레만 밝다)
+const DARK_REGIONS = new Set([REGION.SWAMP, REGION.MAZE]);
 const REGIONS = [
   { emoji: '🌲', ko: '무서운 숲', en: 'Dark Forest' }, // 왼쪽 위: 나무가 빽빽, 육식동물
   { emoji: '🏞️', ko: '호수',     en: 'Lakes' },       // 오른쪽 위: 큰 호수, 물고기
@@ -303,7 +305,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 74;
+const GAME_V = 75;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -3537,10 +3539,10 @@ const Render = {
     this.drawMinimap(peers, boss);
   },
 
-  // 🍄 늪에 들어가면 화면이 어두워지고 내 둘레와 🔥 횃불 둘레만 밝다 (천천히 바뀐다)
+  // 🍄 늪 / 🧭 미로에 들어가면 화면이 어두워지고 내 둘레와 🔥 횃불 둘레만 밝다 (천천히 바뀐다)
   drawSwampDark() {
     const home = Math.hypot(Player.x - (World.door.x * T + T / 2), Player.y - (World.door.y * T + T / 2)) < CONFIG.SAFE_RADIUS * T;
-    const want = Game.state !== 'title' && World.regionAtPx(Player.x, Player.y) === REGION.SWAMP && !home ? 1 : 0; // 집 앞은 밝게
+    const want = Game.state !== 'title' && DARK_REGIONS.has(World.regionAtPx(Player.x, Player.y)) && !home ? 1 : 0; // 집 앞은 밝게
     this.dark = (this.dark || 0) + (want - (this.dark || 0)) * 0.04;
     if (this.dark < 0.01) return;
     // 어둠은 따로 그린 다음 횃불 자리를 지워서 (destination-out) 화면에 얹는다
@@ -5689,7 +5691,7 @@ const Buddy = {
     if (food && wild && myPets < 3) choices.push(['tame', { m: wild, food }, 12]);
     const dig = (Game.inventory.flower || 0) < 4 && this.findTile(a, [TILE.FLOWER], 6);
     if (dig) choices.push(['gather', { tx: dig.x, ty: dig.y, tile: TILE.FLOWER }, 10]);
-    if (Game.inventory.flower > 0 || (Game.inventory.torch > 0 && World.regionAtPx(Player.x, Player.y) === REGION.SWAMP)) {
+    if (Game.inventory.flower > 0 || (Game.inventory.torch > 0 && DARK_REGIONS.has(World.regionAtPx(Player.x, Player.y)))) {
       choices.push(['build', { block: this.pickBlock(), left: randInt(2, 3) }, 14]);
     }
     // 아이 곁에 떨어진 것: 줍지 않고 옆에 가서 👉 (아이가 줍게)
@@ -5816,9 +5818,9 @@ const Buddy = {
     return pr && x >= pr.ox && x < pr.ox + pr.w && y >= pr.oy && y < pr.oy + pr.h;
   },
 
-  // 심을 블록: 꽃 > 나무 > (늪이면) 횃불 > 벽돌
+  // 심을 블록: 꽃 > 나무 > (늪/미로처럼 어두우면) 횃불 > 벽돌
   pickBlock() {
-    const swamp = World.regionAtPx(Player.x, Player.y) === REGION.SWAMP;
+    const swamp = DARK_REGIONS.has(World.regionAtPx(Player.x, Player.y));
     const order = swamp ? ['torch', 'flower', 'tree'] : ['flower', 'tree', 'torch', 'brick'];
     return order.find(id => Game.inventory[id] > 0) || null;
   },
