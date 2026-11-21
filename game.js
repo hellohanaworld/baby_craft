@@ -340,7 +340,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 76;
+const GAME_V = 77;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -3480,7 +3480,11 @@ const Input = {
       if (e.code === 'Escape' && Game.bigMap) Game.setBigMap(false);
       if (KEYMAP[e.code]) { this.keys.add(e.code); e.preventDefault(); }
       if (e.code === 'KeyQ' && !e.repeat) { Game.toggleWeaponPicker(); Sfx.click(); }
-      if (e.code === 'Space' || e.code === 'Enter') {
+      // Enter: 놀고 있을 때는 💬 말풍선 칸을 열고 바로 ✏️ 쓰기 칸에 글자를 쓴다 (카드/시작 화면에서는 예전처럼 ✅ / 시작)
+      if (e.code === 'Enter' && Game.state === 'play') {
+        e.preventDefault();
+        if (!e.repeat) { Game.toggleTalk(true); Sfx.click(); }
+      } else if (e.code === 'Space' || e.code === 'Enter') {
         e.preventDefault();
         if (!e.repeat) Game.onAction();
       }
@@ -5173,7 +5177,7 @@ const Game = {
       { icon: '💬', ko: '말', en: 'Say', items: SAY_WORDS.map(([ko, en]) => ({ html: tr(ko, en), cls: 'say-choice', act: () => Social.say(tr(ko, en)) })) },
       { icon: '😊', ko: '표정', en: 'Face', items: SAY_EMOJI.map(e => ({ html: e, act: () => Social.emote(e) })) },
     ];
-    const peer = Social.nearPeer(4), held = this.heldBlock || this.heldFood, items = [];
+    const peer = Social.nearPeer(4), held = this.heldBlock || this.heldFood || this.heldPotion, items = [];
     if (this.hearts < CONFIG.MAX_HEARTS && this.edible()) items.push({ html: '😋', label: tr('먹기', 'Eat'), act: () => this.eatOne() });
     if (peer && held) items.push({ html: `🎁${iconHtml(ITEMS[held])}`, label: tr('주기', 'Give'), act: () => { if (Social.give(peer)) Social.say(tr('선물이야!', 'For you!')); } });
     if (peer && Monsters.list.some(m => m.owner === Multi.sid)) {
@@ -5183,7 +5187,8 @@ const Game = {
     return rows;
   },
 
-  toggleTalk() {
+  // write: 열자마자 ✏️ 쓰기 칸에 글자 쓰기 (Enter 로 열 때)
+  toggleTalk(write = false) {
     const panel = $('#talk-panel');
     if (this.talkOpen) return this.closeTalk(false);
     if (this.state !== 'play') return;
@@ -5211,6 +5216,7 @@ const Game = {
     });
     panel.classList.remove('hidden');
     this.markTalk();
+    if (write) $('#talk-panel .talk-input').focus(); // ✏️ 쓰기 칸이 첫 줄 첫 칸 (r 0, c 0)
   },
 
   // ✏️ 직접 쓰기: 20글자까지 쓰고 Enter 또는 💬 를 누르면 말풍선으로
@@ -5364,7 +5370,7 @@ const Game = {
         ['✋', '때리기 · 캐기 · 놓기 · 먹이 던지기', 'Hit · Dig · Place · Throw food', 'Space', '✋ 큰 버튼', 'Big ✋ button'],
         ['🗡️', '손에 들 것 고르기', 'Choose what to hold', 'Q', '✋ 위 작은 버튼', 'Small button above ✋'],
         ['🦘', '점프', 'Jump', 'J', '🦘 버튼', '🦘 button'],
-        ['💬', '말하기 (✏️ 쓰기, 표정, 먹기, 주기)', 'Talk (write, faces, eat, give)', 'C', '💬 버튼', '💬 button'],
+        ['💬', '말하기 (✏️ 쓰기, 표정, 먹기, 주기)', 'Talk (write, faces, eat, give)', 'C / Enter', '💬 버튼', '💬 button'],
         ['🎒', '가방 접기 · 펴기', 'Open / close bag', 'B', '하트 옆 🎒', '🎒 next to hearts'],
         ['🗺️', '지도 크게 보기 · 작게', 'Big map', 'M', '오른쪽 위 지도 누르기', 'Tap the map'],
         ['📖', '카드 다 읽었어요', 'Card done', 'Space / Enter', '✅ 버튼', '✅ button'],
