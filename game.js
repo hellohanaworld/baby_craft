@@ -321,7 +321,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 80;
+const GAME_V = 82;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -3126,6 +3126,18 @@ const Multi = {
       this.itemsVersion = -1;
     });
     console.log(`[Server] 채널 ${code} 시작 (시드 ${Game.seed})`);
+    // 게임 파일이 새 버전으로 바뀌면 (고치고 배포하면) 서버도 저절로 새로 켠다. 세상은 방에 남아 있어서 그대로 이어진다
+    setInterval(async () => {
+      try {
+        const html = await (await fetch(`index.html?t=${Date.now()}`, { cache: 'no-store' })).text();
+        const v = Number((html.match(/game\.js\?v=(\d+)/) || [])[1]);
+        if (v > GAME_V) {
+          console.log(`[Server] 새 버전 ${v} (지금 ${GAME_V}): 새로 켬`);
+          await this.uploadWorld().catch(() => {});
+          location.reload();
+        }
+      } catch { /* 다음에 다시 */ }
+    }, 30000);
   },
 
   // 내 세상(바뀐 칸 + 보스 진행)을 방에 올린다
@@ -3541,7 +3553,8 @@ const Multi = {
   },
 
   onItems(list) {
-    Items.list = (list || []).filter(Boolean).map(([id, type, x, y]) =>
+    // 모르는 아이템 (서버/방장이 예전 버전)은 뺀다: 그리다가 멈춰서 캐릭터와 작은 지도가 안 보이던 것
+    Items.list = (list || []).filter(it => it && ITEMS[it[1]]).map(([id, type, x, y]) =>
       ({ id, type, x, y, tx: Math.floor(x / T), ty: Math.floor(y / T), phase: id }));
     for (const id of [...Items.pending.keys()]) if (!Items.list.some(it => it.id === id)) Items.pending.delete(id);
   },
@@ -4162,7 +4175,7 @@ const Render = {
         box(5.5, 3, 1, 1, '#1a237e');
       }
     }
-    const headWear = { crown: { type: 'crown' }, hat: { type: 'leather' } }[wear.find(id => ITEMS[id].slot === 'head')];
+    const headWear = { crown: { type: 'crown' }, hat: { type: 'leather' } }[wear.find(id => ITEMS[id]?.slot === 'head')];
     const hat = headWear || look.hat;
     this.drawHat(box, hat, dir);
 
