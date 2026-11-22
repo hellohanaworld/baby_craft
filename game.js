@@ -369,7 +369,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 100;
+const GAME_V = 101;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -1659,7 +1659,6 @@ const BLOCKING = new Set([TILE.TREE, TILE.WATER, TILE.ROCK, TILE.HOUSE, TILE.BRI
 const MONSTER_BLOCKING = new Set([...BLOCKING, TILE.GATE]); // 문은 몬스터만 막는다
 const ARROW_BLOCKING = new Set([TILE.TREE, TILE.ROCK, TILE.HOUSE, TILE.BRICK, TILE.GATE, TILE.TORCH, TILE.LOCK_TREE, TILE.GOLD_TREE, TILE.CLIFF, TILE.CHEST, TILE.STATION, TILE.JUNGLE, TILE.CRACK, TILE.BUSH]);
 const CHUNK = 16; // 그림 조각 크기 (칸)
-const BAYER4 = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map(v => (v + 0.5) / 16); // 점 섞기 순서 (도트 그림 디더링)
 // ☀️ 해는 왼쪽 위: 키 큰 칸은 오른쪽 아래 땅에 그림자를 드리운다 (둥근 것: 나무/바위/덤불, 네모: 벽/절벽/상자)
 const ROUND_CASTERS = new Set([TILE.TREE, TILE.LOCK_TREE, TILE.GOLD_TREE, TILE.ROCK, TILE.BUSH, TILE.JUNGLE]);
 const WALL_CASTERS = new Set([TILE.CLIFF, TILE.CRACK, TILE.BRICK, TILE.CHEST]);
@@ -2896,32 +2895,6 @@ const World = {
     }
   },
 
-  // 구역 경계: 옆 구역의 풀색을 점점이 섞어서 (가장자리 12픽셀) 계단 모양 경계 대신 자연스럽게 이어진다
-  blendBorder(p, nz, x, y, region) {
-    if (region == null || !this.tiles) return;
-    const W = 12;
-    for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, -1], [-1, 1], [1, 1]]) {
-      const nx = x + dx, ny = y + dy;
-      if (nx < 0 || ny < 0 || nx >= this.w || ny >= this.h) continue;
-      const nr = this.region(nx, ny);
-      if (nr === region || !GROUND[nr]) continue;
-      // 대각선은 두 옆이 모두 우리 구역일 때만 (모서리 한 점)
-      if (dx && dy && (this.region(x + dx, y) !== region || this.region(x, y + dy) !== region)) continue;
-      const ng = GROUND[nr].grass;
-      for (let j = 0; j < T; j++) {
-        const ey = dy < 0 ? j : dy > 0 ? T - 1 - j : -1;
-        if (!dx && ey >= W) continue;
-        for (let i = 0; i < T; i++) {
-          const ex = dx < 0 ? i : dx > 0 ? T - 1 - i : -1;
-          const d = ex >= 0 && ey >= 0 ? Math.hypot(ex, ey) : Math.max(ex, ey);
-          if (d >= W) continue;
-          const w = 0.5 * (1 - d / W) + (nz(i, j, 11) - 0.5) * 0.3;
-          if (w > BAYER4[(j & 3) * 4 + (i & 3)]) p(i, j, nz(i, j, 12) < 0.65 ? ng[0] : ng[nz(i, j, 13) < 0.5 ? 1 : 2]);
-        }
-      }
-    }
-  },
-
   // 작은 지도 (한 칸 = 1px)
   renderMini() {
     const c = this.mini = document.createElement('canvas');
@@ -2969,7 +2942,6 @@ const World = {
       const [g0, g1, g2] = gr.grass, dark = shade(g0, 0.84);
       fill(g0);
       specks(34, [g1, g2, g1], 1);
-      this.blendBorder(p, nz, x, y, region);
       // 풀잎: 짙은 세로 줄 + 밝은 끝
       for (let k = 0; k < 5; k++) {
         const bx = ri(200 + k, 30) + 1, by = ri(210 + k, 26) + 3;
