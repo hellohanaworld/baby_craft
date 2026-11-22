@@ -381,7 +381,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 113;
+const GAME_V = 118;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -952,6 +952,44 @@ const Judge = (() => {
 // ============================================================
 const Sfx = {
   ctx: null,
+  vol: (() => { const v = Store.get('bc.volume', 0.8); return typeof v === 'number' && v >= 0 && v <= 1 ? v : 0.8; })(), // 소리 크기 0~1 (이 기기에 저장)
+
+  // 모든 효과음이 지나가는 소리 크기 마디
+  out() {
+    if (!this.master) { this.master = this.ctx.createGain(); this.master.connect(this.ctx.destination); }
+    this.master.gain.value = this.vol * this.vol * 1.25;
+    return this.master;
+  },
+
+  setVolume(v) {
+    this.vol = Math.max(0, Math.min(1, Math.round(v * 10) / 10));
+    Store.set('bc.volume', this.vol);
+    if (this.master) this.master.gain.value = this.vol * this.vol * 1.25;
+    if (this.vol === 0) window.speechSynthesis?.cancel();
+  },
+
+  // 🔉 소리 크기 단추: 누르면 아래에 - 막대 + 가 나온다
+  initVolume() {
+    const btn = $('#btn-volume'), pop = $('#volume-pop');
+    const icon = () => (this.vol === 0 ? '🔇' : this.vol < 0.4 ? '🔈' : this.vol < 0.75 ? '🔉' : '🔊');
+    const show = () => {
+      btn.innerHTML = `${icon()}<span>${tr('소리', 'Sound')} ${Math.round(this.vol * 10)}</span>`;
+      pop.querySelector('.vol-fill').style.width = `${this.vol * 100}%`;
+      pop.querySelector('.vol-num').textContent = Math.round(this.vol * 10);
+    };
+    const set = v => { this.setVolume(v); show(); this.unlock(); this.pickup(); };
+    btn.addEventListener('click', e => { e.stopPropagation(); this.click(); pop.classList.toggle('hidden'); });
+    pop.querySelector('.vol-down').addEventListener('click', e => { e.stopPropagation(); set(this.vol - 0.1); });
+    pop.querySelector('.vol-up').addEventListener('click', e => { e.stopPropagation(); set(this.vol + 0.1); });
+    const bar = pop.querySelector('.vol-bar');
+    const drag = e => { const b = bar.getBoundingClientRect(); this.setVolume((e.clientX - b.left) / b.width); show(); };
+    bar.addEventListener('pointerdown', e => { e.stopPropagation(); bar.setPointerCapture(e.pointerId); drag(e); });
+    bar.addEventListener('pointermove', e => { if (bar.hasPointerCapture(e.pointerId)) drag(e); });
+    bar.addEventListener('pointerup', () => { this.unlock(); this.pickup(); });
+    pop.addEventListener('pointerdown', e => e.stopPropagation());
+    document.addEventListener('pointerdown', () => pop.classList.add('hidden'));
+    show();
+  },
 
   unlock() {
     try {
@@ -962,7 +1000,7 @@ const Sfx = {
 
   tone(freq, dur, { type = 'sine', vol = 0.15, delay: wait = 0, to = null } = {}) {
     const ctx = this.ctx;
-    if (!ctx) return;
+    if (!ctx || this.vol === 0) return;
     const t0 = ctx.currentTime + wait;
     const osc = ctx.createOscillator(), gain = ctx.createGain();
     osc.type = type;
@@ -971,7 +1009,7 @@ const Sfx = {
     gain.gain.setValueAtTime(0.0001, t0);
     gain.gain.exponentialRampToValueAtTime(vol, t0 + 0.02);
     gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-    osc.connect(gain).connect(ctx.destination);
+    osc.connect(gain).connect(this.out());
     osc.start(t0);
     osc.stop(t0 + dur + 0.05);
   },
@@ -1006,9 +1044,15 @@ const Sfx = {
     gain.gain.setValueAtTime(0.0001, t0);
     gain.gain.exponentialRampToValueAtTime(CONFIG.STEP_VOL, t0 + 0.008);
     gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.07);
-    src.connect(low).connect(gain).connect(ctx.destination);
+    src.connect(low).connect(gain).connect(this.out());
     src.start(t0);
     src.stop(t0 + 0.09);
+  },
+  // 두둥! (게임 시작): 낮은 북 두 번 + 반짝 올라가는 소리
+  dudung() {
+    this.tone(110, 0.22, { type: 'square', to: 70, vol: 0.14 });
+    this.tone(82, 0.45, { type: 'square', to: 55, vol: 0.16, delay: 0.26 });
+    [523, 659, 784, 1047].forEach((f, i) => this.tone(f, 0.16, { type: 'triangle', vol: 0.08, delay: 0.62 + i * 0.06 }));
   },
   boss() { this.tone(110, 0.6, { type: 'sawtooth', to: 70, vol: 0.08 }); this.tone(147, 0.6, { type: 'sawtooth', to: 90, vol: 0.06, delay: 0.3 }); },
 };
@@ -1081,8 +1125,10 @@ const Speech = {
     return new Promise(resolve => {
       if (!('speechSynthesis' in window)) return resolve();
       if (speechSynthesis.speaking || speechSynthesis.pending) speechSynthesis.cancel();
+      if (Sfx.vol === 0) return resolve();
       const u = new SpeechSynthesisUtterance(text);
       u.lang = LANG_CODE[lang] || 'ko-KR';
+      u.volume = Math.min(1, 0.25 + Sfx.vol * 0.75);
       const voice = this.pickVoice(u.lang);
       if (voice) u.voice = voice;
       const natural = this.isNatural(voice);
@@ -2287,6 +2333,34 @@ const CRITTER_BY_EMOJI = { '🐉': 'dragon' };
 const Critter = {
   OL: '#3a2618',
 
+  // 그림 상자: 움직이면 걸음 8장, 가만히 있으면 숨쉬기 12장, 맞음/깜빡 1장씩 미리 그려 두고 쓴다 (그라데이션이 많아 매번 그리면 무겁다)
+  cache: new Map(),
+  drawCached(c, type, s, m, time) {
+    const tf = c.getTransform(), k = Math.round(Math.hypot(tf.a, tf.b) * 4) / 4;
+    const S = s, mv = (m.animMv || 0) > 0.35, hurt = m.hitT > 0;
+    const blink = !hurt && (time + m.phase * 3) % 4.2 < 0.12;
+    let frame, q;
+    if (hurt) { frame = 'h'; q = { animMv: 0, animT: 0, t: 0.3 }; }
+    else if (blink) { frame = 'b'; q = { animMv: 0, animT: 0, t: 0.05 }; }
+    else if (mv) { const f = ((Math.floor(((m.animT || 0) * 11 + m.phase) / (Math.PI / 4)) % 8) + 8) % 8; frame = 'w' + f; q = { animMv: 1, animT: (f * Math.PI / 4) / 11, t: f * 0.125 }; }
+    else { const f = Math.floor((time + m.phase) * 6) % 12; frame = 'i' + f; q = { animMv: 0, animT: 0, t: f / 6 }; }
+    const key = `${type}|${S}|${k}|${frame}`;
+    let bmp = this.cache.get(key);
+    if (!bmp) {
+      const px = Math.max(8, Math.ceil(S * 1.8 * k));
+      bmp = document.createElement('canvas');
+      bmp.width = bmp.height = px;
+      const g = bmp.getContext('2d');
+      g.setTransform(px / (S * 1.8), 0, 0, px / (S * 1.8), px / 2, px * (1.5 / 1.8));
+      // 맞음: hitT > 0, 깜빡: 시간으로 맞춘다 (phase 0 기준)
+      const fake = { def: m.def, phase: 0, animMv: q.animMv, animT: q.animT, hitT: hurt ? 1 : 0 };
+      this.draw(g, type, S, fake, blink ? 0.05 + 4.2 * 10 : q.t + 0.5);
+      if (this.cache.size > 900) this.cache.delete(this.cache.keys().next().value);
+      this.cache.set(key, bmp);
+    }
+    c.drawImage(bmp, -S * 0.9, -S * 1.5, S * 1.8, S * 1.8);
+  },
+
   // m: 몬스터 (움직임/맞음 상태). 원점 = 발바닥 가운데, s = 몸 크기 (월드 px)
   draw(c, type, s, m, time) {
     const spec = CRITTERS[type] || CRITTERS[CRITTER_BY_EMOJI[m.def.emoji]] || CRITTERS.bear;
@@ -2307,7 +2381,34 @@ const Critter = {
   sh(c, fill, fn, stroke = true) { c.beginPath(); fn(); if (fill) { c.fillStyle = fill; c.fill(); } if (stroke) c.stroke(); },
   el(c, x, y, rx, ry, rot = 0) { return () => c.ellipse(x, y, rx, ry, rot, 0, Math.PI * 2); },
   rr(c, x, y, w, h, r) { return () => c.roundRect(x, y, w, h, r); },
-  grad(c, x, y, r, c0, c1) { const g = c.createRadialGradient(x - r * 0.35, y - r * 0.45, r * 0.1, x, y, r * 1.05); g.addColorStop(0, c0); g.addColorStop(1, c1); return g; },
+  // 둥근 몸 칠: 왼쪽 위가 밝고, 가운데 본색, 가장자리/오른쪽 아래가 그늘 (입체감)
+  grad(c, x, y, r, c0, c1) {
+    const g = c.createRadialGradient(x - r * 0.38, y - r * 0.48, r * 0.05, x + r * 0.1, y + r * 0.05, r * 1.12);
+    g.addColorStop(0, shade(c1, 1.32));
+    g.addColorStop(0.35, c0);
+    g.addColorStop(0.72, c1);
+    g.addColorStop(1, shade(c1, 0.68));
+    return g;
+  },
+  // 반짝 윤기 (왼쪽 위)
+  gloss(c, x, y, r) {
+    c.save();
+    c.fillStyle = 'rgba(255,255,255,.42)';
+    c.beginPath(); c.ellipse(x - r * 0.42, y - r * 0.5, r * 0.32, r * 0.17, -0.6, 0, Math.PI * 2); c.fill();
+    c.fillStyle = 'rgba(255,255,255,.7)';
+    c.beginPath(); c.arc(x - r * 0.62, y - r * 0.38, r * 0.07, 0, Math.PI * 2); c.fill();
+    c.restore();
+  },
+  // 머리가 몸에 드리운 그늘
+  ao(c, x, y, rx, ry) {
+    c.save();
+    const g = c.createRadialGradient(x, y, 0, x, y, rx);
+    g.addColorStop(0, 'rgba(40,20,10,.32)');
+    g.addColorStop(1, 'rgba(40,20,10,0)');
+    c.fillStyle = g;
+    c.beginPath(); c.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2); c.fill();
+    c.restore();
+  },
 
   // 촉촉한 큰 눈 + 걱정스러운 눈썹 + 작은 입 + 볼터치. (cx, cy) = 두 눈 가운데, w = 눈 사이 거리, er = 눈 크기
   face(c, st, cx, cy, w, er, opt = {}) {
@@ -2376,7 +2477,7 @@ const Critter = {
     c.translate(0, -bob);
     c.rotate(S.hop ? -Math.sin(ph) * 0.12 * mv : -0.05 * mv); // 움직이면 앞으로 살짝 기운다
     // 뒤쪽 다리 (어둡게)
-    const leg = (x, lift, col) => this.sh(c, col, this.rr(c, x - 1.5 * slim, -5 + low + lift * -1, 3 * slim * chunky, 5 - low + lift * 0, 1.4));
+    const leg = (x, lift, col) => { const lg = c.createLinearGradient(x - 1.5, 0, x + 1.5, 0); lg.addColorStop(0, shade(col, 1.12)); lg.addColorStop(1, shade(col, 0.78)); this.sh(c, lg, this.rr(c, x - 1.5 * slim, -5 + low + lift * -1, 3 * slim * chunky, 5 - low + lift * 0, 1.4)); };
     if (!S.hop) { leg(6.5 - sw * 1.6, Math.max(0, -sw) * 2.4, shade(legC, 0.85)); leg(-0.5 + sw * 1.6, Math.max(0, sw) * 2.4, shade(legC, 0.85)); }
     // 꼬리
     this.tail(c, st, S, 9.5, -7 + low * 0.5);
@@ -2416,12 +2517,14 @@ const Critter = {
     const hx = -4.2, hy = -13.2 + low * 0.8 + nod, hr = 7.6 * (S.chunky ? 1.05 : 1);
     this.ears(c, st, S, hx, hy, hr, 'back');
     if (S.horns) this.horns(c, S, hx, hy, hr, 'back');
+    this.ao(c, hx + 2.5, by - bry * 0.55, hr * 1.05, hr * 0.55);
     const headC = S.face && !S.wool ? S.c : S.face || S.c;
     if (S.wool) this.sh(c, S.c, () => c.arc(hx + 1, hy - 2.5, hr * 0.85, 0, Math.PI * 2));
     this.sh(c, this.grad(c, hx, hy, hr, shade(headC, 1.12), headC), () => c.ellipse(hx, hy, hr, hr * 0.94, 0, 0, Math.PI * 2));
     if (S.wool) { for (const [dx, dy] of [[-3, -5.5], [0, -6.5], [3, -5.5]]) this.sh(c, S.c, () => c.arc(hx + dx, hy + dy, 2.4, 0, Math.PI * 2)); }
     if (S.face && !S.wool) this.sh(c, S.face, () => { c.ellipse(hx - 0.8, hy + 1, hr * 0.72, hr * 0.62, 0, 0, Math.PI * 2); }, false);
     if (S.stripes) { c.strokeStyle = S.stripes; c.lineWidth = 0.9; for (const d of [-1.5, 0, 1.5]) { c.beginPath(); c.moveTo(hx + d * 1.6, hy - hr + 0.5); c.lineTo(hx + d * 1.3, hy - hr + 2.6); c.stroke(); } c.strokeStyle = this.OL; c.lineWidth = st.lw; }
+    this.gloss(c, hx, hy, hr);
     this.ears(c, st, S, hx, hy, hr, 'front');
     if (S.horns) this.horns(c, S, hx, hy, hr, 'front');
     // 주둥이 + 얼굴
@@ -2537,7 +2640,9 @@ const Critter = {
     const hx = -3, hy = -14.5;
     if (S.comb) this.sh(c, S.comb, () => { c.arc(hx - 1, hy - 6, 1.6, 0, Math.PI * 2); c.moveTo(hx + 2.6, hy - 5.6); c.arc(hx + 1.2, hy - 5.8, 1.5, 0, Math.PI * 2); });
     if (S.crest) this.sh(c, S.crest, () => { c.moveTo(hx, hy - 5); c.quadraticCurveTo(hx + 1, hy - 9, hx + 4, hy - 8.5); c.quadraticCurveTo(hx + 2, hy - 7, hx + 2, hy - 4.5); c.closePath(); });
+    this.ao(c, hx + 2, hy + 5, 6.5, 3);
     this.sh(c, this.grad(c, hx, hy, 6.3, shade(S.head || S.c, 1.1), S.head || S.c), () => c.arc(hx, hy, 6.2, 0, Math.PI * 2));
+    this.gloss(c, hx, hy, 6.2);
     // 부리 (작고 둥근)
     this.sh(c, S.beak, () => { c.moveTo(hx - 4.6, hy + 0.6); c.quadraticCurveTo(hx - 8, hy + 1.6, hx - 4.4, hy + 3); c.closePath(); });
     if (S.comb) this.sh(c, S.comb, () => c.ellipse(hx - 4.2, hy + 4, 0.9, 1.4, 0, 0, Math.PI * 2));
@@ -2561,6 +2666,7 @@ const Critter = {
     if (S.stripes) { c.save(); c.beginPath(); c.ellipse(0, -9, 7.4, 7, 0, 0, Math.PI * 2); c.clip(); c.fillStyle = S.stripes; for (const sx of [1.5, 5]) c.fillRect(sx, -17, 1.8, 16); c.restore(); this.sh(c, null, () => c.ellipse(0, -9, 7.4, 7, 0, 0, Math.PI * 2)); }
     if (S.ear === 'pointy') for (const d of [-1, 1]) this.sh(c, S.c, () => { c.moveTo(d * 2 - 2, -14.5); c.lineTo(d * 3.5, -19); c.lineTo(d * 4.6 + 0.4, -14); c.closePath(); });
     if (S.antenna) { c.lineWidth = st.lw; for (const d of [-1, 1]) { c.beginPath(); c.moveTo(d * 1.5 - 1, -15.5); c.quadraticCurveTo(d * 2 - 1, -19, d * 3.5 - 1.5, -19.5); c.stroke(); this.sh(c, '#3e2723', () => c.arc(d * 3.5 - 1.5, -19.5, 0.9, 0, Math.PI * 2), false); } }
+    this.gloss(c, 0, -9, 7.2);
     this.face(c, st, -1.2, -9.5, 5.4, 1.75);
     c.restore();
   },
@@ -2582,6 +2688,7 @@ const Critter = {
     c.save(); c.translate(1, 1.5); c.rotate(0.5 + wag * 0.8);
     this.sh(c, S.fin, () => c.ellipse(1.8, 0, 2.6, 1.3, 0, 0, Math.PI * 2));
     c.restore();
+    this.gloss(c, 0, 0, Math.min(rx, ry));
     this.face(c, st, -3.6, -1, 4.6, 1.6, { mouthY: 1.9 });
     c.restore();
   },
@@ -2624,6 +2731,7 @@ const Critter = {
     if (S.kind === 'ant') for (const d of [-1, 1]) { c.beginPath(); c.moveTo(hx + d * 1.6, hy - hr + 0.8); c.quadraticCurveTo(hx + d * 2.6 - 1, hy - hr - 3.5, hx + d * 4 - 2, hy - hr - 3.6); c.stroke(); }
     if (S.kind === 'crab') for (const d of [-1, 1]) { c.beginPath(); c.moveTo(hx + d * 2.6, hy - hr + 1.5); c.lineTo(hx + d * 3, hy - hr - 2); c.stroke(); this.sh(c, '#ffffff', () => c.arc(hx + d * 3, hy - hr - 2.6, 1.4, 0, Math.PI * 2)); }
     this.sh(c, this.grad(c, hx, hy, hr, shade(S.c, 1.15), S.c), () => c.ellipse(hx, hy, hr, hr * (S.kind === 'crab' ? 0.75 : 0.92), 0, 0, Math.PI * 2));
+    this.gloss(c, hx, hy, hr);
     if (S.kind === 'spider') { c.fillStyle = 'rgba(255,255,255,.5)'; c.beginPath(); c.arc(hx + 3, hy - 4, 0.6, 0, Math.PI * 2); c.arc(hx - 0.5, hy - 4.6, 0.6, 0, Math.PI * 2); c.fill(); }
     this.face(c, st, hx - (S.kind === 'crab' ? 0 : 0.8), hy, 5, 1.65);
     c.restore();
@@ -2640,7 +2748,8 @@ const Critter = {
     }
     // 몸통: 굵은 선 (테두리 → 색 → 배)
     const stroke = (col, wd) => { c.strokeStyle = col; c.lineWidth = wd; c.beginPath(); c.moveTo(pts[0][0], pts[0][1]); for (const [x, y] of pts.slice(1)) c.lineTo(x, y); c.stroke(); };
-    stroke(this.OL, 6.4); stroke(S.c, 4.6);
+    stroke(this.OL, 6.4); stroke(shade(S.c, 0.8), 4.6);
+    c.save(); c.translate(0, -0.9); stroke(S.c, 2.8); c.translate(0, -0.6); stroke(shade(S.c, 1.25), 1); c.restore();
     c.strokeStyle = S.belly; c.lineWidth = 1.6; c.beginPath(); c.moveTo(pts[0][0], pts[0][1] + 1.2); for (const [x, y] of pts.slice(1, 8)) c.lineTo(x, y + 1.2); c.stroke();
     if (!S.legs) { c.fillStyle = shade(S.c, 0.78); for (const i of [3, 6, 9]) { c.beginPath(); c.arc(pts[i][0], pts[i][1] - 0.8, 0.9, 0, Math.PI * 2); c.fill(); } }
     c.strokeStyle = this.OL; c.lineWidth = st.lw;
@@ -2648,6 +2757,7 @@ const Critter = {
     const hx = -3, hy = -8.5 + Math.sin(w) * 0.5;
     if (!S.legs && Math.sin(st.time * 2.3) > 0.6) { c.strokeStyle = '#e53935'; c.lineWidth = 0.7; c.beginPath(); c.moveTo(hx - 6.5, hy + 2.5); c.lineTo(hx - 9, hy + 2.8); c.lineTo(hx - 9.8, hy + 2); c.moveTo(hx - 9, hy + 2.8); c.lineTo(hx - 9.8, hy + 3.6); c.stroke(); c.strokeStyle = this.OL; c.lineWidth = st.lw; }
     this.sh(c, this.grad(c, hx, hy, 6.4, shade(S.c, 1.15), S.c), () => c.ellipse(hx, hy, 6.6, 6, 0, 0, Math.PI * 2));
+    this.gloss(c, hx, hy, 6.4);
     this.face(c, st, hx - 0.8, hy - 0.5, 5, 1.7);
   },
 
@@ -2673,6 +2783,7 @@ const Critter = {
     this.sh(c, shade(S.shell, 0.8), () => c.roundRect(-7, -5, 18, 1.8, 0.9));
     const hx = -8.5, hy = -8 + Math.sin(st.ph) * 0.4 * st.mv;
     this.sh(c, this.grad(c, hx, hy, 5.6, shade(S.c, 1.15), S.c), () => c.ellipse(hx, hy, 5.6, 5.2, 0, 0, Math.PI * 2));
+    this.gloss(c, hx, hy, 5.6);
     this.face(c, st, hx - 0.6, hy - 0.4, 4.4, 1.5);
   },
 
@@ -2684,7 +2795,7 @@ const Critter = {
       this.sh(c, shade(S.c, i % 2 ? 0.9 : 1), () => { c.moveTo(x - 1.4, -6); c.quadraticCurveTo(x - 1.2 + w, -2, x + w * 1.4, -0.4); c.quadraticCurveTo(x + 1.4 + w, -2, x + 1.4, -6); c.closePath(); });
     }
     this.sh(c, this.grad(c, 0, -12, 8.5, shade(S.c, 1.12), S.c), () => c.ellipse(0, -12, 8.6, 8, 0, 0, Math.PI * 2));
-    c.fillStyle = 'rgba(255,255,255,.35)'; c.beginPath(); c.arc(3.5, -16, 1.2, 0, Math.PI * 2); c.arc(5.5, -13.5, 0.7, 0, Math.PI * 2); c.fill();
+    this.gloss(c, 0, -12, 8.4);
     this.face(c, st, -1, -10.5, 5.6, 1.8);
     c.restore();
   },
@@ -2697,6 +2808,8 @@ const Critter = {
       for (let i = 0; i < 4; i++) { const x0 = 8 - i * 4; c.quadraticCurveTo(x0 - 1, 1 + Math.sin(t + i) * 1.2, x0 - 2, -1); c.quadraticCurveTo(x0 - 3, -3, x0 - 4, -1.5); }
       c.closePath();
     });
+    c.save(); c.clip(); const gg = c.createLinearGradient(-6, -18, 6, 2); gg.addColorStop(0, 'rgba(255,255,255,0)'); gg.addColorStop(1, 'rgba(120,140,200,.35)'); c.fillStyle = gg; c.fillRect(-12, -22, 24, 26); c.restore();
+    this.gloss(c, 0, -11, 8);
     for (const d of [-1, 1]) this.sh(c, '#ffffff', () => c.ellipse(d * 8.4, -7 + Math.sin(t + d) * 0.6, 1.8, 1.3, d * 0.4, 0, Math.PI * 2));
     this.face(c, st, -1, -11, 5.4, 1.8);
     c.restore();
@@ -4752,7 +4865,7 @@ const Monsters = {
     this.spawn('boss', far);
     const { main } = itemNames(BOSS);
     console.log('[Monsters] 보스 등장');
-    if (World.stageAtPx(Player.x, Player.y) !== 0) return; // 1탄 용 알림은 1탄에 있는 사람만
+    if (World.stageAtPx(Player.x, Player.y) !== 0 || Game.quiet()) return; // 1탄 용 알림은 1탄에 있는 사람만 (들어온 직후는 조용히)
     Sfx.boss();
     toast(`${BOSS.emoji} ${main}!`);
     if (Store.settings.lang === 'en') Speech.speak(`A ${BOSS.en}!`, 'en');
@@ -4786,7 +4899,7 @@ const Monsters = {
 
   announceBoss(type) {
     const def = MONSTERS[type] || BOSS;
-    if (World.stageAtPx(Player.x, Player.y) !== (def === BOSS ? 0 : 1)) return; // 그 탄에 있는 사람만
+    if (World.stageAtPx(Player.x, Player.y) !== (def === BOSS ? 0 : 1) || Game.quiet()) return; // 그 탄에 있는 사람만 (들어온 직후는 조용히)
     Sfx.boss();
     toast(`${def.emoji} ${itemNames(def).main}!`);
     if (Store.settings.lang === 'en') Speech.speak(`A ${def.en}!`, 'en');
@@ -6189,6 +6302,7 @@ const Input = {
     zone.addEventListener('lostpointercapture', end);
 
     $('#btn-action').addEventListener('pointerdown', e => { e.preventDefault(); Game.onAction(); });
+    $('#btn-weapon').addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); if (Game.state === 'play') Game.pouchTap(0); }); // 무기 바꾸기 (주머니 1번과 같다)
     $('#btn-jump').addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); Social.jump(); });
     $('#btn-talk').addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); Game.toggleTalk(); });
     $('#chat-box').addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); if (!Game.talkOpen) Game.toggleTalk(); });
@@ -6309,13 +6423,13 @@ const Render = {
     main.imageSmoothingEnabled = false;
     main.setTransform(s, 0, 0, s, (ox - this.camX) * s, (oy - this.camY) * s);
     main.drawImage(lo, 0, 0);
-    this.drawGrade(main, this.canvas.width, this.canvas.height);
     main.imageSmoothingEnabled = true;
     main.setTransform(s, 0, 0, s, -this.camX * s, -this.camY * s);
     // 캐릭터/몬스터: 화면 해상도로 (그린 순서 = 앞뒤 순서)
     const hdList = this.hdList;
     this.hdList = null;
     for (const fn of hdList) { main.save(); fn(main); main.restore(); }
+    this.drawGrade(main, this.canvas.width, this.canvas.height); // 땅과 같은 빛이 캐릭터에도
     this.drawVignette(main);
     main.setTransform(s, 0, 0, s, -this.camX * s, -this.camY * s);
     const later = this.deferred;
@@ -6406,7 +6520,9 @@ const Render = {
 
     // y 순서대로 그려서 앞뒤가 자연스럽게
     const drawables = Items.list.filter(it => !Items.pending.has(it.id)).map(it => ({ y: it.y, draw: () => this.drawItem(it, time) }));
-    for (const m of Monsters.list) drawables.push({ y: m.y, draw: () => this.drawMonster(m, time) });
+    // 화면 안(조금 넉넉히)의 몬스터만 그린다
+    const vx0 = this.camX - 80, vx1 = this.camX + viewW + 80, vy0 = this.camY - 80, vy1 = this.camY + viewH + 120;
+    for (const m of Monsters.list) if (m.x > vx0 && m.x < vx1 && m.y > vy0 && m.y < vy1) drawables.push({ y: m.y, draw: () => this.drawMonster(m, time) });
     const peers = Multi.visiblePeers(), showHearts = Multi.online;
     const myWear = wornList(Game.equip);
     drawables.push({ y: Player.y, draw: () => this.drawCharacter(Player, Multi.myLook(), Game.held, Game.playerName, true, showHearts ? Game.hearts : null, myWear) });
@@ -6650,7 +6766,7 @@ const Render = {
         c.scale(1 / squash, squash);
         if (m.def.ghost) { c.globalAlpha = 0.78; c.translate(0, Math.sin(time * 2.5 + m.phase) * 3 - 3); }
         if (m.hitT > 0 && Math.floor(m.hitT * 20) % 2) c.globalAlpha *= 0.55;
-        Critter.draw(c, m.type, s * 1.12, m, time);
+        Critter.drawCached(c, m.type, s * 1.12, m, time);
         return;
       }
       c.translate(m.x, m.y - s * 0.15 + bob + s * 0.45);
@@ -6975,6 +7091,8 @@ const Render = {
     const rr = (x0, y0, w, h, r) => () => c.roundRect(x0, y0, w, h, r);
     const ell = (cx, cy, rx, ry) => () => c.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
     const hy = -21.5 - bob; // 머리 가운데
+    // 빛은 왼쪽 위에서: 가로로 밝음 → 그늘
+    const lit = (fill, x0, x1, k0 = 1.18, k1 = 0.74) => { const g = c.createLinearGradient(x0, 0, x1, 0); g.addColorStop(0, shade(fill, k0)); g.addColorStop(0.45, fill); g.addColorStop(1, shade(fill, k1)); return g; };
 
     // 긴 머리 / 양갈래: 몸 뒤에
     if (style === 'long' && !side && !back) shape(HAIR_D, () => c.roundRect(-9.2, hy - 2, 18.4, 13.5, [4, 4, 5, 5]));
@@ -6986,15 +7104,17 @@ const Render = {
 
     // 다리 + 신발 (걸으면 번갈아)
     const leg = (lx, lift, dx = 0) => {
-      shape(PANTS, rr(lx + dx, -7.5 - bob * 0.3 - lift, 3.6, 6.2, 1.2));
-      shape(SHOE, ell(lx + 1.8 + dx - (side ? 0.8 : 0), -1.4 - lift, side ? 2.8 : 2.2, 1.5));
+      shape(lit(PANTS, lx + dx, lx + dx + 3.6), rr(lx + dx, -7.5 - bob * 0.3 - lift, 3.6, 6.2, 1.2));
+      const sg = c.createLinearGradient(0, -3 - lift, 0, -lift);
+      sg.addColorStop(0, shade(SHOE, 1.35)); sg.addColorStop(1, shade(SHOE, 0.8));
+      shape(sg, ell(lx + 1.8 + dx - (side ? 0.8 : 0), -1.4 - lift, side ? 2.8 : 2.2, 1.5));
     };
     if (side) { leg(-1.6, Math.max(0, -walk) * 1.2, walk * 1.6); leg(-2.2, Math.max(0, walk) * 1.2, -walk * 1.6); }
     else { leg(-4.3, Math.max(0, walk) * 1.3); leg(0.7, Math.max(0, -walk) * 1.3); }
 
     // 팔 (뒤쪽)
     const arm = (ax, swing) => {
-      shape(BODY_D, rr(ax - 1.4, -14.5 - bob + swing, 2.8, 6.5, 1.4));
+      shape(lit(BODY_D, ax - 1.4, ax + 1.4, 1.2, 0.78), rr(ax - 1.4, -14.5 - bob + swing, 2.8, 6.5, 1.4));
       shape(SKIN, ell(ax, -8 - bob + swing, 1.5, 1.4));
     };
     if (!side) { arm(-6.6, walk * 1.1); arm(6.6, -walk * 1.1); }
@@ -7003,11 +7123,18 @@ const Render = {
     const bw = side ? 9 : 11;
     c.beginPath();
     c.roundRect(-bw / 2, -15.5 - bob, bw, 10.5, [3.5, 3.5, 2.5, 2.5]);
-    const g = c.createLinearGradient(0, -15.5 - bob, 0, -5 - bob);
-    g.addColorStop(0, col(shade(vest ? '#a8723f' : look.shirt, 1.18)));
-    g.addColorStop(1, BODY);
+    const g = c.createLinearGradient(-bw / 2, -15.5 - bob, bw / 2, -5 - bob);
+    g.addColorStop(0, col(shade(vest ? '#a8723f' : look.shirt, 1.25)));
+    g.addColorStop(0.45, BODY);
+    g.addColorStop(1, col(shade(vest ? '#a8723f' : look.shirt, 0.7)));
     c.fillStyle = g;
     c.fill();
+    // 머리가 드리운 그늘 (목 아래)
+    c.save(); c.clip();
+    const ns = c.createRadialGradient(0.5, -15.8 - bob, 0, 0.5, -15.8 - bob, 7);
+    ns.addColorStop(0, 'rgba(50,20,10,.38)'); ns.addColorStop(1, 'rgba(50,20,10,0)');
+    c.fillStyle = ns; c.fillRect(-8, -17 - bob, 16, 8);
+    c.restore();
     c.stroke();
     if (vest && !back) { c.fillStyle = SHIRT; c.fillRect(side ? -3.5 : -1.2, -15 - bob, 2.4, 9.5); }
     if (!back && !vest) { // 옷깃
@@ -7024,15 +7151,21 @@ const Render = {
     // 머리 (살짝 넓은 둥근 얼굴)
     c.beginPath();
     c.ellipse(0, hy, 9.2, 8.6, 0, 0, Math.PI * 2);
-    const sk = c.createRadialGradient(-2.5, hy - 3, 1, 0, hy, 10);
-    sk.addColorStop(0, col('#ffe7d1'));
-    sk.addColorStop(1, SKIN);
+    const sk = c.createRadialGradient(-3, hy - 3.5, 0.5, 0.8, hy + 0.5, 10.2);
+    sk.addColorStop(0, col('#fff3e6'));
+    sk.addColorStop(0.45, SKIN);
+    sk.addColorStop(0.85, SKIN_D);
+    sk.addColorStop(1, col('#d99a74'));
     c.fillStyle = sk;
     c.fill();
     c.stroke();
 
-    // 머리카락
-    c.fillStyle = HAIR;
+    // 머리카락 (위가 밝고 아래가 진하게)
+    const hg = c.createLinearGradient(-6, hy - 10, 6, hy + 4);
+    hg.addColorStop(0, col(shade(look.hair, 1.3)));
+    hg.addColorStop(0.5, HAIR);
+    hg.addColorStop(1, HAIR_D);
+    c.fillStyle = hg;
     c.beginPath();
     if (back) {
       c.ellipse(0, hy - 0.3, 9.6, 8.9, 0, 0, Math.PI * 2);
@@ -7058,6 +7191,19 @@ const Render = {
     }
     c.fill();
     c.stroke();
+    // 앞머리가 이마에 드리운 그늘
+    if (!back) {
+      c.save();
+      c.beginPath(); c.ellipse(0, hy, 9.2, 8.6, 0, 0, Math.PI * 2); c.clip();
+      const fs = c.createLinearGradient(0, hy - 3, 0, hy + 0.5);
+      fs.addColorStop(0, 'rgba(120,50,20,.3)'); fs.addColorStop(1, 'rgba(120,50,20,0)');
+      c.fillStyle = fs;
+      c.beginPath();
+      if (side) { c.moveTo(-9, hy - 3.2); c.quadraticCurveTo(-5.5, hy - 0.8, -3, hy - 3); c.quadraticCurveTo(-1.5, hy - 0.4, 2, hy - 1.4); c.lineTo(2, hy + 1); c.lineTo(-9, hy + 1); }
+      else { c.moveTo(-9.6, hy - 2); c.quadraticCurveTo(-5.4, hy + 0.2, -3.6, hy - 2); c.quadraticCurveTo(-1.6, hy, 0.4, hy - 2.4); c.quadraticCurveTo(2.2, hy - 0.2, 4.2, hy - 2); c.quadraticCurveTo(5.8, hy + 0.1, 9.6, hy - 1); c.lineTo(9.6, hy + 1.2); c.lineTo(-9.6, hy + 1.2); }
+      c.fill();
+      c.restore();
+    }
     // 머리 윤기 (반달 하이라이트)
     c.strokeStyle = HAIR_L;
     c.lineWidth = 1.1;
@@ -7101,6 +7247,8 @@ const Render = {
       }
       c.strokeStyle = OL;
       c.lineWidth = 0.9;
+      c.fillStyle = 'rgba(255,255,255,.55)';
+      c.beginPath(); c.ellipse(side ? -6.4 : -6, hy + 1.8, 0.9, 0.5, -0.3, 0, Math.PI * 2); c.fill();
     }
     this.drawChibiHat(c, hat, hy, side, back, col, OL);
     c.restore();
@@ -7334,6 +7482,7 @@ const Game = {
     this.initHome();
     this.initBuddy();
     Social.initVoice();
+    Sfx.initVolume();
     Social.initWords();
     this.autoResume();
   },
@@ -7395,6 +7544,9 @@ const Game = {
     this.renderHearts();
     this.state = 'play';
     this.playAt = performance.now(); // 들어온 직전에 받은 칸 변화는 알리지 않는다
+    // 두둥! 바로 시작
+    Sfx.dudung();
+    Render.shake(0.3, 3);
   },
 
   // 캐릭터 이름: 머리 위에 보인다. 이 탭(새로고침해도 그대로)과 이 기기(새 탭의 처음 이름)에 저장
@@ -7910,7 +8062,7 @@ const Game = {
 
   // 1탄 용을 잡아서 테두리 나무 하나가 ✨ 황금 나무가 됐다 (모든 기기)
   onGateGold(x, y) {
-    if (this.state === 'title' || this.state === 'loading' || performance.now() - (this.playAt || 0) < 4000) return;
+    if (this.quiet()) return;
     Sfx.success();
     const gi = (World.stageGates || []).findIndex(g => g.x === x && g.y === y);
     toast(`✨🌳 → ${['🍀', '🧭', '🌴', '🏔️', '🌊'][gi] || '🍀'}`);
@@ -7920,7 +8072,7 @@ const Game = {
 
   // 황금 나무를 캐서 다음 탄 길이 열렸다 (모든 기기)
   onGateOpen(x, y) {
-    if (this.state === 'title' || this.state === 'loading' || performance.now() - (this.playAt || 0) < 4000) return;
+    if (this.quiet()) return;
     for (let i = 0; i < 6; i++) Floaters.add(x * T + T / 2 + randFloat(-16, 16), y * T + randFloat(-10, 10), '✨', 16);
     // 몇 번째 문인지 → 열린 탄 (문 0 = 2탄, 1 = 3탄, 2 = 4탄 ...)
     const gi = Math.max(0, (World.stageGates || []).findIndex(g => g.x === x && g.y === y)), n = gi + 2;
@@ -7930,8 +8082,14 @@ const Game = {
     else Speech.speak(`${n}탄 ${names[1]}${josa(names[1], '이', '가')} 열렸어요!${n === 3 || n === 4 ? ' 금 간 벽은 부술 수 있어요!' : n === 5 ? ' 낭떠러지에 다리를 놓아서 건널 수 있어요!' : n === 6 ? ' 바다에 다리를 놓아서 건너요!' : ''}`, 'ko');
   },
 
+  // 들어온 직후(10초)에는 탄 열림/클리어/보스 같은 안내를 하지 않는다: 이미 지난 일을 서버에서 받아도 조용히 바로 시작
+  quiet() {
+    return this.state === 'title' || this.state === 'loading' || this.state === 'starting' || performance.now() - (this.playAt || 0) < 10000;
+  },
+
   // 그 탄의 보스를 잡았다 (모든 기기)
   onStageClear(n) {
+    if (this.quiet()) return;
     Sfx.success();
     toast(`🎉 ${n}탄 클리어!`);
     if (Store.settings.lang === 'en') Speech.speak(`Stage ${n} clear!`, 'en');
@@ -8772,6 +8930,8 @@ const Game = {
   // 손에 든 것이 바뀌거나 가방이 바뀌면: ✋ 버튼 그림, 아래 주머니 4칸, (열려 있으면) 가방
   renderInventory(bumpType) {
     $('#btn-action').innerHTML = iconHtml(WEAPONS[this.held] || ITEMS[this.held]);
+    const w = this.pouchShow('weapon'), wb = $('#btn-weapon');
+    if (wb) { wb.innerHTML = w ? iconHtml(WEAPONS[w]) : '⚔️'; wb.classList.toggle('on', pouchOf(this.held) === 'weapon'); }
     this.renderPouch(bumpType);
     if (this.bagOpen) this.renderBag();
   },
@@ -8844,14 +9004,14 @@ const Social = {
     const btn = $('#btn-voice');
     const show = () => {
       btn.classList.toggle('on', this.voiceOn);
-      btn.innerHTML = `${this.voiceOn ? '🔊' : '🔇'}<span>${tr('음성', 'Voice')} ${this.voiceOn ? 'ON' : 'OFF'}</span>`;
+      btn.innerHTML = `${this.voiceOn ? '🗣️' : '🤐'}<span>${tr('음성', 'Voice')} ${this.voiceOn ? 'ON' : 'OFF'}</span>`;
     };
     btn.addEventListener('click', () => {
       this.voiceOn = !this.voiceOn;
       Store.set('bc.sayVoice', this.voiceOn);
       if (!this.voiceOn) window.speechSynthesis?.cancel(); // 읽던 것도 멈춘다
       show();
-      toast(this.voiceOn ? '🔊 ON' : '🔇 OFF');
+      toast(this.voiceOn ? '🗣️ ON' : '🤐 OFF');
     });
     show();
   },

@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Color+Emoji&display=swap&text=%F0%9F%AA%B5%F0%9F%AA%A8%F0%9F%AA%93%F0%9F%9F%AB%F0%9F%A4%8D%F0%9F%A6%9B%F0%9F%A6%98%F0%9F%A7%B1%F0%9F%A7%B5%F0%9F%9B%A1%F0%9F%A6%94%F0%9F%A5%A9">
   <!-- 시작 화면 로고용 픽셀 글꼴 (로고 글자만 받는다) -->
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap&text=BABYCRAFT">
-  <link rel="stylesheet" href="style.css?v=50">
+  <link rel="stylesheet" href="style.css?v=52">
 </head>
 <body>
   <canvas id="game"></canvas>
@@ -30,8 +30,16 @@
     <button id="btn-home" class="home-btn" aria-label="home">🏠</button>
     <div id="room-badge" class="room-badge hidden"></div>
     <button id="btn-buddy" class="home-btn buddy-btn" aria-label="play buddy">🤝<span>놀아주기</span></button>
-    <button id="btn-voice" class="home-btn voice-btn on" aria-label="read chat aloud">🔊<span>음성 ON</span></button>
+    <button id="btn-voice" class="home-btn voice-btn on" aria-label="read chat aloud">🗣️<span>음성 ON</span></button>
     <button id="btn-words" class="home-btn voice-btn on" aria-label="word cards on/off">📖<span>단어 ON</span></button>
+    <button id="btn-volume" class="home-btn voice-btn vol-btn" aria-label="volume">🔉<span>소리</span></button>
+  </div>
+  <!-- 🔉 소리 크기: - 막대 + -->
+  <div id="volume-pop" class="volume-pop hidden">
+    <button class="vol-down" aria-label="quieter">🔈</button>
+    <div class="vol-bar"><div class="vol-fill"></div></div>
+    <button class="vol-up" aria-label="louder">🔊</button>
+    <b class="vol-num"></b>
   </div>
 
   <!-- 🏠 를 눌렀을 때 한 번 묻기 -->
@@ -69,6 +77,7 @@
     <div id="joystick-zone">
       <div id="joy-base"><div id="joy-knob"></div></div>
     </div>
+    <button id="btn-weapon" class="big-btn" aria-label="change weapon">⚔️</button>
     <button id="btn-action" class="big-btn" aria-label="action">✋</button>
     <div id="pouch" class="pouch"></div>
     <button id="btn-jump" class="big-btn side-btn" aria-label="jump">🦘</button>
@@ -154,6 +163,6 @@
       });
     }
   </script>
-  <script src="game.js?v=113"></script>
+  <script src="game.js?v=118"></script>
 </body>
 </html>
