@@ -325,6 +325,12 @@ function josa(word, withBatchim, without) {
 
 // 색 밝기: k < 1 이면 어둡게 (곱하기), k > 1 이면 흰색 쪽으로 (#rgb / #rrggbb). 같은 색은 한 번만 계산
 const shadeCache = new Map();
+// 테두리 색: 칠한 색(또는 그라데이션의 바탕색)보다 진한 같은 계열. 모르는 색이면 부드러운 진갈색
+function inkOf(fill, k = 0.52) {
+  const base = typeof fill === 'string' ? fill : fill && fill._base;
+  return base && /^#[0-9a-f]{3,6}$/i.test(base) ? shade(base, k) : '#5a4032';
+}
+
 function shade(hex, k) {
   const key = hex + k;
   if (shadeCache.has(key)) return shadeCache.get(key);
@@ -381,7 +387,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 118;
+const GAME_V = 119;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -2331,7 +2337,7 @@ const CRITTERS = {
 const CRITTER_BY_EMOJI = { '🐉': 'dragon' };
 
 const Critter = {
-  OL: '#3a2618',
+  OL: '#5a4032',
 
   // 그림 상자: 움직이면 걸음 8장, 가만히 있으면 숨쉬기 12장, 맞음/깜빡 1장씩 미리 그려 두고 쓴다 (그라데이션이 많아 매번 그리면 무겁다)
   cache: new Map(),
@@ -2369,7 +2375,7 @@ const Critter = {
     c.scale(k, k);
     c.lineJoin = 'round';
     c.lineCap = 'round';
-    c.lineWidth = Math.max(0.85, k * 0.55) / k;
+    c.lineWidth = Math.max(0.5, k * 0.36) / k;
     c.strokeStyle = this.OL;
     const mv = m.animMv || 0, ph = (m.animT || 0) * 11 + m.phase;
     const st = { spec, mv, ph, time, hurt: m.hitT > 0, blink: (time + m.phase * 3) % 4.2 < 0.12, lw: c.lineWidth };
@@ -2378,7 +2384,21 @@ const Critter = {
   },
 
   // ---------- 그리기 도구 ----------
-  sh(c, fill, fn, stroke = true) { c.beginPath(); fn(); if (fill) { c.fillStyle = fill; c.fill(); } if (stroke) c.stroke(); },
+  // 테두리는 칠한 색의 진한 색: 빛 받는 왼쪽 위는 옅게, 그늘진 오른쪽 아래는 진하게
+  sh(c, fill, fn, stroke = true) {
+    c.beginPath(); fn();
+    if (fill) { c.fillStyle = fill; c.fill(); }
+    if (!stroke) return;
+    const base = typeof fill === 'string' ? fill : fill && fill._base;
+    if (base && /^#[0-9a-f]{3,6}$/i.test(base)) {
+      const g = c.createLinearGradient(-10, -24, 10, 2);
+      g.addColorStop(0, shade(base, 0.66));
+      g.addColorStop(1, shade(base, 0.4));
+      c.strokeStyle = g;
+    }
+    c.stroke();
+    c.strokeStyle = this.OL;
+  },
   el(c, x, y, rx, ry, rot = 0) { return () => c.ellipse(x, y, rx, ry, rot, 0, Math.PI * 2); },
   rr(c, x, y, w, h, r) { return () => c.roundRect(x, y, w, h, r); },
   // 둥근 몸 칠: 왼쪽 위가 밝고, 가운데 본색, 가장자리/오른쪽 아래가 그늘 (입체감)
@@ -2388,6 +2408,7 @@ const Critter = {
     g.addColorStop(0.35, c0);
     g.addColorStop(0.72, c1);
     g.addColorStop(1, shade(c1, 0.68));
+    g._base = c1;
     return g;
   },
   // 반짝 윤기 (왼쪽 위)
@@ -2606,12 +2627,12 @@ const Critter = {
         break;
       case 'pom': this.sh(c, col, () => c.arc(0.8, -0.6, 2.1, 0, Math.PI * 2)); break;
       case 'thin': case 'long':
-        c.strokeStyle = this.OL; c.lineWidth = 2.6; c.beginPath(); c.moveTo(0, 0); c.quadraticCurveTo(4, -1, 5.5, -4.5); c.stroke();
+        c.strokeStyle = shade(col, 0.5); c.lineWidth = 2.2; c.beginPath(); c.moveTo(0, 0); c.quadraticCurveTo(4, -1, 5.5, -4.5); c.stroke();
         c.strokeStyle = col; c.lineWidth = 1.3; c.beginPath(); c.moveTo(0, 0); c.quadraticCurveTo(4, -1, 5.5, -4.5); c.stroke();
         if (S.stripes || S.spots) this.sh(c, S.stripes || S.spots, () => c.arc(5.5, -4.5, 1, 0, Math.PI * 2), false);
         break;
-      case 'curl': c.strokeStyle = this.OL; c.lineWidth = 2.2; c.beginPath(); c.arc(2, -1, 1.6, Math.PI, Math.PI * 2.6); c.stroke(); c.strokeStyle = col; c.lineWidth = 1; c.beginPath(); c.arc(2, -1, 1.6, Math.PI, Math.PI * 2.6); c.stroke(); break;
-      case 'curlLong': c.strokeStyle = this.OL; c.lineWidth = 2.4; c.beginPath(); c.moveTo(0, 0); c.quadraticCurveTo(6, 0, 6, -5); c.arc(4.5, -5, 1.5, 0, Math.PI * 1.3, true); c.stroke(); c.strokeStyle = col; c.lineWidth = 1.1; c.beginPath(); c.moveTo(0, 0); c.quadraticCurveTo(6, 0, 6, -5); c.arc(4.5, -5, 1.5, 0, Math.PI * 1.3, true); c.stroke(); break;
+      case 'curl': c.strokeStyle = shade(col, 0.5); c.lineWidth = 1.8; c.beginPath(); c.arc(2, -1, 1.6, Math.PI, Math.PI * 2.6); c.stroke(); c.strokeStyle = col; c.lineWidth = 1; c.beginPath(); c.arc(2, -1, 1.6, Math.PI, Math.PI * 2.6); c.stroke(); break;
+      case 'curlLong': c.strokeStyle = shade(col, 0.5); c.lineWidth = 2; c.beginPath(); c.moveTo(0, 0); c.quadraticCurveTo(6, 0, 6, -5); c.arc(4.5, -5, 1.5, 0, Math.PI * 1.3, true); c.stroke(); c.strokeStyle = col; c.lineWidth = 1.1; c.beginPath(); c.moveTo(0, 0); c.quadraticCurveTo(6, 0, 6, -5); c.arc(4.5, -5, 1.5, 0, Math.PI * 1.3, true); c.stroke(); break;
       case 'dragon': this.sh(c, col, () => { c.moveTo(-1, -2); c.quadraticCurveTo(5, -1, 7, -5); c.lineTo(8.5, -3.5); c.quadraticCurveTo(6, 1.5, -1, 2); c.closePath(); }); this.sh(c, S.backSpikes, () => { c.moveTo(6.6, -4.6); c.lineTo(9.2, -6.4); c.lineTo(8.6, -3.4); c.closePath(); }); break;
       default: break;
     }
@@ -2701,7 +2722,7 @@ const Critter = {
     c.lineWidth = 1.4;
     for (let i = 0; i < half; i++) for (const d of [-1, 1]) {
       const bx = -3 + i * (8 / Math.max(1, half - 1)), w = Math.sin(wig + i * 1.6 + (d > 0 ? Math.PI : 0)) * 1.2;
-      c.strokeStyle = this.OL; c.lineWidth = 2.2;
+      c.strokeStyle = shade(S.c, 0.5); c.lineWidth = 1.9;
       c.beginPath(); c.moveTo(bx, -5); c.quadraticCurveTo(bx + d * 3 + w, -8.5 + (d > 0 ? 0.5 : 0), bx + d * 4.2 + w, -0.4); c.stroke();
       c.strokeStyle = shade(S.c, 0.85); c.lineWidth = 1;
       c.beginPath(); c.moveTo(bx, -5); c.quadraticCurveTo(bx + d * 3 + w, -8.5 + (d > 0 ? 0.5 : 0), bx + d * 4.2 + w, -0.4); c.stroke();
@@ -2748,7 +2769,7 @@ const Critter = {
     }
     // 몸통: 굵은 선 (테두리 → 색 → 배)
     const stroke = (col, wd) => { c.strokeStyle = col; c.lineWidth = wd; c.beginPath(); c.moveTo(pts[0][0], pts[0][1]); for (const [x, y] of pts.slice(1)) c.lineTo(x, y); c.stroke(); };
-    stroke(this.OL, 6.4); stroke(shade(S.c, 0.8), 4.6);
+    stroke(shade(S.c, 0.45), 5.8); stroke(shade(S.c, 0.8), 4.6);
     c.save(); c.translate(0, -0.9); stroke(S.c, 2.8); c.translate(0, -0.6); stroke(shade(S.c, 1.25), 1); c.restore();
     c.strokeStyle = S.belly; c.lineWidth = 1.6; c.beginPath(); c.moveTo(pts[0][0], pts[0][1] + 1.2); for (const [x, y] of pts.slice(1, 8)) c.lineTo(x, y + 1.2); c.stroke();
     if (!S.legs) { c.fillStyle = shade(S.c, 0.78); for (const i of [3, 6, 9]) { c.beginPath(); c.arc(pts[i][0], pts[i][1] - 0.8, 0.9, 0, Math.PI * 2); c.fill(); } }
@@ -4193,19 +4214,19 @@ const World = {
   drawTileHD(g, x, y, type, region, bare = false) {
     const gr = GROUND[region] || GROUND.DEFAULT;
     const X = x * T, Y = y * T;
-    const OL = '#3a2618';
+    const OL = '#5a4032';
     const r = k => hash(x, y, k);
     const nb = (dx, dy) => (bare ? null : this.tile(x + dx, y + dy));
-    const path = (fill, fn, stroke = OL, lw = 1.1) => {
+    const path = (fill, fn, stroke = 'auto', lw = 0.75) => {
       g.beginPath(); fn();
       if (fill) { g.fillStyle = fill; g.fill(); }
-      if (stroke) { g.strokeStyle = stroke; g.lineWidth = lw; g.stroke(); }
+      if (stroke) { g.strokeStyle = stroke === 'auto' ? inkOf(fill) : stroke; g.lineWidth = lw; g.stroke(); }
     };
     const circle = (cx, cy, rr) => () => g.arc(X + cx, Y + cy, rr, 0, Math.PI * 2);
     const oval = (cx, cy, rx, ry, rot = 0) => () => g.ellipse(X + cx, Y + cy, rx, ry, rot, 0, Math.PI * 2);
     const rrect = (x0, y0, w, h, rr) => () => g.roundRect(X + x0, Y + y0, w, h, rr);
-    const lin = (y0, y1, c0, c1) => { const gg = g.createLinearGradient(0, Y + y0, 0, Y + y1); gg.addColorStop(0, c0); gg.addColorStop(1, c1); return gg; };
-    const rad = (cx, cy, r0, c0, c1) => { const gg = g.createRadialGradient(X + cx - r0 * 0.35, Y + cy - r0 * 0.4, r0 * 0.1, X + cx, Y + cy, r0 * 1.1); gg.addColorStop(0, c0); gg.addColorStop(1, c1); return gg; };
+    const lin = (y0, y1, c0, c1) => { const gg = g.createLinearGradient(0, Y + y0, 0, Y + y1); gg.addColorStop(0, c0); gg.addColorStop(1, c1); gg._base = c1; return gg; };
+    const rad = (cx, cy, r0, c0, c1) => { const gg = g.createRadialGradient(X + cx - r0 * 0.35, Y + cy - r0 * 0.4, r0 * 0.1, X + cx, Y + cy, r0 * 1.1); gg.addColorStop(0, c0); gg.addColorStop(1, c1); gg._base = c1; return gg; };
     g.lineJoin = 'round';
     g.lineCap = 'round';
 
@@ -4238,7 +4259,7 @@ const World = {
       g.globalAlpha = 1;
       // 풀잎 (ʌ 모양)
       g.strokeStyle = shade(g0, 0.78);
-      g.lineWidth = 1;
+      g.lineWidth = 0.68;
       for (let k = 0; k < 3; k++) {
         const bx = X + 5 + r(20 + k) * 22, by = Y + 7 + r(30 + k) * 20;
         g.beginPath(); g.moveTo(bx - 1.6, by); g.lineTo(bx - 0.6, by - 3); g.moveTo(bx + 0.4, by); g.lineTo(bx + 1.4, by - 3.4); g.stroke();
@@ -4258,7 +4279,7 @@ const World = {
       g.fillRect(X, Y, T, T);
       // 물결 (⌒⌒)
       g.strokeStyle = 'rgba(255,255,255,.7)';
-      g.lineWidth = 1.1;
+      g.lineWidth = 0.75;
       for (let k = 0; k < 2; k++) {
         const wx = X + 5 + r(150 + k) * 16, wy = Y + 8 + k * 12 + r(160 + k) * 4;
         g.beginPath(); g.arc(wx, wy + 2, 2.2, Math.PI * 1.15, Math.PI * 1.85); g.arc(wx + 4, wy + 2, 2.2, Math.PI * 1.15, Math.PI * 1.85); g.stroke();
@@ -4267,7 +4288,7 @@ const World = {
       if (!foam) return;
       // 물가: 땅 쪽 가장자리에 하얀 거품 줄
       g.strokeStyle = 'rgba(255,255,255,.85)';
-      g.lineWidth = 1.4;
+      g.lineWidth = 0.95;
       const side = (dx, dy, x0, y0, x1, y1) => {
         const v = nb(dx, dy);
         if (v == null || WET.has(v)) return;
@@ -4300,7 +4321,7 @@ const World = {
         ground(s0);
         g.fillStyle = s1;
         for (let k = 0; k < 7; k++) { g.beginPath(); g.arc(X + 3 + r(60 + k) * 26, Y + 3 + r(70 + k) * 26, 0.7, 0, 7); g.fill(); }
-        if (r(80) < 0.5) path(s2, oval(6 + r(81) * 20, 6 + r(82) * 20, 2.2, 1.5), shade(s0, 0.75), 0.7);
+        if (r(80) < 0.5) path(s2, oval(6 + r(81) * 20, 6 + r(82) * 20, 2.2, 1.5), shade(s0, 0.75), 0.48);
         break;
       }
       case TILE.PATH: {
@@ -4325,15 +4346,15 @@ const World = {
       case TILE.FLOWER: {
         grass();
         const fx = 10 + r(7) * 12, fy = 9 + r(8) * 9, color = r(9) > 0.5 ? '#ef5350' : '#ffca28';
-        g.strokeStyle = '#2e7d32'; g.lineWidth = 1.4;
+        g.strokeStyle = '#2e7d32'; g.lineWidth = 0.95;
         g.beginPath(); g.moveTo(X + fx, Y + fy + 3); g.quadraticCurveTo(X + fx + 1, Y + fy + 9, X + fx, Y + fy + 13); g.stroke();
-        path('#66bb6a', oval(fx + 3, fy + 9, 3, 1.4, -0.5), '#2e7d32', 0.8);
-        path('#66bb6a', oval(fx - 3, fy + 11, 3, 1.4, 0.5), '#2e7d32', 0.8);
+        path('#66bb6a', oval(fx + 3, fy + 9, 3, 1.4, -0.5), '#2e7d32', 0.54);
+        path('#66bb6a', oval(fx - 3, fy + 11, 3, 1.4, 0.5), '#2e7d32', 0.54);
         for (let k = 0; k < 5; k++) {
           const a = k * Math.PI * 2 / 5 - Math.PI / 2;
-          path(color, circle(fx + Math.cos(a) * 3.2, fy + Math.sin(a) * 3.2, 2.7), shade(color, 0.6), 0.8);
+          path(color, circle(fx + Math.cos(a) * 3.2, fy + Math.sin(a) * 3.2, 2.7), shade(color, 0.6), 0.54);
         }
-        path('#fff59d', circle(fx, fy, 2), '#f9a825', 0.8);
+        path('#fff59d', circle(fx, fy, 2), '#f9a825', 0.54);
         break;
       }
       case TILE.TREE: case TILE.LOCK_TREE: case TILE.GOLD_TREE: {
@@ -4344,8 +4365,8 @@ const World = {
         path(lin(18, 30, '#9c6a40', '#6d4321'), rrect(12.5, 17, 7, 12.5, 2.5));
         // 잎: 동그라미 네 개를 합친 뭉게구름 (바깥 테두리 한 줄)
         const balls = [[16, 11, 10], [8.5, 15, 7], [23.5, 15, 7], [16, 5.5, 7]];
-        g.fillStyle = OL;
-        for (const [cx, cy, rr] of balls) { g.beginPath(); g.arc(X + cx, Y + cy, rr + 1.1, 0, 7); g.fill(); }
+        g.fillStyle = shade(leaf[0], 0.5);
+        for (const [cx, cy, rr] of balls) { g.beginPath(); g.arc(X + cx, Y + cy, rr + 0.75, 0, 7); g.fill(); }
         for (const [cx, cy, rr] of balls) { g.fillStyle = rad(cx, cy, rr, leaf[2], leaf[0]); g.beginPath(); g.arc(X + cx, Y + cy, rr, 0, 7); g.fill(); }
         // 아래쪽 그늘 + 반짝 잎
         g.fillStyle = 'rgba(0,40,0,.14)';
@@ -4355,7 +4376,7 @@ const World = {
         if (gold) { g.fillStyle = '#fff'; for (const [sx, sy] of [[24, 4], [7, 12], [20, 13]]) { g.beginPath(); g.arc(X + sx, Y + sy, 0.9, 0, 7); g.fill(); } }
         if (type === TILE.LOCK_TREE) {
           // 자물쇠 (보스를 잡으면 열린다)
-          g.strokeStyle = '#424242'; g.lineWidth = 1.6;
+          g.strokeStyle = '#424242'; g.lineWidth = 1.09;
           g.beginPath(); g.arc(X + 16, Y + 12, 3, Math.PI, 0); g.stroke();
           path('#fbc02d', rrect(11.5, 12, 9, 7, 1.5));
           path('#3e2723', circle(16, 15, 1), null);
@@ -4369,9 +4390,9 @@ const World = {
         g.moveTo(X + 4, Y + 26); g.bezierCurveTo(X + 1, Y + 16, X + 6, Y + 7, X + 14, Y + 7);
         g.bezierCurveTo(X + 22, Y + 5, X + 30, Y + 12, X + 29, Y + 22); g.quadraticCurveTo(X + 29, Y + 28, X + 22, Y + 28); g.lineTo(X + 9, Y + 28); g.quadraticCurveTo(X + 4, Y + 28, X + 4, Y + 26);
         g.fillStyle = rad(14, 14, 15, '#d5dbe1', '#7d8792'); g.fill();
-        g.strokeStyle = OL; g.lineWidth = 1.1; g.stroke();
+        g.strokeStyle = '#59616b'; g.lineWidth = 0.75; g.stroke();
         g.fillStyle = 'rgba(255,255,255,.45)'; g.beginPath(); g.ellipse(X + 12, Y + 11, 4, 2, -0.4, 0, 7); g.fill();
-        g.strokeStyle = 'rgba(58,38,24,.55)'; g.lineWidth = 0.9;
+        g.strokeStyle = 'rgba(58,38,24,.55)'; g.lineWidth = 0.61;
         g.beginPath(); g.moveTo(X + 18, Y + 14); g.lineTo(X + 21, Y + 18); g.lineTo(X + 20, Y + 22); g.stroke();
         break;
       }
@@ -4383,7 +4404,7 @@ const World = {
           g.beginPath(); g.moveTo(0, 0);
           g.bezierCurveTo(-sz * 0.95, -sz * 0.25, -sz * 0.8, -sz * 1.25, 0, -sz * 0.85);
           g.bezierCurveTo(sz * 0.8, -sz * 1.25, sz * 0.95, -sz * 0.25, 0, 0);
-          g.fillStyle = fill; g.fill(); g.strokeStyle = '#1b5e20'; g.lineWidth = 0.8; g.stroke();
+          g.fillStyle = fill; g.fill(); g.strokeStyle = '#1b5e20'; g.lineWidth = 0.54; g.stroke();
           g.restore();
         };
         // 구석 작은 세잎
@@ -4391,7 +4412,7 @@ const World = {
         for (const a of [0, -2.1, 2.1]) leafAt(sx, sy, a, 3.2, '#66bb6a');
         // 가운데 큰 클로버 (세잎과 네잎은 크기/색이 똑같고 잎 수만 다르다)
         const cx = 15 + r(11) * 2, cy = 15 + r(12) * 2;
-        g.strokeStyle = '#2e7d32'; g.lineWidth = 1.2;
+        g.strokeStyle = '#2e7d32'; g.lineWidth = 0.82;
         g.beginPath(); g.moveTo(X + cx, Y + cy); g.quadraticCurveTo(X + cx + 2, Y + cy + 6, X + cx + 1, Y + cy + 10); g.stroke();
         const angs = lucky ? [0, Math.PI / 2, Math.PI, -Math.PI / 2] : [0, -2.1, 2.1];
         for (const a of angs) leafAt(cx, cy, a, 6.4, '#43a047');
@@ -4416,11 +4437,11 @@ const World = {
         if (D) {
           g.fillStyle = lin(19, T, '#7a5a43', '#4e3626');
           g.beginPath(); g.roundRect(X - 0.3, Y + 19, T + 0.6, 13.3, [0, 0, R ? 4 : 0, L ? 4 : 0]); g.fill();
-          g.strokeStyle = 'rgba(40,24,14,.6)'; g.lineWidth = 1;
+          g.strokeStyle = 'rgba(40,24,14,.6)'; g.lineWidth = 0.68;
           for (let k = 0; k < 4; k++) { const lx = X + 4 + k * 8 + r(60 + k) * 3; g.beginPath(); g.moveTo(lx, Y + 22); g.lineTo(lx + 0.5, Y + 30); g.stroke(); }
-          g.strokeStyle = OL; g.lineWidth = 1.1; g.beginPath(); g.moveTo(X, Y + 19); g.lineTo(X + T, Y + 19); g.stroke();
+          g.strokeStyle = '#4e3626'; g.lineWidth = 0.75; g.beginPath(); g.moveTo(X, Y + 19); g.lineTo(X + T, Y + 19); g.stroke();
         }
-        g.strokeStyle = OL; g.lineWidth = 1.2;
+        g.strokeStyle = '#6b5442'; g.lineWidth = 0.82;
         g.beginPath();
         if (U) { g.moveTo(X, Y + 0.6); g.lineTo(X + T, Y + 0.6); }
         if (D) { g.moveTo(X, Y + T - 0.6); g.lineTo(X + T, Y + T - 0.6); }
@@ -4429,10 +4450,10 @@ const World = {
         g.stroke();
         if (cracked) {
           // 쩍 갈라진 금 (부술 수 있어요)
-          g.strokeStyle = '#2b2118'; g.lineWidth = 1.6;
+          g.strokeStyle = '#2b2118'; g.lineWidth = 1.09;
           g.beginPath(); g.moveTo(X + 16, Y + 3); g.lineTo(X + 13, Y + 9); g.lineTo(X + 18, Y + 14); g.lineTo(X + 14, Y + 20); g.lineTo(X + 17, Y + 27);
           g.moveTo(X + 18, Y + 14); g.lineTo(X + 23, Y + 16); g.moveTo(X + 13, Y + 9); g.lineTo(X + 8, Y + 11); g.stroke();
-          g.strokeStyle = 'rgba(255,255,255,.4)'; g.lineWidth = 0.7;
+          g.strokeStyle = 'rgba(255,255,255,.4)'; g.lineWidth = 0.48;
           g.beginPath(); g.moveTo(X + 17.2, Y + 3); g.lineTo(X + 14.2, Y + 9); g.lineTo(X + 19.2, Y + 14); g.stroke();
         }
         break;
@@ -4446,8 +4467,8 @@ const World = {
         const rr = 10, ex = 0.4;
         const corner = [!U && !L ? rr : 0, !U && !R ? rr : 0, !D && !R ? rr : 0, !D && !L ? rr : 0];
         const box = (ins) => { const l = L ? -ex : ins, t = U ? -ex : ins, rr2 = R ? -ex : ins, b = D ? -ex : ins; g.beginPath(); g.roundRect(X + l, Y + t, T - l - rr2, T - t - b, corner.map(c => Math.max(0, c - ins))); };
-        box(0.4); g.fillStyle = OL; g.fill();
-        box(1.6); g.fillStyle = lin(0, T, leaf[1], leaf[0]); g.fill();
+        box(0.4); g.fillStyle = shade(leaf[0], 0.5); g.fill();
+        box(1.2); g.fillStyle = lin(0, T, leaf[1], leaf[0]); g.fill();
         // 둥근 잎 뭉치 + 반짝
         for (let k = 0; k < 4; k++) {
           const bx = 7 + r(300 + k) * 18, by = 7 + r(310 + k) * 18;
@@ -4456,19 +4477,19 @@ const World = {
           g.fillStyle = 'rgba(255,255,255,.35)'; g.beginPath(); g.arc(X + bx - 1.2, Y + by - 1.2, 1, 0, 7); g.fill();
         }
         if (!thin && r(320) < 0.25) { const fx = 7 + r(321) * 18, fy = 7 + r(322) * 18; for (let k = 0; k < 5; k++) path('#f06292', circle(fx + Math.cos(k * 1.26) * 1.5, fy + Math.sin(k * 1.26) * 1.5, 1.3), null); path('#fff59d', circle(fx, fy, 0.8), null); }
-        if (thin) { g.strokeStyle = '#6d4c41'; g.lineWidth = 1.2; for (const [sx, sy, len] of [[6, 22, 9], [16, 10, 8]]) { g.beginPath(); g.moveTo(X + sx, Y + sy); g.lineTo(X + sx + len, Y + sy - len / 2); g.stroke(); } }
+        if (thin) { g.strokeStyle = '#6d4c41'; g.lineWidth = 0.82; for (const [sx, sy, len] of [[6, 22, 9], [16, 10, 8]]) { g.beginPath(); g.moveTo(X + sx, Y + sy); g.lineTo(X + sx + len, Y + sy - len / 2); g.stroke(); } }
         break;
       }
       case TILE.BRICK: {
         if (!bare) grass();
-        path('#e8d8b8', rrect(1, 1, 30, 30, 3), OL, 1.1);
+        path('#e8d8b8', rrect(1, 1, 30, 30, 3), 'auto', 0.75);
         for (let row = 0; row < 4; row++) {
           const by = 2 + row * 7, off = row % 2 ? 0 : 7;
           for (let bx = off - 14; bx < 30; bx += 14) {
             const x0 = Math.max(2, bx + 2), x1 = Math.min(30, bx + 14);
             if (x1 - x0 < 3) continue;
             const base = shade('#c0603f', 0.9 + hash(x * 7 + bx, y * 5 + row, 91) * 0.2);
-            path(base, rrect(x0, by, x1 - x0 - 0.8, 6, 1.4), '#7a3524', 0.7);
+            path(base, rrect(x0, by, x1 - x0 - 0.8, 6, 1.4), '#7a3524', 0.48);
             g.fillStyle = 'rgba(255,255,255,.25)'; g.fillRect(X + x0 + 1, Y + by + 1, x1 - x0 - 3, 1);
           }
         }
@@ -4476,9 +4497,9 @@ const World = {
       }
       case TILE.GATE: {
         if (!bare) grass();
-        for (const [gx, w] of [[5, 7.5], [12.8, 7.5], [20.6, 7]]) path(lin(1, 31, '#c08a50', '#8d5a2b'), rrect(gx, 1, w, 30, [3, 3, 1, 1]), OL, 1);
-        for (const by of [6, 22]) { path('#5d4037', rrect(4.5, by, 23.5, 3.4, 1.2), OL, 0.9); g.fillStyle = '#e0e0e0'; for (const rx of [7, 25]) { g.beginPath(); g.arc(X + rx, Y + by + 1.7, 0.8, 0, 7); g.fill(); } }
-        path('#ffca28', circle(23, 15.5, 1.6), '#8d6e00', 0.7);
+        for (const [gx, w] of [[5, 7.5], [12.8, 7.5], [20.6, 7]]) path(lin(1, 31, '#c08a50', '#8d5a2b'), rrect(gx, 1, w, 30, [3, 3, 1, 1]), 'auto', 0.68);
+        for (const by of [6, 22]) { path('#5d4037', rrect(4.5, by, 23.5, 3.4, 1.2), 'auto', 0.61); g.fillStyle = '#e0e0e0'; for (const rx of [7, 25]) { g.beginPath(); g.arc(X + rx, Y + by + 1.7, 0.8, 0, 7); g.fill(); } }
+        path('#ffca28', circle(23, 15.5, 1.6), '#8d6e00', 0.48);
         break;
       }
       case TILE.BRIDGE: {
@@ -4489,19 +4510,19 @@ const World = {
           else water(gr.water[0], gr.water[1], false);
         }
         path('rgba(0,0,0,.25)', rrect(0, 7, T, 21, 2), null);
-        for (let k = 0; k < 4; k++) path(lin(5, 27, '#c9925a', '#946238'), rrect(k * 8 + 0.4, 5, 7.2, 22, 1.6), OL, 0.9);
-        for (const by of [1.5, 26.5]) path('#7a5238', rrect(-0.3, by, T + 0.6, 4, 2), OL, 1);
+        for (let k = 0; k < 4; k++) path(lin(5, 27, '#c9925a', '#946238'), rrect(k * 8 + 0.4, 5, 7.2, 22, 1.6), 'auto', 0.61);
+        for (const by of [1.5, 26.5]) path('#7a5238', rrect(-0.3, by, T + 0.6, 4, 2), 'auto', 0.68);
         break;
       }
       case TILE.TORCH: {
         if (!bare) grass();
         g.fillStyle = 'rgba(255,190,80,.25)'; g.beginPath(); g.arc(X + 16, Y + 8, 9, 0, 7); g.fill();
         path('rgba(0,0,0,.18)', oval(16, 29.5, 4.5, 1.4), null);
-        path(lin(14, 30, '#a1887f', '#6d4c41'), rrect(14, 14, 4, 16, 1.5), OL, 1);
-        path('#5d4037', rrect(12.5, 12, 7, 4, 1.5), OL, 1);
+        path(lin(14, 30, '#a1887f', '#6d4c41'), rrect(14, 14, 4, 16, 1.5), 'auto', 0.68);
+        path('#5d4037', rrect(12.5, 12, 7, 4, 1.5), 'auto', 0.68);
         g.beginPath(); g.moveTo(X + 16, Y + 1.5); g.bezierCurveTo(X + 22, Y + 7, X + 21, Y + 13, X + 16, Y + 13); g.bezierCurveTo(X + 11, Y + 13, X + 10, Y + 7, X + 16, Y + 1.5);
         const fl = g.createLinearGradient(0, Y + 2, 0, Y + 13); fl.addColorStop(0, '#ff7043'); fl.addColorStop(1, '#ffb300');
-        g.fillStyle = fl; g.fill(); g.strokeStyle = '#bf360c'; g.lineWidth = 0.9; g.stroke();
+        g.fillStyle = fl; g.fill(); g.strokeStyle = '#bf360c'; g.lineWidth = 0.61; g.stroke();
         path('#fff59d', () => { g.moveTo(X + 16, Y + 6); g.bezierCurveTo(X + 19, Y + 9, X + 18.5, Y + 12, X + 16, Y + 12); g.bezierCurveTo(X + 13.5, Y + 12, X + 13, Y + 9, X + 16, Y + 6); }, null);
         break;
       }
@@ -4510,28 +4531,28 @@ const World = {
         path('rgba(0,0,0,.18)', oval(16, 29.5, 14, 1.8), null);
         for (const [cx, top, hw] of [[6, 11, 4.2], [12.5, 4, 4.6], [19.5, 7, 4.6], [26, 12, 4.2]]) {
           g.beginPath(); g.moveTo(X + cx - hw, Y + 25); g.quadraticCurveTo(X + cx - hw * 0.3, Y + top + 6, X + cx, Y + top); g.quadraticCurveTo(X + cx + hw * 0.3, Y + top + 6, X + cx + hw, Y + 25); g.closePath();
-          g.fillStyle = lin(top, 25, '#bcaaa4', '#795548'); g.fill(); g.strokeStyle = OL; g.lineWidth = 1; g.stroke();
+          g.fillStyle = lin(top, 25, '#bcaaa4', '#795548'); g.fill(); g.strokeStyle = '#4e342e'; g.lineWidth = 0.68; g.stroke();
           path('#ffffff', circle(cx, top + 1.6, 1), null);
         }
-        path(lin(24, 29, '#a1887f', '#5d4037'), rrect(1, 23.5, 30, 5.5, 2.4), OL, 1.1);
+        path(lin(24, 29, '#a1887f', '#5d4037'), rrect(1, 23.5, 30, 5.5, 2.4), 'auto', 0.75);
         break;
       }
       case TILE.SAPLING: {
         if (!bare) grass();
-        path(lin(23, 30, '#a1887f', '#6d4c41'), oval(16, 27, 8.5, 3.6), OL, 1);
-        g.strokeStyle = '#558b2f'; g.lineWidth = 1.8; g.beginPath(); g.moveTo(X + 16, Y + 25); g.quadraticCurveTo(X + 15, Y + 17, X + 16.5, Y + 9); g.stroke();
-        path(lin(8, 15, '#a5d6a7', '#43a047'), oval(11, 12, 5.2, 2.8, 0.35), '#1b5e20', 0.9);
-        path(lin(4, 11, '#c5e1a5', '#558b2f'), oval(21.5, 8, 5.2, 2.8, -0.45), '#1b5e20', 0.9);
+        path(lin(23, 30, '#a1887f', '#6d4c41'), oval(16, 27, 8.5, 3.6), 'auto', 0.68);
+        g.strokeStyle = '#558b2f'; g.lineWidth = 1.22; g.beginPath(); g.moveTo(X + 16, Y + 25); g.quadraticCurveTo(X + 15, Y + 17, X + 16.5, Y + 9); g.stroke();
+        path(lin(8, 15, '#a5d6a7', '#43a047'), oval(11, 12, 5.2, 2.8, 0.35), '#1b5e20', 0.61);
+        path(lin(4, 11, '#c5e1a5', '#558b2f'), oval(21.5, 8, 5.2, 2.8, -0.45), '#1b5e20', 0.61);
         break;
       }
       case TILE.CHEST: {
         grass();
         path('rgba(0,0,0,.22)', oval(16, 28.5, 13, 2.4), null);
-        path(lin(14, 28, '#b5763c', '#8a5328'), rrect(4, 13, 24, 15, [1, 1, 3, 3]), OL, 1.1);
-        path(lin(5, 14, '#c98a4c', '#a0612e'), () => { g.moveTo(X + 4, Y + 14); g.lineTo(X + 4, Y + 10); g.quadraticCurveTo(X + 16, Y + 2, X + 28, Y + 10); g.lineTo(X + 28, Y + 14); g.closePath(); }, OL, 1.1);
+        path(lin(14, 28, '#b5763c', '#8a5328'), rrect(4, 13, 24, 15, [1, 1, 3, 3]), 'auto', 0.75);
+        path(lin(5, 14, '#c98a4c', '#a0612e'), () => { g.moveTo(X + 4, Y + 14); g.lineTo(X + 4, Y + 10); g.quadraticCurveTo(X + 16, Y + 2, X + 28, Y + 10); g.lineTo(X + 28, Y + 14); g.closePath(); }, 'auto', 0.75);
         g.fillStyle = '#ffca28';
         g.fillRect(X + 4.5, Y + 13, 23, 2); g.fillRect(X + 6.5, Y + 7, 2.2, 20.5); g.fillRect(X + 23.3, Y + 7, 2.2, 20.5);
-        path('#ffd54f', rrect(13, 11.5, 6, 7, 1.5), '#8d6e00', 0.8);
+        path('#ffd54f', rrect(13, 11.5, 6, 7, 1.5), '#8d6e00', 0.54);
         path('#5d4037', circle(16, 15, 0.9), null);
         g.fillStyle = '#ffffff'; g.beginPath(); g.arc(X + 26, Y + 4, 1.1, 0, 7); g.arc(X + 4, Y + 6, 0.7, 0, 7); g.fill();
         break;
@@ -4542,20 +4563,20 @@ const World = {
 
   // 집 (3 x 3 칸): 나무 판자 벽 + 빨간 기와 지붕 + 창문 + 문 + 꽃 상자
   drawHouseHD(g) {
-    const X = this.house.x * T, Y = this.house.y * T, W3 = 3 * T, OL = '#3a2618';
+    const X = this.house.x * T, Y = this.house.y * T, W3 = 3 * T, OL = '#5a4032';
     g.lineJoin = 'round';
-    const lin = (y0, y1, c0, c1) => { const gg = g.createLinearGradient(0, Y + y0, 0, Y + y1); gg.addColorStop(0, c0); gg.addColorStop(1, c1); return gg; };
-    const rr = (x0, y0, w, h, r, fill, lw = 1.2) => { g.beginPath(); g.roundRect(X + x0, Y + y0, w, h, r); g.fillStyle = fill; g.fill(); if (lw) { g.strokeStyle = OL; g.lineWidth = lw; g.stroke(); } };
+    const lin = (y0, y1, c0, c1) => { const gg = g.createLinearGradient(0, Y + y0, 0, Y + y1); gg.addColorStop(0, c0); gg.addColorStop(1, c1); gg._base = c1; return gg; };
+    const rr = (x0, y0, w, h, r, fill, lw = 0.8) => { g.beginPath(); g.roundRect(X + x0, Y + y0, w, h, r); g.fillStyle = fill; g.fill(); if (lw) { g.strokeStyle = inkOf(fill); g.lineWidth = lw; g.stroke(); } };
     // 벽
     rr(2, 22, W3 - 4, 74, [0, 0, 3, 3], lin(22, 96, '#e2aa6a', '#b97a3e'));
-    g.strokeStyle = 'rgba(110,60,25,.35)'; g.lineWidth = 0.8;
+    g.strokeStyle = 'rgba(110,60,25,.35)'; g.lineWidth = 0.54;
     for (let yy = 30; yy < 96; yy += 8) { g.beginPath(); g.moveTo(X + 3, Y + yy); g.lineTo(X + W3 - 3, Y + yy); g.stroke(); }
     // 지붕
     g.beginPath();
     g.moveTo(X - 5, Y + 27); g.lineTo(X + 6, Y + 1); g.quadraticCurveTo(X + W3 / 2, Y - 5, X + W3 - 6, Y + 1); g.lineTo(X + W3 + 5, Y + 27);
     g.quadraticCurveTo(X + W3 / 2, Y + 31, X - 5, Y + 27);
-    g.fillStyle = lin(-4, 30, '#f2705c', '#c0392b'); g.fill(); g.strokeStyle = OL; g.lineWidth = 1.3; g.stroke();
-    g.strokeStyle = 'rgba(120,20,10,.45)'; g.lineWidth = 1;
+    g.fillStyle = lin(-4, 30, '#f2705c', '#c0392b'); g.fill(); g.strokeStyle = '#7a2016'; g.lineWidth = 0.88; g.stroke();
+    g.strokeStyle = 'rgba(120,20,10,.45)'; g.lineWidth = 0.68;
     for (let row = 0; row < 3; row++) {
       const yy = 8 + row * 7, inset = 6 - row * 3.5;
       for (let xx = X + inset; xx < X + W3 - inset - 6; xx += 8) { g.beginPath(); g.arc(xx + 4 + (row % 2) * 4, Y + yy, 4, 0.15, Math.PI - 0.15); g.stroke(); }
@@ -4570,7 +4591,7 @@ const World = {
       g.beginPath(); g.roundRect(X + wx + 2.5, Y + 39.5, 15, 15, 2); g.fillStyle = lin(39, 55, '#d8f2ff', '#8fd0f7'); g.fill();
       g.fillStyle = '#6d4321'; g.fillRect(X + wx + 9, Y + 39, 2, 16); g.fillRect(X + wx + 2, Y + 46, 16, 2);
       g.fillStyle = 'rgba(255,255,255,.7)'; g.fillRect(X + wx + 4, Y + 41, 3, 1.5);
-      rr(wx - 1, 57, 22, 5, 1.5, '#8d5a2b', 1);
+      rr(wx - 1, 57, 22, 5, 1.5, '#8d5a2b', 0.68);
       for (const [fx, fc] of [[3, '#f06292'], [10, '#ffeb3b'], [17, '#f06292']]) {
         g.fillStyle = '#43a047'; g.beginPath(); g.arc(X + wx + fx, Y + 57, 1.8, 0, 7); g.fill();
         g.fillStyle = fc; g.beginPath(); g.arc(X + wx + fx, Y + 55.5, 1.5, 0, 7); g.fill();
@@ -4579,9 +4600,9 @@ const World = {
     // 문 (위가 둥근 판자 문 + 손잡이)
     const dx = T + 4, dy = 54;
     rr(dx, dy, T - 8, 42, [11, 11, 0, 0], lin(dy, 96, '#8d5a2b', '#5d3a1a'), 1.3);
-    g.strokeStyle = 'rgba(40,20,10,.45)'; g.lineWidth = 0.9;
+    g.strokeStyle = 'rgba(40,20,10,.45)'; g.lineWidth = 0.61;
     for (const k of [1, 2]) { g.beginPath(); g.moveTo(X + dx + k * 8, Y + dy + 4); g.lineTo(X + dx + k * 8, Y + 96); g.stroke(); }
-    g.fillStyle = '#ffca28'; g.beginPath(); g.arc(X + dx + T - 13, Y + dy + 22, 1.8, 0, 7); g.fill(); g.strokeStyle = OL; g.lineWidth = 0.7; g.stroke();
+    g.fillStyle = '#ffca28'; g.beginPath(); g.arc(X + dx + T - 13, Y + dy + 22, 1.8, 0, 7); g.fill(); g.strokeStyle = OL; g.lineWidth = 0.48; g.stroke();
   },
 
   // 새 그림 조각 (HD_CHUNK x HD_CHUNK 칸, 배율 R). 그림자와 집까지
@@ -7071,7 +7092,8 @@ const Render = {
   drawChibi(c, x, gy, dir, e, look, wear, hat, flash) {
     const worn = new Set(wear), boots = worn.has('boots'), vest = worn.has('vest');
     const col = v => (flash ? '#ff6b6b' : v);
-    const OL = flash ? '#b71c1c' : '#3a2618';
+    const OL = flash ? '#b71c1c' : '#5a4032';
+    const ink = (fill, k = 0.5) => (flash ? OL : inkOf(fill, k));
     const SKIN = col('#ffd9b8'), SKIN_D = col('#f2b994');
     const HAIR = col(look.hair), HAIR_L = col(shade(look.hair, 1.5)), HAIR_D = col(shade(look.hair, 0.75));
     const SHIRT = col(look.shirt), BODY = col(vest ? '#a8723f' : look.shirt), BODY_D = col(shade(vest ? '#a8723f' : look.shirt, 0.8));
@@ -7085,14 +7107,14 @@ const Render = {
     if (dir === 'right') c.scale(-1, 1); // 왼쪽 보기를 그리고 오른쪽은 거울로
     c.lineJoin = 'round';
     c.lineCap = 'round';
-    c.lineWidth = 0.9;
+    c.lineWidth = 0.6;
     c.strokeStyle = OL;
-    const shape = (fill, path) => { c.beginPath(); path(); c.fillStyle = fill; c.fill(); c.stroke(); };
+    const shape = (fill, path) => { c.beginPath(); path(); c.fillStyle = fill; c.fill(); c.strokeStyle = ink(fill); c.stroke(); };
     const rr = (x0, y0, w, h, r) => () => c.roundRect(x0, y0, w, h, r);
     const ell = (cx, cy, rx, ry) => () => c.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
     const hy = -21.5 - bob; // 머리 가운데
     // 빛은 왼쪽 위에서: 가로로 밝음 → 그늘
-    const lit = (fill, x0, x1, k0 = 1.18, k1 = 0.74) => { const g = c.createLinearGradient(x0, 0, x1, 0); g.addColorStop(0, shade(fill, k0)); g.addColorStop(0.45, fill); g.addColorStop(1, shade(fill, k1)); return g; };
+    const lit = (fill, x0, x1, k0 = 1.18, k1 = 0.74) => { const g = c.createLinearGradient(x0, 0, x1, 0); g.addColorStop(0, shade(fill, k0)); g.addColorStop(0.45, fill); g.addColorStop(1, shade(fill, k1)); g._base = fill; return g; };
 
     // 긴 머리 / 양갈래: 몸 뒤에
     if (style === 'long' && !side && !back) shape(HAIR_D, () => c.roundRect(-9.2, hy - 2, 18.4, 13.5, [4, 4, 5, 5]));
@@ -7135,6 +7157,7 @@ const Render = {
     ns.addColorStop(0, 'rgba(50,20,10,.38)'); ns.addColorStop(1, 'rgba(50,20,10,0)');
     c.fillStyle = ns; c.fillRect(-8, -17 - bob, 16, 8);
     c.restore();
+    c.strokeStyle = ink(BODY);
     c.stroke();
     if (vest && !back) { c.fillStyle = SHIRT; c.fillRect(side ? -3.5 : -1.2, -15 - bob, 2.4, 9.5); }
     if (!back && !vest) { // 옷깃
@@ -7158,6 +7181,7 @@ const Render = {
     sk.addColorStop(1, col('#d99a74'));
     c.fillStyle = sk;
     c.fill();
+    c.strokeStyle = flash ? OL : '#a8664a';
     c.stroke();
 
     // 머리카락 (위가 밝고 아래가 진하게)
@@ -7190,6 +7214,7 @@ const Render = {
       c.quadraticCurveTo(-8.6, hy - 0.4, -9.6, hy + 2.5);
     }
     c.fill();
+    c.strokeStyle = ink(HAIR, 0.45);
     c.stroke();
     // 앞머리가 이마에 드리운 그늘
     if (!back) {
@@ -7246,7 +7271,7 @@ const Render = {
         c.beginPath(); c.arc(0, hy + 3.6, 1.15, Math.PI * 0.2, Math.PI * 0.8); c.stroke();
       }
       c.strokeStyle = OL;
-      c.lineWidth = 0.9;
+      c.lineWidth = 0.6;
       c.fillStyle = 'rgba(255,255,255,.55)';
       c.beginPath(); c.ellipse(side ? -6.4 : -6, hy + 1.8, 0.9, 0.5, -0.3, 0, Math.PI * 2); c.fill();
     }
@@ -7258,7 +7283,7 @@ const Render = {
   drawChibiHat(c, hat, hy, side, back, col, OL) {
     if (!hat) return;
     const t = hy - 8.4; // 머리 꼭대기
-    const shape = (fill, path) => { c.beginPath(); path(); c.fillStyle = col(fill); c.fill(); c.stroke(); };
+    const shape = (fill, path) => { c.beginPath(); path(); c.fillStyle = col(fill); c.fill(); c.strokeStyle = OL === '#b71c1c' ? OL : inkOf(fill, 0.5); c.stroke(); };
     if (hat.type === 'cap') {
       shape(hat.color, () => { c.moveTo(-8.6, t + 6); c.bezierCurveTo(-8.8, t - 3.5, 8.8, t - 3.5, 8.6, t + 6); c.closePath(); });
       if (!back) shape(shade(hat.color, 0.78), () => c.ellipse(side ? -6.5 : 0, t + 6.2, side ? 6 : 9.5, 1.8, 0, 0, Math.PI * 2));
