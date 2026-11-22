@@ -735,6 +735,7 @@ body:not(.touch) .pouch-slot i { color: #5d4037; }
 .wear-cell.empty { border-style: dashed; background: rgba(255, 255, 255, .4); }
 .wear-cell.on { border-color: #43a047; background: #e8f5e9; }
 .wear-cell.sel { border-color: #f9a825; background: #fff59d; }
+.bag-cell.held { border-color: #1e88e5; background: #e3f2fd; box-shadow: 0 0 0 3px rgba(30, 136, 229, .35); }
 .bag-info { display: flex; align-items: center; gap: 12px; min-height: 76px; padding: 8px 12px; border-radius: 18px; background: #fff; }
 .bag-info-icon { font-size: 46px; line-height: 1; }
 .bag-info-icon .tile-icon { width: 72px; height: 72px; }
