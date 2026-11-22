@@ -10,7 +10,9 @@
   <title>Baby Craft</title>
   <!-- 옛 윈도우 10 에 없는 이모지(🪵 🪨 등 새 이모지)만 Noto 이모지 글꼴로 채운다 (그 글자들만 받는다) -->
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Color+Emoji&display=swap&text=%F0%9F%AA%B5%F0%9F%AA%A8%F0%9F%AA%93%F0%9F%9F%AB%F0%9F%A4%8D%F0%9F%A6%9B%F0%9F%A6%98%F0%9F%A7%B1%F0%9F%A7%B5%F0%9F%9B%A1%F0%9F%A6%94%F0%9F%A5%A9">
-  <link rel="stylesheet" href="style.css?v=47">
+  <!-- 시작 화면 로고용 픽셀 글꼴 (로고 글자만 받는다) -->
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap&text=BABYCRAFT">
+  <link rel="stylesheet" href="style.css?v=48">
 </head>
 <body>
   <canvas id="game"></canvas>
@@ -114,8 +116,17 @@
 
   <!-- 시작 화면 -->
   <div id="title" class="overlay">
-    <h1 class="logo">Baby Craft</h1>
-    <div class="logo-emoji">🪵 🪨 🗡️</div>
+    <!-- 배경: 해, 구름, 언덕, 나무, 잔디 땅 (꾸미기만) -->
+    <div class="title-bg" aria-hidden="true">
+      <div class="sun"></div>
+      <div class="cloud c1"></div><div class="cloud c2"></div><div class="cloud c3"></div>
+      <div class="hill h1"></div><div class="hill h2"></div>
+      <div class="tree t1">🌳</div><div class="tree t2">🌲</div><div class="tree t3">🌳</div><div class="tree t4">🌲</div>
+      <div class="ground"></div>
+    </div>
+    <h1 class="logo"><span class="logo-1">BABY</span><span class="logo-2">CRAFT</span></h1>
+    <div class="logo-emoji" aria-hidden="true"><span>🪵</span><span>🪨</span><span>🗡️</span><span>🍎</span><span>💎</span></div>
+    <div class="title-card">
     <input id="name-input" class="name-input" placeholder="이름" autocomplete="off" aria-label="name">
     <div class="title-buttons">
       <div class="look-picker">
@@ -125,6 +136,7 @@
       <button id="btn-start" class="big-btn start" disabled aria-label="start">▶</button>
       <button id="btn-multi" class="big-btn multi" disabled aria-label="two players">👥</button>
       <button id="btn-new" class="big-btn new-world hidden" aria-label="new world">🌱</button>
+    </div>
     </div>
     <!-- 원격 여럿이 하기: 한 기기는 🏠 방 만들기, 다른 기기들은 번호 입력 후 ▶ -->
     <div id="mp-panel" class="mp-panel hidden">
