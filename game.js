@@ -97,7 +97,7 @@ try { document.fonts.load(`20px "Noto Color Emoji"`, EMOJI_FALLBACK).catch(() =>
 
 // 게임 아이템. 종류(kind)는 다섯 가지 + 맵의 하트:
 //   material 재료 (제작대에서만 쓴다) / block 블록 (tile: 땅에 놓으면 되는 맵 칸) / food 음식 (먹으면 ❤️ heal, 던지면 좋아하는 동물이 따라온다)
-//   potion 물약 (마시면 특별한 힘: heal / speed / light 초) / wear 옷 (slot: 입는 곳. 꾸미기) / gear 방패 (slot 에 들면 두 번에 한 번 막아 준다)
+//   potion 물약 (마시면 특별한 힘: heal / speed / light 초) / wear 옷 (slot: 입는 곳. 꾸미기) / gear 방패 (slot 에 들면 다 막아 주고 10번 막으면 부서진다)
 // 그림은 모두 픽셀 그림 (icon: PIXEL_ICONS, 블록은 맵 칸 그림). emoji 는 말풍선/알림 글자에만 쓴다
 // weight: 맵에 저절로 떨어져 있는 비율 (0 이면 안 생긴다)
 const ITEMS = {
@@ -125,7 +125,7 @@ const ITEMS = {
   crown:   { emoji: '👑', ko: '왕관',      en: 'crown',          kind: 'wear', slot: 'head', weight: 0, icon: 'CROWN' },
   vest:    { emoji: '🦺', ko: '가죽 갑옷', en: 'leather armor',  kind: 'wear', slot: 'body', weight: 0, icon: 'VEST' },
   boots:   { emoji: '👢', ko: '장화',      en: 'boots',          kind: 'wear', slot: 'feet', weight: 0, icon: 'BOOTS' },
-  shield:  { emoji: '🛡️', ko: '방패',      en: 'shield',         kind: 'gear', slot: 'arm', weight: 0, icon: 'SHIELD' }, // 방패 칸에 끼우면 맞을 때 두 번에 한 번 막는다
+  shield:  { emoji: '🛡️', ko: '방패',      en: 'shield',         kind: 'gear', slot: 'arm', weight: 0, icon: 'SHIELD' }, // 방패 칸에 끼우면 맞을 때 막는다 (SHIELD_HITS 번 막으면 부서짐)
   // 🧱 블록: 꽃은 캐서, 묘목은 나무를 캐면 같이 나온다 (심으면 자라서 나무), 나머지는 제작대에서
   flower:  { emoji: '🌷', ko: '꽃',     en: 'flower',  kind: 'block', tile: 'FLOWER',  weight: 0 },
   sapling: { emoji: '🌱', ko: '묘목',   en: 'sapling', kind: 'block', tile: 'SAPLING', weight: 0 },
@@ -361,7 +361,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 94;
+const GAME_V = 96;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -653,11 +653,44 @@ function spokenNumbers(text) {
 const numJosa = n => (n % 10 === 0 || [1, 3, 6, 7, 8].includes(n % 10) ? '은' : '는');
 
 const ABC_NAMES = {
-  a: ['에이', '애이'], b: ['비', '삐'], c: ['씨', '시'], d: ['디', '띠'], e: ['이'], f: ['에프', '애프', '에후'], g: ['지', '쥐'],
+  a: ['에이', '애이', '에'], b: ['비', '삐'], c: ['씨', '시'], d: ['디', '띠'], e: ['이'], f: ['에프', '애프', '에후'], g: ['지', '쥐'],
   h: ['에이치', '에이취', '에치', '에취'], i: ['아이'], j: ['제이', '재이'], k: ['케이', '캐이'], l: ['엘', '앨'], m: ['엠', '앰'],
   n: ['엔', '앤'], o: ['오'], p: ['피'], q: ['큐'], r: ['알', '아르'], s: ['에스', '애스'], t: ['티'], u: ['유'],
-  v: ['브이', '뷔'], w: ['더블유', '더블류', '더블'], x: ['엑스', '액스'], y: ['와이'], z: ['지', '제트', '쥐', '즤', '젯'],
+  v: ['브이', '뷔', '부이', '비이'], w: ['더블유', '더블류', '더블', '떠블유', '더유'], x: ['엑스', '액스', '엑쓰', '익스'], y: ['와이', '와'], z: ['지', '제트', '쥐', '즤', '젯', '지이'],
 };
+// 영어로 알아들었을 때 (B → "bee", C → "see")
+const ABC_EN = {
+  a: ['ay', 'eh', 'hey'], b: ['be', 'bee'], c: ['see', 'sea', 'si'], d: ['dee', 'the'], e: ['ee'], f: ['ef', 'eff'], g: ['gee', 'ji'],
+  h: ['age', 'eich', 'each'], i: ['eye', 'ai'], j: ['jay'], k: ['kay', 'okay', 'ok'], l: ['el', 'elle', 'al'], m: ['em'], n: ['en', 'and'],
+  o: ['oh', 'owe'], p: ['pee', 'pea'], q: ['queue', 'cue', 'kyu'], r: ['are', 'our'], s: ['es', 'ess', 'yes'], t: ['tea', 'tee'],
+  u: ['you', 'yu'], v: ['vee', 'we'], w: ['double'], x: ['ex', 'axe'], y: ['why'], z: ['zee', 'zed'],
+};
+// 발음이 서툴러도: 센소리/된소리는 예사소리로 (피 = 비, 티 = 디), ㅐ = ㅔ 로 보고 자모가 60% 넘게 같으면 맞음
+const ABC_SOFT = { 'ㄲ': 'ㄱ', 'ㅋ': 'ㄱ', 'ㄸ': 'ㄷ', 'ㅌ': 'ㄷ', 'ㅃ': 'ㅂ', 'ㅍ': 'ㅂ', 'ㅆ': 'ㅅ', 'ㅉ': 'ㅈ', 'ㅊ': 'ㅈ', 'ㅐ': 'ㅔ', 'ㅒ': 'ㅖ' };
+function abcHeard(heard, ch) {
+  const soft = t => Array.from(Judge.toJamo(t)).map(j => ABC_SOFT[j] || j).join('');
+  const toks = (heard || '').normalize('NFC').toLowerCase().split(/[\s.,!?~]+/).map(t => t.replace(/[^\p{L}]/gu, '')).filter(Boolean);
+  const en = ABC_EN[ch], ko = ABC_NAMES[ch].map(soft);
+  const raw = [...toks.slice(0, 3), toks.join('')], cands = [...raw];
+  for (const t0 of raw) cands.push(t0.replace(/(이에요|에요|예요|이요|요|이야|야|입니다)$/, '')); // "에이요" → "에이"도 "에"도
+  for (const t of new Set(cands.filter(Boolean))) {
+    if (t === ch || t === ch + ch || en.includes(t)) return true;
+    if (/^[a-z]+$/.test(t)) continue;
+    const syl = Array.from(t);
+    for (const nm of ko) {
+      const n = ABC_NAMES[ch][ko.indexOf(nm)].length;
+      if (syl.length > n + 1) continue; // 긴 말 속의 우연은 빼고 (비행기 ≠ B)
+      for (let len = Math.max(1, n - 1); len <= n + 1; len++) {
+        for (let i = 0; i + len <= syl.length; i++) {
+          const js = soft(syl.slice(i, i + len).join(''));
+          if (js === nm || 1 - Judge.lev(js, nm) / Math.max(js.length, nm.length) >= 0.6) return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+const SHIELD_HITS = 10; // 🛡️ 방패가 버티는 횟수
 const rint = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
 
 const Quiz = {
@@ -716,10 +749,7 @@ const Quiz = {
     return {
       id: 'q:abc', kind: 'abc', word: shown, lang: 'en', emoji: '🔤', level: lv, alts: [],
       speak: names[0], speakLang: 'ko', listen: 'ko',
-      check: heard => {
-        const c = (heard || '').normalize('NFC').toLowerCase().replace(/[^\p{L}]/gu, '').replace(/(이에요|예요|이요|요)$/, '');
-        return c === ch || names.some(nm => c === nm || c === nm + nm);
-      },
+      check: heard => abcHeard(heard, ch),
     };
   },
 
@@ -894,7 +924,7 @@ const Judge = (() => {
     return { pass, score: best.score, best: best.cand, how: best.how, threshold };
   }
 
-  return { judge, normalize, toJamo, similarity, pronounce: s => toJamo(normalize(s)) };
+  return { judge, normalize, toJamo, similarity, lev: levenshtein, pronounce: s => toJamo(normalize(s)) };
 })();
 
 // ============================================================
@@ -1337,7 +1367,7 @@ const Card = {
 
     const e = this.el;
     e.card.classList.add('success');
-    e.reveal.textContent = this.word.emoji || '⭐';
+    e.reveal.textContent = /^[sq]:/.test(this.word.id || '') ? '' : this.word.emoji || '⭐'; // 퀴즈 (문장/산수/알파벳) 는 그림 없이
     const sl = this.word.speakLang || this.word.lang;
     e.praise.textContent = PRAISE[sl];
     if (this.word.answer != null) e.word.textContent = this.word.answer; // 산수: 맞춘 뒤 답을 보여 준다
@@ -5744,13 +5774,14 @@ const Game = {
     this.picked = holdable(bag.picked) ? bag.picked : null;
     this.lastWeapon = WEAPONS[bag.lastWeapon] ? bag.lastWeapon : null;
     this.kills = bag.kills || 0;
+    this.shieldHits = bag.shieldHits || 0;
     for (const r of RECIPES) if (r.unlock > 0 && this.kills >= r.unlock) this.unlockShown.add(r.result);
     this.bagJson = JSON.stringify(this.bagItems());
     this.bagT = bag.t || 0;
   },
 
   bagItems() {
-    return { v: BAG_V, inventory: this.inventory, equip: this.equip, seen: [...this.seen], weapons: [...this.weapons], picked: this.picked, lastWeapon: this.lastWeapon, kills: this.kills };
+    return { v: BAG_V, inventory: this.inventory, equip: this.equip, seen: [...this.seen], weapons: [...this.weapons], picked: this.picked, lastWeapon: this.lastWeapon, kills: this.kills, shieldHits: this.shieldHits || 0 };
   },
 
   // 가방 + 누구 것인지(owner: 이름) + 마지막으로 바뀐 때(t). 바뀌었을 때만 t 를 새로
@@ -6463,11 +6494,21 @@ const Game = {
   // m: 몬스터 또는 다른 사람 캐릭터(isPlayer). 맞으면 빨갛게 번쩍이며 때린 쪽 반대로 밀린다
   hurt(m) {
     if (this.state !== 'play' || Player.invulnT > 0) return;
-    // 🛡️ 방패: 두 번에 한 번 막는다
-    if (this.equip.arm === 'shield' && (this.shieldBlock = !this.shieldBlock)) {
+    // 🛡️ 방패: 다 막아 주고, SHIELD_HITS 번 막으면 부서진다 (다시 만들 수 있다)
+    if (this.equip.arm === 'shield') {
       Player.invulnT = CONFIG.INVULN_SEC;
-      Sfx.click();
-      Floaters.add(Player.x, Player.y - 30, '🛡️', 18);
+      const left = SHIELD_HITS - (this.shieldHits = (this.shieldHits || 0) + 1);
+      if (left <= 0) {
+        delete this.equip.arm;
+        this.shieldHits = 0;
+        if (this.inventory.shield > 0) this.wear('shield', false); // 가방에 하나 더 있으면 바로 끼운다
+        Sfx.hurt();
+        Floaters.add(Player.x, Player.y - 30, '💥', 20);
+        toast(`💥 ${iconHtml(ITEMS.shield)} ${tr('방패가 부서졌어요! 🔨 다시 만들어요', 'Your shield broke! Craft a new one')}`);
+      } else {
+        Sfx.click();
+        Floaters.add(Player.x, Player.y - 30, `🛡️${left}`, 18);
+      }
       return;
     }
     this.hearts--;
