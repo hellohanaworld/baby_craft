@@ -361,7 +361,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 92;
+const GAME_V = 93;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -4042,6 +4042,9 @@ const Multi = {
         const html = await (await fetch(`index.html?t=${Date.now()}`, { cache: 'no-store' })).text();
         const v = Number((html.match(/game\.js\?v=(\d+)/) || [])[1]);
         if (v > GAME_V) {
+          // 고치는 중이라 새 game.js 가 깨져 있으면 아직 켜지 않는다 (깨진 채 켜면 서버가 멈춘다). 실행은 하지 않고 문법만 본다
+          const code = await (await fetch(`game.js?v=${v}&t=${Date.now()}`, { cache: 'no-store' })).text();
+          try { new Function(code); } catch (err) { console.log(`[Server] 새 버전 ${v} 이 깨져 있어 기다림`, String(err)); return; }
           console.log(`[Server] 새 버전 ${v} (지금 ${GAME_V}): 새로 켬`);
           await this.uploadWorld().catch(() => {});
           location.reload();

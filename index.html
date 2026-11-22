@@ -138,6 +138,16 @@
     <p id="title-msg" class="msg"></p>
   </div>
 
-  <script src="game.js?v=92"></script>
+  <script>
+    // 채널 서버(?server=)는 game.js 가 깨져서 못 켜지면 1분 뒤 다시 불러온다 (고친 것이 오면 저절로 살아난다)
+    if (/[?&]server=/.test(location.search)) {
+      window.addEventListener('error', e => {
+        if (window.__retry || typeof Game !== 'undefined') return; // 게임이 켜진 뒤의 오류는 그대로 둔다
+        console.log('[Server] 게임을 못 불러옴, 1분 뒤 다시', e.message);
+        window.__retry = setTimeout(() => location.reload(), 60000);
+      });
+    }
+  </script>
+  <script src="game.js?v=93"></script>
 </body>
 </html>
