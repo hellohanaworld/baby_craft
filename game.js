@@ -30,6 +30,7 @@ const CONFIG = {
 
   // 전투
   MAX_HEARTS: 5,
+  HEAR_TILES: 8,           // 💬 다른 사람 말을 소리로 듣는 거리 (칸). 글은 같은 서버 모두 보인다
   INVULN_SEC: 1.2,        // 다친 뒤 무적 시간
   HIT_FLASH_SEC: 0.35,    // 맞았을 때 빨갛게 번쩍이며 흔들리는 시간
   STEP_SEC: 0.12,         // 발자국 소리 간격
@@ -338,7 +339,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 88;
+const GAME_V = 89;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -982,7 +983,6 @@ const Card = {
       praise: $('#card-praise'), follow: $('#card-follow'), speaker: $('#btn-speaker'), mic: $('#mic'),
       pass: $('#btn-pass'), heard: $('#card-heard'), status: $('#card-status'),
     };
-    this.el.speaker.addEventListener('click', () => this.sayWord());
     this.el.pass.addEventListener('click', () => this.tapPass());
     document.addEventListener('visibilitychange', () => {
       if (!this.active || this.passed) return;
@@ -1008,7 +1008,6 @@ const Card = {
     this.fitWord();
     this.updateUI();
     this.setHint(false);
-    this.hintTimer = setTimeout(() => { if (!this.gotAttempt) this.setHint(true); }, CONFIG.HINT_DELAY_MS);
     this.scheduleListen(CONFIG.LISTEN_START_DELAY_MS);
     if (!Game.tapMode) Meter.start();
     console.log(`[Card] 표시 "${word.word}" (${word.lang}, level ${word.level}) 모드=${this.mode}`);
@@ -4082,7 +4081,7 @@ const Multi = {
     if (p.beat !== d.h) { p.beat = d.h; p.lastSeen = performance.now(); }
     p.name = String(d.n || '').slice(0, CONFIG.NAME_MAX);
     p.lk = d.lk || 0;
-    p.wear = Array.isArray(d.wr) ? d.wr.filter(id => ITEMS[id] && ITEMS[id].kind === 'wear').slice(0, 4) : [];
+    p.wear = Array.isArray(d.wr) ? d.wr.filter(id => ITEMS[id] && ['wear', 'gear'].includes(ITEMS[id].kind)).slice(0, 5) : [];
     p.st = d.st;
     p.tx = pos[0];
     p.ty = pos[1];
@@ -4102,7 +4101,10 @@ const Multi = {
       p.saySeq = d.say[0];
       p.sayText = String(d.say[1] || '').slice(0, SAY_MAX);
       p.sayT = SAY_SEC;
-      if (p.sayText && Game.state === 'play' && Social.voiceOn) Speech.speak(p.sayText, sayLang(p.sayText));
+      // 글은 같은 서버 모두에게 (대화 줄), 소리는 가까이 있는 사람 말만
+      const near = Math.hypot(p.tx - Player.x, p.ty - Player.y) < CONFIG.HEAR_TILES * T;
+      if (p.sayText) Chat.add(p.name, p.sayText, false, !near);
+      if (p.sayText && near && Game.state === 'play' && Social.voiceOn) Speech.speak(p.sayText, sayLang(p.sayText));
     }
     p.arrows = (d.a || []).filter(Boolean).map(([x, y, fx, fy, food]) => ({ x, y, fx, fy, food: ITEMS[food] ? food : null }));
     for (const ev of evs.sort((a, b) => a[0] - b[0])) {
@@ -4271,6 +4273,7 @@ const Input = {
     $('#btn-action').addEventListener('pointerdown', e => { e.preventDefault(); Game.onAction(); });
     $('#btn-jump').addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); Social.jump(); });
     $('#btn-talk').addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); Game.toggleTalk(); });
+    $('#chat-box').addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); if (!Game.talkOpen) Game.toggleTalk(); });
     // 가방 / 말하기 칸 바깥을 누르면 닫는다
     addEventListener('pointerdown', e => {
       if (!e.target.closest('#bag-panel')) Game.closeBag(!e.target.closest('button'));
@@ -6090,7 +6093,8 @@ const Game = {
     this.closeBag(false);
     Input.reset();
     this.talk = { rows: this.talkRows(), r: 0, c: 0 };
-    panel.innerHTML = '';
+    panel.innerHTML = '<div class="talk-log"></div>';
+    Chat.render();
     this.talk.rows.forEach((g, r) => {
       const row = document.createElement('div');
       row.className = 'pick-row';
@@ -6628,6 +6632,34 @@ const JUMP_SEC = 0.45;
 const tr = (ko, en) => (Store.settings.lang === 'en' ? en : ko);
 const sayLang = text => (/[가-힣]/.test(text) ? 'ko' : 'en');
 
+// 💬 대화 기록: 같은 서버 사람들이 한 말. 아래 가운데 줄에 최근 3줄, 넓은 대화 창에 전부
+const Chat = {
+  log: [],
+  add(name, text, mine, far = false) {
+    this.log.push({ name: name || '?', text, mine, far });
+    if (this.log.length > 60) this.log.shift();
+    this.render();
+  },
+  line(m) {
+    const div = document.createElement('div');
+    div.className = `chat-line${m.mine ? ' mine' : ''}${m.far ? ' far' : ''}`;
+    const b = document.createElement('b');
+    b.textContent = `${m.name}:`;
+    b.style.color = m.mine ? '#90caf9' : '#ffe082';
+    div.append(b, document.createTextNode(m.text));
+    return div;
+  },
+  render() {
+    const box = $('#chat-box');
+    if (box) box.replaceChildren(...this.log.slice(-3).map(m => this.line(m)));
+    const full = document.querySelector('#talk-panel .talk-log');
+    if (full) {
+      full.replaceChildren(...this.log.map(m => { const d = this.line(m); d.querySelector('b').style.color = m.mine ? '#1565c0' : '#c62828'; return d; }));
+      full.scrollTop = full.scrollHeight;
+    }
+  },
+};
+
 const Social = {
   // 🔊 음성 ON/OFF: 모든 사람의 말풍선을 소리로 읽어 줄지 (이 기기에만 저장, 처음엔 ON)
   voiceOn: Store.get('bc.sayVoice', true) !== false,
@@ -6670,6 +6702,7 @@ const Social = {
     Player.sayText = String(text).slice(0, SAY_MAX);
     Player.sayT = SAY_SEC;
     Player.saySeq = (Date.now() % 1e8) + Math.random(); // 다른 사람이 새 말인지 알아보게
+    Chat.add(Game.playerName, Player.sayText, true);
     if (voice && Game.state === 'play' && this.voiceOn) Speech.speak(Player.sayText, sayLang(Player.sayText));
   },
 
