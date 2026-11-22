@@ -338,7 +338,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 85;
+const GAME_V = 86;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -1829,12 +1829,12 @@ Object.assign(ICON_ART, {
     d.ell(12, 7.8, 1.1, 1.7, '#fffde7');
   },
   BLOCK_THORN: d => {
-    d.ell(12, 13.5, 10, 8.5, (nx, ny) => (ny > 0.55 ? '#1b5e20' : nx * 0.55 + ny * 0.8 < -0.4 ? '#558b2f' : '#33691e'));
-    for (let k = 0; k < 10; k++) {
-      const a = k / 10 * Math.PI * 2 + 0.3, x = 12 + Math.cos(a) * 10, y = 13.5 + Math.sin(a) * 8.5;
-      d.line(12 + Math.cos(a) * 8, 13.5 + Math.sin(a) * 6.8, x + Math.cos(a) * 1.6, y + Math.sin(a) * 1.6, 1, '#f5f5f5');
+    // 맵의 가시 울타리와 같은 모양 (받침 + 가시 네 개)
+    for (const [cx, top, hw] of [[4.5, 8, 3.4], [10, 2, 3.6], [15.5, 4.5, 3.6], [20.5, 9, 3.2]]) {
+      d.poly([[cx - hw, 19.5], [cx, top], [cx + hw, 19.5]], (u) => (u < cx - 0.6 ? '#a1887f' : u > cx + 0.6 ? '#6d4c41' : '#8d6e63'));
+      d.poly([[cx - 0.9, top + 2.4], [cx, top], [cx + 0.9, top + 2.4]], '#f5f5f5');
     }
-    for (const [x, y] of [[9, 10], [15, 12], [11, 16], [16, 16.5], [7, 14]]) d.rect(x, y, 1, 1, '#d7ccc8');
+    d.rect(1, 18.5, 22, 4, '#5d4037'); d.rect(1, 18.5, 22, 1, '#8d6e63'); d.rect(1, 21.5, 22, 1, '#3e2723');
   },
 });
 
@@ -1847,11 +1847,12 @@ function tileIcon(name, size = 24) {
     const c = document.createElement('canvas');
     c.width = c.height = size;
     const g = c.getContext('2d');
-    if (ICON_ART[name]) {
+    const tileName = name.startsWith('TILE:') ? name.slice(5) : null;
+    if (!tileName && ICON_ART[name]) {
       // 24 칸 기준 그림을 이 크기로 바로 그린다 (늘리지 않는다)
       ICON_ART[name](iconPainter(g, size));
       outlinePixels(g, size);
-    } else if (PIXEL_ICONS[name]) {
+    } else if (!tileName && PIXEL_ICONS[name]) {
       const pix = PIXEL_ICONS[name], rows = size === 24 ? scale3x(pix.rows) : size === 16 ? scale2x(pix.rows) : pix.rows, u = size / rows.length;
       rows.forEach((row, y) => [...row].forEach((ch, x) => {
         if (pix.colors[ch]) { g.fillStyle = pix.colors[ch]; g.fillRect(x * u, y * u, u, u); }
@@ -1862,7 +1863,7 @@ function tileIcon(name, size = 24) {
       const t = document.createElement('canvas');
       t.width = t.height = T;
       const tg = t.getContext('2d', { willReadFrequently: true });
-      World.drawTile(tg, 0, 0, TILE[name], undefined, true);
+      World.drawTile(tg, 0, 0, TILE[tileName || name], undefined, true);
       const d = tg.getImageData(0, 0, T, T).data;
       let x0 = T, y0 = T, x1 = -1, y1 = -1;
       for (let y = 0; y < T; y++) for (let x = 0; x < T; x++) if (d[(y * T + x) * 4 + 3] > 40) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
@@ -1880,7 +1881,7 @@ function tileIcon(name, size = 24) {
 // 아이템/무기 정의 → 그림 (블록은 BLOCK_ 그림, 없으면 맵 칸을 잘라 낸 것)
 function itemIcon(def, size = 24) {
   if (def.icon) return tileIcon(def.icon, size);
-  return tileIcon(ICON_ART[`BLOCK_${def.tile}`] ? `BLOCK_${def.tile}` : def.tile, size);
+  return tileIcon(ICON_ART[`BLOCK_${def.tile}`] ? `BLOCK_${def.tile}` : `TILE:${def.tile}`, size);
 }
 
 // 그림 둘레 빈칸에 옆 색을 아주 어둡게 한 테두리 (몬스터 그림과 같은 방식)
@@ -2671,16 +2672,20 @@ const World = {
         p(15, 8, '#fffde7', 2, 3);
         break;
       case TILE.THORN: {
-        // 가시 울타리: 짙은 가시덤불 + 하얀 가시
+        // 가시 울타리: 나무 받침 위에 뾰족한 가시 (끝이 하얗다)
         grass();
-        p(2, 28, 'rgba(0,0,0,.16)', 28, 3);
-        blob(16, 17, 15.5, 12.5, 0.3, (dx, dy, d, i, j) => (dy > 0.55 ? '#1b5e20' : dx + dy < -0.5 && nz(i, j, 7) > 0.4 ? '#558b2f' : '#33691e'));
-        const clampPx = v => Math.min(31, Math.max(0, v));
-        for (let k = 0; k < 14; k++) {
-          const a = k / 14 * Math.PI * 2 + r(110) * 0.4, tx = clampPx(Math.round(16 + Math.cos(a) * 15)), ty = clampPx(Math.round(17 + Math.sin(a) * 12));
-          p(tx, ty, '#f5f5f5'); p(tx, clampPx(ty + 1), '#d7ccc8');
+        p(1, 29, 'rgba(0,0,0,.18)', 30, 2);
+        for (const [cx, top, hw] of [[5, 11, 4], [12, 4, 4.5], [20, 7, 4.5], [27, 12, 4]]) {
+          for (let yy = top; yy < 25; yy++) {
+            const w = (yy - top) / (25 - top) * hw, x0 = Math.round(cx - w), x1 = Math.round(cx + w);
+            for (let xx = Math.max(0, x0); xx <= Math.min(31, x1); xx++) {
+              p(xx, yy, xx === x0 || xx === x1 ? '#4e342e' : xx < cx ? '#a1887f' : xx > cx ? '#6d4c41' : '#8d6e63');
+            }
+          }
+          p(cx, top, '#ffffff'); p(cx, top + 1, '#f5f5f5'); p(cx, top + 2, '#d7ccc8');
         }
-        for (let k = 0; k < 7; k++) p(6 + ri(120 + k, 20), 10 + ri(130 + k, 14), '#d7ccc8');
+        p(1, 24, '#5d4037', 30, 5); p(1, 24, '#8d6e63', 30, 1); p(1, 28, '#3e2723', 30, 1);
+        for (const x of [4, 15, 26]) p(x, 26, '#3e2723');
         break;
       }
       case TILE.CLIFF: {
@@ -4457,7 +4462,7 @@ const Render = {
     if (!color) return;
     if (block && spot) {
       ctx.globalAlpha = 0.6;
-      ctx.drawImage(tileIcon(ITEMS[block].tile, T).canvas, t.x * T, t.y * T);
+      ctx.drawImage(tileIcon(`TILE:${ITEMS[block].tile}`, T).canvas, t.x * T, t.y * T);
       ctx.globalAlpha = 1;
     }
     ctx.strokeStyle = color;
