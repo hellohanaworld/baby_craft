@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Color+Emoji&display=swap&text=%F0%9F%AA%B5%F0%9F%AA%A8%F0%9F%AA%93%F0%9F%9F%AB%F0%9F%A4%8D%F0%9F%A6%9B%F0%9F%A6%98%F0%9F%A7%B1%F0%9F%A7%B5%F0%9F%9B%A1%F0%9F%A6%94%F0%9F%A5%A9">
   <!-- 시작 화면 로고용 픽셀 글꼴 (로고 글자만 받는다) -->
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap&text=BABYCRAFT">
-  <link rel="stylesheet" href="style.css?v=49">
+  <link rel="stylesheet" href="style.css?v=50">
 </head>
 <body>
   <canvas id="game"></canvas>
@@ -116,14 +116,8 @@
 
   <!-- 시작 화면 -->
   <div id="title" class="overlay">
-    <!-- 배경: 해, 구름, 언덕, 나무, 잔디 땅 (꾸미기만) -->
-    <div class="title-bg" aria-hidden="true">
-      <div class="sun"></div>
-      <div class="cloud c1"></div><div class="cloud c2"></div><div class="cloud c3"></div>
-      <div class="hill h1"></div><div class="hill h2"></div>
-      <div class="tree t1">🌳</div><div class="tree t2">🌲</div><div class="tree t3">🌳</div><div class="tree t4">🌲</div>
-      <div class="ground"></div>
-    </div>
+    <!-- 배경: 게임 그림체의 하늘/언덕/땅 + 캐릭터가 몬스터를 무찌르는 장면 (TitleScene) -->
+    <div class="title-bg" aria-hidden="true"><canvas id="title-scene"></canvas></div>
     <h1 class="logo"><span class="logo-1">BABY</span><span class="logo-2">CRAFT</span></h1>
     <div class="logo-emoji" aria-hidden="true"><span>🪵</span><span>🪨</span><span>🗡️</span><span>🍎</span><span>💎</span></div>
     <div class="title-card">
@@ -160,6 +154,6 @@
       });
     }
   </script>
-  <script src="game.js?v=108"></script>
+  <script src="game.js?v=113"></script>
 </body>
 </html>

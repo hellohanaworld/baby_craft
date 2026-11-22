@@ -381,7 +381,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 108;
+const GAME_V = 113;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -2238,6 +2238,749 @@ function scale3x(rows) {
 //               픽셀 그림처럼 만든다. 이모지마다 한 번만 만들어 둔다 (글꼴을 다 받기 전에는 이모지 그대로)
 // ============================================================
 // 이모지 스티커: 화면 해상도로 그린 이모지 + 진한 테두리 (몬스터 몸). 크기/배율마다 한 번 그려 둔다
+// ============================================================
+// Critters — 아기 동물 그림 (머리가 크고 눈이 촉촉한 2등신, 걸으면 다리/꼬리/귀가 움직인다)
+// 왼쪽을 보는 모습으로 그린다 (오른쪽은 거울). 단위: 24 = 몸 크기 (발바닥 y = 0)
+// ============================================================
+const CRITTERS = {
+  // plan: quad 네발 / bird 새 / fly 나는 것 / fish 물고기 / bug 벌레 / snake 뱀 / snail 달팽이 / turtle 거북 / octo 문어 / ghost 유령
+  wolf:     { plan: 'quad', c: '#9aa6b2', belly: '#eef2f5', ear: 'pointy', snout: 'muzzle', tail: 'fluffy' },
+  fox:      { plan: 'quad', c: '#f28c3a', belly: '#fff4e8', ear: 'pointy', earTip: '#5d4037', snout: 'muzzle', tail: 'fluffy', tailTip: '#ffffff' },
+  bear:     { plan: 'quad', c: '#a8784f', belly: '#ecd0ae', ear: 'round', snout: 'muzzle', tail: 'pom' },
+  tiger:    { plan: 'quad', c: '#f7a62a', belly: '#fff6e5', ear: 'pointy', snout: 'muzzle', tail: 'thin', stripes: '#4a2c14' },
+  hippo:    { plan: 'quad', c: '#b3a6cf', belly: '#ddd3ec', ear: 'tiny', snout: 'hippo', tail: 'pom', chunky: true },
+  sheep:    { plan: 'quad', c: '#fbf6ee', face: '#f2d7c2', ear: 'floppy', snout: 'none', tail: 'pom', wool: true, legs: '#6d5a4b' },
+  cow:      { plan: 'quad', c: '#ffffff', ear: 'floppy', snout: 'cow', tail: 'thin', patches: '#3e302b', horns: 'nub' },
+  pig:      { plan: 'quad', c: '#ffb9c6', ear: 'floppy', snout: 'pig', tail: 'curl' },
+  deer:     { plan: 'quad', c: '#c98b55', belly: '#f6e3cb', ear: 'leaf', snout: 'tinynose', tail: 'pom', tailColor: '#ffffff', dots: '#fff8ec', slim: true },
+  rabbit:   { plan: 'quad', c: '#f6f4f2', ear: 'long', earIn: '#f8bbd0', snout: 'tinynose', tail: 'pom', hop: true },
+  bunny:    { plan: 'quad', c: '#cfa77d', belly: '#f3e3cf', ear: 'long', earIn: '#f8bbd0', snout: 'tinynose', tail: 'pom', tailColor: '#ffffff', hop: true },
+  hedgehog: { plan: 'quad', c: '#f2d6b3', ear: 'tiny', snout: 'tinynose', tail: 'none', spikes: '#7a5a44', low: true },
+  rat:      { plan: 'quad', c: '#a9a9b3', belly: '#e6e6ea', ear: 'big', earIn: '#f8bbd0', snout: 'tinynose', tail: 'long', tailColor: '#f4a7b9', low: true },
+  monkey:   { plan: 'quad', c: '#8d5a3b', face: '#f2d0a9', ear: 'side', snout: 'none', tail: 'curlLong' },
+  leopard:  { plan: 'quad', c: '#f3c76f', belly: '#fff7e6', ear: 'pointy', snout: 'muzzle', tail: 'thin', spots: '#6d4c2f' },
+  goat:     { plan: 'quad', c: '#f3ede3', ear: 'floppy', snout: 'tinynose', tail: 'pom', horns: 'goat', beard: true, slim: true },
+  ram:      { plan: 'quad', c: '#f7f1e6', face: '#e9d3bd', ear: 'floppy', snout: 'none', tail: 'pom', wool: true, horns: 'ram', legs: '#6d5a4b' },
+  dragon:   { plan: 'quad', c: '#5fc06c', belly: '#f7e7a6', ear: 'none', snout: 'dragon', tail: 'dragon', horns: 'dragon', wings: '#7fd08a', backSpikes: '#f9a825' },
+  chicken:  { plan: 'bird', c: '#ffffff', wing: '#f2f2f2', comb: '#e53935', beak: '#ffa726', feet: '#ffa726' },
+  parrot:   { plan: 'bird', c: '#4caf50', head: '#e53935', wing: '#1e88e5', crest: '#ffeb3b', beak: '#fff3c4', feet: '#8d6e63', tailLong: '#1e88e5' },
+  eagle:    { plan: 'bird', c: '#8a5a33', head: '#ffffff', wing: '#6d4426', beak: '#ffc107', feet: '#ffc107', big: true },
+  bat:      { plan: 'fly', c: '#7a5aa6', wing: '#4a3570', ear: 'pointy' },
+  cavebat:  { plan: 'fly', c: '#5b4b6e', wing: '#3a2f48', ear: 'pointy' },
+  bee:      { plan: 'fly', c: '#ffd54f', wing: 'rgba(255,255,255,.75)', stripes: '#3e2723', antenna: true, stinger: true },
+  fish:     { plan: 'fish', c: '#4fc3f7', fin: '#0288d1' },
+  blowfish: { plan: 'fish', c: '#ffd180', fin: '#ffb74d', puff: true },
+  shark:    { plan: 'fish', c: '#9fb3bf', belly: '#ffffff', fin: '#78909c', shark: true },
+  spider:   { plan: 'bug', c: '#6c5a96', legs: 8, kind: 'spider' },
+  scorpion: { plan: 'bug', c: '#d9a64e', legs: 6, kind: 'scorpion' },
+  ant:      { plan: 'bug', c: '#a1453a', legs: 6, kind: 'ant' },
+  crab:     { plan: 'bug', c: '#ef6a5a', legs: 6, kind: 'crab' },
+  snake:    { plan: 'snake', c: '#86c25a', belly: '#e4f2d0' },
+  lizard:   { plan: 'snake', c: '#4fb8ac', belly: '#d6f2ee', legs: true },
+  snail:    { plan: 'snail', c: '#f2dfc4', shell: '#d79a5b' },
+  turtle:   { plan: 'turtle', c: '#a9d67c', shell: '#5f9e3a' },
+  octopus:  { plan: 'octo', c: '#f59bbd' },
+  ghost:    { plan: 'ghost', c: '#ffffff' },
+};
+const CRITTER_BY_EMOJI = { '🐉': 'dragon' };
+
+const Critter = {
+  OL: '#3a2618',
+
+  // m: 몬스터 (움직임/맞음 상태). 원점 = 발바닥 가운데, s = 몸 크기 (월드 px)
+  draw(c, type, s, m, time) {
+    const spec = CRITTERS[type] || CRITTERS[CRITTER_BY_EMOJI[m.def.emoji]] || CRITTERS.bear;
+    const k = s / 24;
+    c.save();
+    c.scale(k, k);
+    c.lineJoin = 'round';
+    c.lineCap = 'round';
+    c.lineWidth = Math.max(0.85, k * 0.55) / k;
+    c.strokeStyle = this.OL;
+    const mv = m.animMv || 0, ph = (m.animT || 0) * 11 + m.phase;
+    const st = { spec, mv, ph, time, hurt: m.hitT > 0, blink: (time + m.phase * 3) % 4.2 < 0.12, lw: c.lineWidth };
+    this[spec.plan](c, st);
+    c.restore();
+  },
+
+  // ---------- 그리기 도구 ----------
+  sh(c, fill, fn, stroke = true) { c.beginPath(); fn(); if (fill) { c.fillStyle = fill; c.fill(); } if (stroke) c.stroke(); },
+  el(c, x, y, rx, ry, rot = 0) { return () => c.ellipse(x, y, rx, ry, rot, 0, Math.PI * 2); },
+  rr(c, x, y, w, h, r) { return () => c.roundRect(x, y, w, h, r); },
+  grad(c, x, y, r, c0, c1) { const g = c.createRadialGradient(x - r * 0.35, y - r * 0.45, r * 0.1, x, y, r * 1.05); g.addColorStop(0, c0); g.addColorStop(1, c1); return g; },
+
+  // 촉촉한 큰 눈 + 걱정스러운 눈썹 + 작은 입 + 볼터치. (cx, cy) = 두 눈 가운데, w = 눈 사이 거리, er = 눈 크기
+  face(c, st, cx, cy, w, er, opt = {}) {
+    const { hurt, blink } = st;
+    const dark = opt.eyeColor || '#2a1a12';
+    for (const ex of [cx - w / 2, cx + w / 2]) {
+      if (hurt) {
+        // 맞으면 질끈 > <
+        c.strokeStyle = dark; c.lineWidth = st.lw * 1.2;
+        const d = ex < cx ? 1 : -1;
+        c.beginPath(); c.moveTo(ex - er * 0.8 * d, cy - er * 0.6); c.lineTo(ex + er * 0.5 * d, cy); c.lineTo(ex - er * 0.8 * d, cy + er * 0.6); c.stroke();
+      } else if (blink) {
+        c.strokeStyle = dark; c.lineWidth = st.lw * 1.2;
+        c.beginPath(); c.arc(ex, cy - er * 0.2, er * 0.8, Math.PI * 0.15, Math.PI * 0.85); c.stroke();
+      } else {
+        c.fillStyle = dark;
+        c.beginPath(); c.ellipse(ex, cy, er * 0.85, er, 0, 0, Math.PI * 2); c.fill();
+        c.fillStyle = 'rgba(120,80,60,.55)';
+        c.beginPath(); c.ellipse(ex, cy + er * 0.45, er * 0.6, er * 0.42, 0, 0, Math.PI * 2); c.fill();
+        c.fillStyle = '#fff';
+        c.beginPath(); c.arc(ex - er * 0.32, cy - er * 0.38, er * 0.36, 0, Math.PI * 2); c.fill();
+        c.beginPath(); c.arc(ex + er * 0.3, cy + er * 0.35, er * 0.16, 0, Math.PI * 2); c.fill();
+        // 눈물 고인 반짝임 (아래 눈꺼풀)
+        c.strokeStyle = 'rgba(180,225,255,.9)'; c.lineWidth = st.lw * 0.8;
+        c.beginPath(); c.arc(ex, cy + er * 0.15, er * 0.88, Math.PI * 0.2, Math.PI * 0.8); c.stroke();
+      }
+    }
+    // 걱정 눈썹 (안쪽이 올라간)
+    if (!opt.noBrow) {
+      c.strokeStyle = opt.browColor || 'rgba(58,38,24,.75)'; c.lineWidth = st.lw * 0.9;
+      for (const d of [-1, 1]) {
+        const bx = cx + d * w / 2;
+        c.beginPath(); c.moveTo(bx - d * er * 0.9, cy - er * 1.45); c.lineTo(bx + d * er * 0.6, cy - er * 1.15); c.stroke();
+      }
+    }
+    // 눈물 (맞았을 때)
+    if (hurt) {
+      c.fillStyle = '#7fd3ff';
+      for (const ex of [cx - w / 2 - er * 0.3, cx + w / 2 + er * 0.3]) { c.beginPath(); c.moveTo(ex, cy + er * 0.6); c.quadraticCurveTo(ex + er * 0.55, cy + er * 1.5, ex, cy + er * 1.7); c.quadraticCurveTo(ex - er * 0.55, cy + er * 1.5, ex, cy + er * 0.6); c.fill(); }
+    }
+    // 볼터치
+    if (!opt.noBlush) {
+      c.fillStyle = 'rgba(255,120,140,.42)';
+      for (const d of [-1, 1]) { c.beginPath(); c.ellipse(cx + d * (w / 2 + er * 0.7), cy + er * 1.25, er * 0.75, er * 0.42, 0, 0, Math.PI * 2); c.fill(); }
+    }
+    // 입: 작게 오므린 (ㅅ 모양, 맞으면 o)
+    if (!opt.noMouth) {
+      const my = cy + er * (opt.mouthY || 1.55);
+      c.strokeStyle = '#6d3326'; c.lineWidth = st.lw * 0.85;
+      c.beginPath();
+      if (hurt) c.arc(cx, my + er * 0.1, er * 0.32, 0, Math.PI * 2);
+      else { c.moveTo(cx - er * 0.45, my + er * 0.15); c.quadraticCurveTo(cx - er * 0.2, my - er * 0.2, cx, my); c.quadraticCurveTo(cx + er * 0.2, my - er * 0.2, cx + er * 0.45, my + er * 0.15); }
+      c.stroke();
+    }
+    c.strokeStyle = this.OL; c.lineWidth = st.lw;
+  },
+
+  // ---------- 네발 동물 ----------
+  quad(c, st) {
+    const S = st.spec, { mv, ph } = st, sw = Math.sin(ph) * mv;
+    const hop = S.hop ? Math.max(0, Math.sin(ph)) * 3 * mv : 0;
+    const bob = S.hop ? hop : Math.abs(Math.sin(ph)) * 0.9 * mv + Math.sin(st.time * 2.2) * 0.25;
+    const low = S.low ? 2 : 0, chunky = S.chunky ? 1.15 : 1, slim = S.slim ? 0.8 : 1;
+    const dark = shade(S.c, 0.8), legC = S.legs || shade(S.c, 0.88);
+    c.save();
+    c.translate(0, -bob);
+    c.rotate(S.hop ? -Math.sin(ph) * 0.12 * mv : -0.05 * mv); // 움직이면 앞으로 살짝 기운다
+    // 뒤쪽 다리 (어둡게)
+    const leg = (x, lift, col) => this.sh(c, col, this.rr(c, x - 1.5 * slim, -5 + low + lift * -1, 3 * slim * chunky, 5 - low + lift * 0, 1.4));
+    if (!S.hop) { leg(6.5 - sw * 1.6, Math.max(0, -sw) * 2.4, shade(legC, 0.85)); leg(-0.5 + sw * 1.6, Math.max(0, sw) * 2.4, shade(legC, 0.85)); }
+    // 꼬리
+    this.tail(c, st, S, 9.5, -7 + low * 0.5);
+    // 날개 (아기 용)
+    if (S.wings) {
+      const f = Math.sin(st.time * (mv ? 9 : 3)) * 0.35;
+      c.save(); c.translate(5, -11); c.rotate(-0.4 + f);
+      this.sh(c, S.wings, () => { c.moveTo(0, 0); c.quadraticCurveTo(3, -9, 10, -9); c.quadraticCurveTo(8, -5, 9, -3); c.quadraticCurveTo(6, -3, 6, -1); c.quadraticCurveTo(3, -1, 0, 0); });
+      c.restore();
+    }
+    // 몸통
+    const bx = 3.5, by = -7.2 + low * 0.6, brx = 7.6 * chunky, bry = 5.4 * chunky;
+    if (S.wool) {
+      for (const [dx, dy, r] of [[-3, -1.5, 3.4], [0.5, -3, 3.8], [4, -2.2, 3.6], [6, 0.8, 3.2], [-2.5, 1.8, 3], [2, 2, 3.4]]) this.sh(c, S.c, () => c.arc(bx + dx, by + dy, r + 0.6, 0, Math.PI * 2));
+      for (const [dx, dy, r] of [[-3, -1.5, 3.4], [0.5, -3, 3.8], [4, -2.2, 3.6], [6, 0.8, 3.2], [-2.5, 1.8, 3], [2, 2, 3.4]]) this.sh(c, S.c, () => c.arc(bx + dx, by + dy, r, 0, Math.PI * 2), false);
+    } else {
+      this.sh(c, this.grad(c, bx, by, brx, shade(S.c, 1.12), S.c), this.el(c, bx, by, brx, bry));
+      if (S.belly) this.sh(c, S.belly, this.el(c, bx - 0.5, by + bry * 0.45, brx * 0.65, bry * 0.42), false);
+      if (S.stripes) { c.strokeStyle = S.stripes; c.lineWidth = 1.1; for (const sx of [1, 4, 7]) { c.beginPath(); c.moveTo(bx + sx - 3, by - bry + 0.6); c.quadraticCurveTo(bx + sx - 2, by - 1, bx + sx - 3.5, by + 0.5); c.stroke(); } c.strokeStyle = this.OL; c.lineWidth = st.lw; }
+      if (S.spots) { c.fillStyle = S.spots; for (const [sx, sy] of [[0, -3], [4, -4], [7, -1.5], [2, -0.5]]) { c.beginPath(); c.arc(bx + sx - 1, by + sy, 0.9, 0, Math.PI * 2); c.fill(); } }
+      if (S.dots) { c.fillStyle = S.dots; for (const [sx, sy] of [[-1, -3.6], [2.5, -4.2], [6, -3], [4, -1.8], [0.5, -1.6]]) { c.beginPath(); c.arc(bx + sx, by + sy, 0.75, 0, Math.PI * 2); c.fill(); } }
+      if (S.patches) { c.fillStyle = S.patches; c.beginPath(); c.ellipse(bx + 3, by - 1.5, 2.6, 2, 0.4, 0, Math.PI * 2); c.fill(); c.beginPath(); c.ellipse(bx - 2.5, by + 1.5, 1.6, 1.3, 0, 0, Math.PI * 2); c.fill(); }
+      if (S.spikes) {
+        for (let i = 0; i < 7; i++) {
+          const a = Math.PI * (1.02 + i * 0.13), px = bx + Math.cos(a) * brx, py = by + Math.sin(a) * bry;
+          this.sh(c, S.spikes, () => { c.moveTo(px - 1.6, py + 1); c.lineTo(bx + Math.cos(a) * (brx + 3.2), by + Math.sin(a) * (bry + 3.2)); c.lineTo(px + 1.6, py + 1); });
+        }
+        this.sh(c, S.spikes, this.el(c, bx + 1, by - 0.8, brx * 0.92, bry * 0.85), false);
+      }
+      if (S.backSpikes) for (let i = 0; i < 3; i++) this.sh(c, S.backSpikes, () => { const x0 = bx - 2 + i * 3.2, y0 = by - bry + 0.5 + Math.abs(i - 1) * 0.4; c.moveTo(x0 - 1.2, y0 + 0.6); c.lineTo(x0, y0 - 2.2); c.lineTo(x0 + 1.2, y0 + 0.6); });
+    }
+    // 앞쪽 다리
+    if (S.hop) { leg(6.5, 0, legC); leg(-0.5, 0, legC); }
+    else { leg(8.5 + sw * 1.6, Math.max(0, sw) * 2.4, legC); leg(1.5 - sw * 1.6, Math.max(0, -sw) * 2.4, legC); }
+    // 머리 (크게): 걸으면 살짝 끄덕
+    const nod = Math.sin(ph * 2) * 0.4 * mv;
+    const hx = -4.2, hy = -13.2 + low * 0.8 + nod, hr = 7.6 * (S.chunky ? 1.05 : 1);
+    this.ears(c, st, S, hx, hy, hr, 'back');
+    if (S.horns) this.horns(c, S, hx, hy, hr, 'back');
+    const headC = S.face && !S.wool ? S.c : S.face || S.c;
+    if (S.wool) this.sh(c, S.c, () => c.arc(hx + 1, hy - 2.5, hr * 0.85, 0, Math.PI * 2));
+    this.sh(c, this.grad(c, hx, hy, hr, shade(headC, 1.12), headC), () => c.ellipse(hx, hy, hr, hr * 0.94, 0, 0, Math.PI * 2));
+    if (S.wool) { for (const [dx, dy] of [[-3, -5.5], [0, -6.5], [3, -5.5]]) this.sh(c, S.c, () => c.arc(hx + dx, hy + dy, 2.4, 0, Math.PI * 2)); }
+    if (S.face && !S.wool) this.sh(c, S.face, () => { c.ellipse(hx - 0.8, hy + 1, hr * 0.72, hr * 0.62, 0, 0, Math.PI * 2); }, false);
+    if (S.stripes) { c.strokeStyle = S.stripes; c.lineWidth = 0.9; for (const d of [-1.5, 0, 1.5]) { c.beginPath(); c.moveTo(hx + d * 1.6, hy - hr + 0.5); c.lineTo(hx + d * 1.3, hy - hr + 2.6); c.stroke(); } c.strokeStyle = this.OL; c.lineWidth = st.lw; }
+    this.ears(c, st, S, hx, hy, hr, 'front');
+    if (S.horns) this.horns(c, S, hx, hy, hr, 'front');
+    // 주둥이 + 얼굴
+    const fx = hx - 1.2, fy = hy + 0.2;
+    this.snout(c, st, S, fx, fy + 3.6);
+    this.face(c, st, fx, fy, 6, 1.75, { noMouth: S.snout !== 'none' && S.snout !== 'tinynose', mouthY: 1.7 });
+    if (S.beard) this.sh(c, '#ffffff', () => { c.moveTo(fx - 1, fy + 5.5); c.lineTo(fx, fy + 8.5); c.lineTo(fx + 1, fy + 5.5); });
+    c.restore();
+  },
+
+  ears(c, st, S, hx, hy, hr, layer) {
+    const wig = Math.sin(st.ph * 2) * 0.12 * st.mv + Math.sin(st.time * 1.7) * 0.03;
+    const earC = S.face && !S.wool ? S.c : S.wool ? (S.face || S.c) : S.c, inC = S.earIn || shade(earC, 1.15);
+    const pair = layer === 'back' ? [1] : [-1];
+    for (const d of pair) {
+      const ex = hx + d * hr * 0.55, ey = hy - hr * 0.72;
+      c.save(); c.translate(ex, ey); c.rotate(d * 0.25 + wig * (layer === 'back' ? -1 : 1));
+      const col = layer === 'back' ? shade(earC, 0.9) : earC;
+      switch (S.ear) {
+        case 'pointy':
+          this.sh(c, col, () => { c.moveTo(-2.6, 1.5); c.lineTo(0, -4.4); c.lineTo(2.6, 1.5); c.closePath(); });
+          this.sh(c, S.earTip || inC, () => { c.moveTo(-1.2, 0.6); c.lineTo(0, -2.6); c.lineTo(1.2, 0.6); c.closePath(); }, false);
+          break;
+        case 'round': case 'big': {
+          const r = S.ear === 'big' ? 3.3 : 2.4;
+          this.sh(c, col, () => c.arc(0, -0.6, r, 0, Math.PI * 2));
+          this.sh(c, inC, () => c.arc(0, -0.4, r * 0.55, 0, Math.PI * 2), false);
+          break;
+        }
+        case 'tiny': this.sh(c, col, () => c.arc(0, 0.4, 1.4, 0, Math.PI * 2)); break;
+        case 'long': {
+          const flop = Math.sin(st.ph) * 0.18 * st.mv;
+          c.rotate(flop);
+          this.sh(c, col, () => c.ellipse(0, -5, 1.9, 5.4, 0, 0, Math.PI * 2));
+          this.sh(c, inC, () => c.ellipse(0, -4.6, 0.9, 4, 0, 0, Math.PI * 2), false);
+          break;
+        }
+        case 'leaf': this.sh(c, col, () => c.ellipse(d * 2.2, -1, 3.4, 1.6, d * 0.5, 0, Math.PI * 2)); this.sh(c, '#f8d7c0', () => c.ellipse(d * 2.2, -1, 2, 0.8, d * 0.5, 0, Math.PI * 2), false); break;
+        case 'floppy': this.sh(c, col, () => c.ellipse(d * 2.8, 2.5, 1.8, 3.4, d * -0.9 + wig, 0, Math.PI * 2)); break;
+        case 'side': c.restore(); c.save(); this.sh(c, col, () => c.arc(hx + d * (hr - 0.3), hy + 0.5, 2.6, 0, Math.PI * 2)); this.sh(c, S.face || inC, () => c.arc(hx + d * (hr - 0.3), hy + 0.5, 1.4, 0, Math.PI * 2), false); break;
+        default: break;
+      }
+      c.restore();
+    }
+  },
+
+  horns(c, S, hx, hy, hr, layer) {
+    const d = layer === 'back' ? 1 : -1, x = hx + d * hr * 0.35, y = hy - hr * 0.85;
+    if (S.horns === 'nub') this.sh(c, '#f3e2c0', () => c.ellipse(x, y, 1, 1.6, d * 0.3, 0, Math.PI * 2));
+    else if (S.horns === 'goat') this.sh(c, '#d7c4a3', () => { c.moveTo(x - 0.9, y + 1); c.quadraticCurveTo(x + 1.5, y - 3, x + 3, y - 3.2); c.quadraticCurveTo(x + 1.6, y - 1.2, x + 0.9, y + 1); c.closePath(); });
+    else if (S.horns === 'ram') this.sh(c, '#c8a97e', () => { c.arc(x + d * 1.4, y + 2.2, 2.6, 0, Math.PI * 2); }), c.strokeStyle = 'rgba(90,60,30,.6)', c.beginPath(), c.arc(x + d * 1.4, y + 2.2, 1.2, 0, Math.PI * 1.5), c.stroke(), c.strokeStyle = this.OL;
+    else if (S.horns === 'dragon') this.sh(c, '#fff3c4', () => { c.moveTo(x - 1, y + 1); c.quadraticCurveTo(x + 0.5, y - 2, x + 2, y - 4); c.quadraticCurveTo(x + 1.6, y - 1, x + 1, y + 1); c.closePath(); });
+  },
+
+  snout(c, st, S, x, y) {
+    switch (S.snout) {
+      case 'muzzle':
+        this.sh(c, S.belly || shade(S.c, 1.3), () => c.ellipse(x - 0.4, y + 0.4, 2.8, 2, 0, 0, Math.PI * 2), false);
+        this.sh(c, '#3a2618', () => c.ellipse(x - 0.4, y - 0.9, 1, 0.7, 0, 0, Math.PI * 2), false);
+        c.strokeStyle = '#6d3326'; c.lineWidth = st.lw * 0.8; c.beginPath(); c.moveTo(x - 0.4, y - 0.3); c.lineTo(x - 0.4, y + 0.6); c.moveTo(x - 1.4, y + 1); c.quadraticCurveTo(x - 0.4, y + 1.6, x + 0.6, y + 1); c.stroke(); c.strokeStyle = this.OL; c.lineWidth = st.lw;
+        break;
+      case 'pig': this.sh(c, '#ff9fb3', () => c.ellipse(x - 0.4, y + 0.2, 2.4, 1.7, 0, 0, Math.PI * 2)); c.fillStyle = '#c2185b'; for (const d of [-0.8, 0.8]) { c.beginPath(); c.ellipse(x - 0.4 + d, y + 0.2, 0.4, 0.6, 0, 0, Math.PI * 2); c.fill(); } break;
+      case 'cow': this.sh(c, '#ffc2cf', () => c.ellipse(x - 0.4, y + 0.6, 3.2, 2, 0, 0, Math.PI * 2)); c.fillStyle = '#ad5070'; for (const d of [-1.1, 1.1]) { c.beginPath(); c.arc(x - 0.4 + d, y + 0.5, 0.45, 0, Math.PI * 2); c.fill(); } break;
+      case 'hippo': this.sh(c, shade(S.c, 1.12), () => c.ellipse(x - 0.4, y + 0.8, 3.8, 2.5, 0, 0, Math.PI * 2)); c.fillStyle = '#5e4b7a'; for (const d of [-1.3, 1.3]) { c.beginPath(); c.arc(x - 0.4 + d, y - 0.1, 0.45, 0, Math.PI * 2); c.fill(); } break;
+      case 'dragon': this.sh(c, shade(S.c, 1.15), () => c.ellipse(x - 0.6, y + 0.6, 3.2, 2.1, 0, 0, Math.PI * 2)); c.fillStyle = '#2e5e33'; for (const d of [-0.9, 0.9]) { c.beginPath(); c.arc(x - 0.6 + d, y - 0.1, 0.35, 0, Math.PI * 2); c.fill(); } break;
+      case 'tinynose': this.sh(c, '#f48fb1', () => c.ellipse(x - 0.4, y - 0.6, 0.8, 0.55, 0, 0, Math.PI * 2), false); break;
+      default: break;
+    }
+  },
+
+  tail(c, st, S, x, y) {
+    const wag = Math.sin(st.ph * (st.mv ? 1 : 0.4) + 1) * (0.25 + 0.2 * st.mv) + Math.sin(st.time * 2) * 0.08;
+    const col = S.tailColor || S.c;
+    c.save(); c.translate(x, y); c.rotate(wag);
+    switch (S.tail) {
+      case 'fluffy':
+        this.sh(c, col, () => c.ellipse(3.6, -2.6, 4.2, 2.4, -0.7, 0, Math.PI * 2));
+        if (S.tailTip) this.sh(c, S.tailTip, () => c.ellipse(6.2, -5.2, 1.6, 1.3, -0.7, 0, Math.PI * 2));
+        break;
+      case 'pom': this.sh(c, col, () => c.arc(0.8, -0.6, 2.1, 0, Math.PI * 2)); break;
+      case 'thin': case 'long':
+        c.strokeStyle = this.OL; c.lineWidth = 2.6; c.beginPath(); c.moveTo(0, 0); c.quadraticCurveTo(4, -1, 5.5, -4.5); c.stroke();
+        c.strokeStyle = col; c.lineWidth = 1.3; c.beginPath(); c.moveTo(0, 0); c.quadraticCurveTo(4, -1, 5.5, -4.5); c.stroke();
+        if (S.stripes || S.spots) this.sh(c, S.stripes || S.spots, () => c.arc(5.5, -4.5, 1, 0, Math.PI * 2), false);
+        break;
+      case 'curl': c.strokeStyle = this.OL; c.lineWidth = 2.2; c.beginPath(); c.arc(2, -1, 1.6, Math.PI, Math.PI * 2.6); c.stroke(); c.strokeStyle = col; c.lineWidth = 1; c.beginPath(); c.arc(2, -1, 1.6, Math.PI, Math.PI * 2.6); c.stroke(); break;
+      case 'curlLong': c.strokeStyle = this.OL; c.lineWidth = 2.4; c.beginPath(); c.moveTo(0, 0); c.quadraticCurveTo(6, 0, 6, -5); c.arc(4.5, -5, 1.5, 0, Math.PI * 1.3, true); c.stroke(); c.strokeStyle = col; c.lineWidth = 1.1; c.beginPath(); c.moveTo(0, 0); c.quadraticCurveTo(6, 0, 6, -5); c.arc(4.5, -5, 1.5, 0, Math.PI * 1.3, true); c.stroke(); break;
+      case 'dragon': this.sh(c, col, () => { c.moveTo(-1, -2); c.quadraticCurveTo(5, -1, 7, -5); c.lineTo(8.5, -3.5); c.quadraticCurveTo(6, 1.5, -1, 2); c.closePath(); }); this.sh(c, S.backSpikes, () => { c.moveTo(6.6, -4.6); c.lineTo(9.2, -6.4); c.lineTo(8.6, -3.4); c.closePath(); }); break;
+      default: break;
+    }
+    c.strokeStyle = this.OL; c.lineWidth = st.lw;
+    c.restore();
+  },
+
+  // ---------- 새 ----------
+  bird(c, st) {
+    const S = st.spec, { mv, ph } = st, sw = Math.sin(ph) * mv;
+    const bob = Math.abs(Math.sin(ph)) * 1 * mv + Math.sin(st.time * 2.5) * 0.25;
+    // 다리
+    c.strokeStyle = S.feet; c.lineWidth = 1.2;
+    for (const [lx, l] of [[-1, Math.max(0, sw)], [2, Math.max(0, -sw)]]) { c.beginPath(); c.moveTo(lx, -4); c.lineTo(lx, -l * 1.4); c.lineTo(lx - 1.4, -l * 1.4); c.stroke(); }
+    c.strokeStyle = this.OL; c.lineWidth = st.lw;
+    c.save(); c.translate(0, -bob);
+    if (S.tailLong) this.sh(c, S.tailLong, () => c.ellipse(8, -6, 4.5, 1.6, 0.5, 0, Math.PI * 2));
+    else this.sh(c, S.c, () => { c.moveTo(6, -9); c.lineTo(10.5, -12.5); c.lineTo(9.5, -7); c.closePath(); });
+    this.sh(c, this.grad(c, 1.5, -9.5, 8, shade(S.c, 1.1), S.c), () => c.ellipse(1.5, -9.5, 7.5, 6.6, 0, 0, Math.PI * 2));
+    // 날개 (퍼덕)
+    const flap = Math.sin(st.time * (mv ? 14 : 3)) * (mv ? 0.5 : 0.12);
+    c.save(); c.translate(3, -10); c.rotate(-0.3 - flap);
+    this.sh(c, S.wing, () => c.ellipse(1.5, 1, 4.2, 2.8, 0.4, 0, Math.PI * 2));
+    c.restore();
+    // 머리 (몸과 붙은 큰 동그라미)
+    const hx = -3, hy = -14.5;
+    if (S.comb) this.sh(c, S.comb, () => { c.arc(hx - 1, hy - 6, 1.6, 0, Math.PI * 2); c.moveTo(hx + 2.6, hy - 5.6); c.arc(hx + 1.2, hy - 5.8, 1.5, 0, Math.PI * 2); });
+    if (S.crest) this.sh(c, S.crest, () => { c.moveTo(hx, hy - 5); c.quadraticCurveTo(hx + 1, hy - 9, hx + 4, hy - 8.5); c.quadraticCurveTo(hx + 2, hy - 7, hx + 2, hy - 4.5); c.closePath(); });
+    this.sh(c, this.grad(c, hx, hy, 6.3, shade(S.head || S.c, 1.1), S.head || S.c), () => c.arc(hx, hy, 6.2, 0, Math.PI * 2));
+    // 부리 (작고 둥근)
+    this.sh(c, S.beak, () => { c.moveTo(hx - 4.6, hy + 0.6); c.quadraticCurveTo(hx - 8, hy + 1.6, hx - 4.4, hy + 3); c.closePath(); });
+    if (S.comb) this.sh(c, S.comb, () => c.ellipse(hx - 4.2, hy + 4, 0.9, 1.4, 0, 0, Math.PI * 2));
+    this.face(c, st, hx - 0.6, hy - 0.8, 5.2, 1.6, { noMouth: true });
+    c.restore();
+  },
+
+  // ---------- 나는 것 (박쥐, 벌): 공중에 둥실, 날개 퍼덕 ----------
+  fly(c, st) {
+    const S = st.spec, float = Math.sin(st.time * 3 + st.ph * 0.1) * 1.2;
+    c.save(); c.translate(0, -5 + float);
+    const flap = Math.sin(st.time * (S.stripes ? 30 : 12)) * 0.55;
+    for (const d of [1, -1]) {
+      c.save(); c.translate(d * 3.5, -9); c.rotate(d * (0.2 + flap));
+      if (S.stripes) this.sh(c, S.wing, () => c.ellipse(d * 4, -3, 4, 2.4, d * 0.5, 0, Math.PI * 2));
+      else this.sh(c, S.wing, () => { c.moveTo(0, 0); c.quadraticCurveTo(d * 5, -6, d * 9.5, -3); c.quadraticCurveTo(d * 8, -1, d * 8.2, 1); c.quadraticCurveTo(d * 6, -0.2, d * 5.4, 2); c.quadraticCurveTo(d * 3.5, 0.6, 0, 2); c.closePath(); });
+      c.restore();
+    }
+    if (S.stinger) this.sh(c, '#3e2723', () => { c.moveTo(6.5, -6); c.lineTo(9.5, -5); c.lineTo(6.5, -4); c.closePath(); });
+    this.sh(c, this.grad(c, 0, -9, 8, shade(S.c, 1.15), S.c), () => c.ellipse(0, -9, 7.4, 7, 0, 0, Math.PI * 2));
+    if (S.stripes) { c.save(); c.beginPath(); c.ellipse(0, -9, 7.4, 7, 0, 0, Math.PI * 2); c.clip(); c.fillStyle = S.stripes; for (const sx of [1.5, 5]) c.fillRect(sx, -17, 1.8, 16); c.restore(); this.sh(c, null, () => c.ellipse(0, -9, 7.4, 7, 0, 0, Math.PI * 2)); }
+    if (S.ear === 'pointy') for (const d of [-1, 1]) this.sh(c, S.c, () => { c.moveTo(d * 2 - 2, -14.5); c.lineTo(d * 3.5, -19); c.lineTo(d * 4.6 + 0.4, -14); c.closePath(); });
+    if (S.antenna) { c.lineWidth = st.lw; for (const d of [-1, 1]) { c.beginPath(); c.moveTo(d * 1.5 - 1, -15.5); c.quadraticCurveTo(d * 2 - 1, -19, d * 3.5 - 1.5, -19.5); c.stroke(); this.sh(c, '#3e2723', () => c.arc(d * 3.5 - 1.5, -19.5, 0.9, 0, Math.PI * 2), false); } }
+    this.face(c, st, -1.2, -9.5, 5.4, 1.75);
+    c.restore();
+  },
+
+  // ---------- 물고기 ----------
+  fish(c, st) {
+    const S = st.spec, wag = Math.sin(st.time * (st.mv ? 12 : 5) + st.ph * 0.1) * 0.35;
+    c.save(); c.translate(0, -8 + Math.sin(st.time * 2 + st.ph * 0.1) * 0.8);
+    c.save(); c.translate(7, 0); c.rotate(wag);
+    this.sh(c, S.fin, () => { c.moveTo(0, 0); c.quadraticCurveTo(4, -5, 6.5, -5); c.quadraticCurveTo(5, 0, 6.5, 5); c.quadraticCurveTo(4, 5, 0, 0); });
+    c.restore();
+    if (S.shark) this.sh(c, S.fin, () => { c.moveTo(-1, -5.5); c.quadraticCurveTo(1, -11, 4, -11); c.quadraticCurveTo(3, -7, 4, -5); c.closePath(); });
+    else if (!S.puff) this.sh(c, S.fin, () => { c.moveTo(-2, -5); c.quadraticCurveTo(1, -9, 4, -6.5); c.lineTo(3, -4.5); c.closePath(); });
+    const rx = S.puff ? 7.6 : 8.6, ry = S.puff ? 7.4 : 6.2;
+    if (S.puff) for (let i = 0; i < 12; i++) { const a = i / 12 * Math.PI * 2; this.sh(c, '#e6a84f', () => { c.moveTo(Math.cos(a - 0.15) * rx, Math.sin(a - 0.15) * ry); c.lineTo(Math.cos(a) * (rx + 2.4), Math.sin(a) * (ry + 2.4)); c.lineTo(Math.cos(a + 0.15) * rx, Math.sin(a + 0.15) * ry); }); }
+    this.sh(c, this.grad(c, 0, 0, rx, shade(S.c, 1.15), S.c), () => c.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2));
+    if (S.belly) this.sh(c, S.belly, () => c.ellipse(-1, 2.8, rx * 0.75, ry * 0.42, 0, 0, Math.PI * 2), false);
+    // 옆 지느러미 (팔랑)
+    c.save(); c.translate(1, 1.5); c.rotate(0.5 + wag * 0.8);
+    this.sh(c, S.fin, () => c.ellipse(1.8, 0, 2.6, 1.3, 0, 0, Math.PI * 2));
+    c.restore();
+    this.face(c, st, -3.6, -1, 4.6, 1.6, { mouthY: 1.9 });
+    c.restore();
+  },
+
+  // ---------- 벌레 (거미, 전갈, 개미, 게): 많은 다리가 꼼지락 ----------
+  bug(c, st) {
+    const S = st.spec, wig = st.time * (st.mv ? 16 : 3);
+    c.save(); c.translate(0, -Math.abs(Math.sin(wig)) * 0.5 * st.mv);
+    const legs = S.legs, half = legs / 2;
+    c.lineWidth = 1.4;
+    for (let i = 0; i < half; i++) for (const d of [-1, 1]) {
+      const bx = -3 + i * (8 / Math.max(1, half - 1)), w = Math.sin(wig + i * 1.6 + (d > 0 ? Math.PI : 0)) * 1.2;
+      c.strokeStyle = this.OL; c.lineWidth = 2.2;
+      c.beginPath(); c.moveTo(bx, -5); c.quadraticCurveTo(bx + d * 3 + w, -8.5 + (d > 0 ? 0.5 : 0), bx + d * 4.2 + w, -0.4); c.stroke();
+      c.strokeStyle = shade(S.c, 0.85); c.lineWidth = 1;
+      c.beginPath(); c.moveTo(bx, -5); c.quadraticCurveTo(bx + d * 3 + w, -8.5 + (d > 0 ? 0.5 : 0), bx + d * 4.2 + w, -0.4); c.stroke();
+    }
+    c.strokeStyle = this.OL; c.lineWidth = st.lw;
+    if (S.kind === 'scorpion') {
+      const t = Math.sin(st.time * 3) * 0.15;
+      c.save(); c.translate(7, -6); c.rotate(t);
+      this.sh(c, S.c, () => { c.moveTo(0, 1.5); c.quadraticCurveTo(6, 0, 5.5, -7); c.quadraticCurveTo(3.5, -9.5, 1.5, -7.5); c.lineTo(3, -6.5); c.quadraticCurveTo(3.5, -2, -0.5, -1.5); c.closePath(); });
+      this.sh(c, '#8d6e63', () => { c.moveTo(1.4, -7.6); c.lineTo(-0.6, -9); c.lineTo(1, -6.4); });
+      c.restore();
+    }
+    if (S.kind === 'ant') { this.sh(c, S.c, () => c.ellipse(6, -6, 4, 3.4, 0, 0, Math.PI * 2)); this.sh(c, S.c, () => c.ellipse(1.5, -6.5, 2.4, 2.2, 0, 0, Math.PI * 2)); }
+    else if (S.kind !== 'crab') this.sh(c, this.grad(c, 4, -7, 6, shade(S.c, 1.15), S.c), () => c.ellipse(4, -7, 6.2, 5.2, 0, 0, Math.PI * 2));
+    if (S.kind === 'crab' || S.kind === 'scorpion') {
+      const snap = Math.sin(st.time * 6) * 0.25;
+      for (const [d, cx] of [[-1, -7], [1, 7]]) {
+        if (S.kind === 'scorpion' && d > 0) continue;
+        c.save(); c.translate(cx * (S.kind === 'scorpion' ? 1 : 1), -10); c.rotate(d * 0.3);
+        this.sh(c, S.c, () => c.ellipse(0, -1, 2.8, 2.2, 0, 0, Math.PI * 2));
+        this.sh(c, shade(S.c, 1.1), () => { c.moveTo(-0.5, -2.4); c.quadraticCurveTo(d * 1 - 1.6, -5 - snap * 3, -2.6, -3.4); c.closePath(); });
+        c.restore();
+      }
+    }
+    // 머리 (크게)
+    const hx = S.kind === 'crab' ? 0 : -3.6, hy = S.kind === 'crab' ? -9 : -10.5, hr = S.kind === 'crab' ? 7.8 : 6.4;
+    if (S.kind === 'ant') for (const d of [-1, 1]) { c.beginPath(); c.moveTo(hx + d * 1.6, hy - hr + 0.8); c.quadraticCurveTo(hx + d * 2.6 - 1, hy - hr - 3.5, hx + d * 4 - 2, hy - hr - 3.6); c.stroke(); }
+    if (S.kind === 'crab') for (const d of [-1, 1]) { c.beginPath(); c.moveTo(hx + d * 2.6, hy - hr + 1.5); c.lineTo(hx + d * 3, hy - hr - 2); c.stroke(); this.sh(c, '#ffffff', () => c.arc(hx + d * 3, hy - hr - 2.6, 1.4, 0, Math.PI * 2)); }
+    this.sh(c, this.grad(c, hx, hy, hr, shade(S.c, 1.15), S.c), () => c.ellipse(hx, hy, hr, hr * (S.kind === 'crab' ? 0.75 : 0.92), 0, 0, Math.PI * 2));
+    if (S.kind === 'spider') { c.fillStyle = 'rgba(255,255,255,.5)'; c.beginPath(); c.arc(hx + 3, hy - 4, 0.6, 0, Math.PI * 2); c.arc(hx - 0.5, hy - 4.6, 0.6, 0, Math.PI * 2); c.fill(); }
+    this.face(c, st, hx - (S.kind === 'crab' ? 0 : 0.8), hy, 5, 1.65);
+    c.restore();
+  },
+
+  // ---------- 뱀 / 도마뱀 ----------
+  snake(c, st) {
+    const S = st.spec, w = st.time * (st.mv ? 9 : 2.5);
+    const pts = [];
+    for (let i = 0; i <= 10; i++) pts.push([i * 1.6, -3 - Math.sin(w - i * 0.7) * (S.legs ? 0.6 : 1.6) * (i / 10)]);
+    if (S.legs) for (const [lx, d] of [[2, 0], [9, Math.PI]]) for (const side of [-1, 1]) {
+      const l = Math.sin(w + d) * st.mv * 1.4;
+      this.sh(c, shade(S.c, side > 0 ? 0.85 : 1), () => c.ellipse(lx + l * side * 0.3, -1.4, 1.2, 1.8, side * 0.6, 0, Math.PI * 2));
+    }
+    // 몸통: 굵은 선 (테두리 → 색 → 배)
+    const stroke = (col, wd) => { c.strokeStyle = col; c.lineWidth = wd; c.beginPath(); c.moveTo(pts[0][0], pts[0][1]); for (const [x, y] of pts.slice(1)) c.lineTo(x, y); c.stroke(); };
+    stroke(this.OL, 6.4); stroke(S.c, 4.6);
+    c.strokeStyle = S.belly; c.lineWidth = 1.6; c.beginPath(); c.moveTo(pts[0][0], pts[0][1] + 1.2); for (const [x, y] of pts.slice(1, 8)) c.lineTo(x, y + 1.2); c.stroke();
+    if (!S.legs) { c.fillStyle = shade(S.c, 0.78); for (const i of [3, 6, 9]) { c.beginPath(); c.arc(pts[i][0], pts[i][1] - 0.8, 0.9, 0, Math.PI * 2); c.fill(); } }
+    c.strokeStyle = this.OL; c.lineWidth = st.lw;
+    // 머리 (크게)
+    const hx = -3, hy = -8.5 + Math.sin(w) * 0.5;
+    if (!S.legs && Math.sin(st.time * 2.3) > 0.6) { c.strokeStyle = '#e53935'; c.lineWidth = 0.7; c.beginPath(); c.moveTo(hx - 6.5, hy + 2.5); c.lineTo(hx - 9, hy + 2.8); c.lineTo(hx - 9.8, hy + 2); c.moveTo(hx - 9, hy + 2.8); c.lineTo(hx - 9.8, hy + 3.6); c.stroke(); c.strokeStyle = this.OL; c.lineWidth = st.lw; }
+    this.sh(c, this.grad(c, hx, hy, 6.4, shade(S.c, 1.15), S.c), () => c.ellipse(hx, hy, 6.6, 6, 0, 0, Math.PI * 2));
+    this.face(c, st, hx - 0.8, hy - 0.5, 5, 1.7);
+  },
+
+  snail(c, st) {
+    const S = st.spec, str = Math.sin(st.time * (st.mv ? 5 : 1.5)) * 0.6;
+    this.sh(c, S.c, () => { c.moveTo(-9 - str, 0); c.quadraticCurveTo(-10, -6, -6, -8); c.lineTo(8, -2); c.quadraticCurveTo(10, 0, 8, 0); c.closePath(); });
+    for (const d of [-1, 1]) { c.beginPath(); c.moveTo(-7 + d, -7.5); c.lineTo(-8 + d * 1.6, -12); c.stroke(); this.sh(c, S.c, () => c.arc(-8 + d * 1.6, -12.5, 1.1, 0, Math.PI * 2)); }
+    this.sh(c, this.grad(c, 3, -8.5, 7, shade(S.shell, 1.2), S.shell), () => c.arc(3, -8.5, 7, 0, Math.PI * 2));
+    c.strokeStyle = shade(S.shell, 0.65); c.lineWidth = 1; c.beginPath();
+    for (let a = 0, r = 0.5; a < Math.PI * 5; a += 0.3, r += 0.12) { const x = 3 + Math.cos(a) * r * 0.9, y = -8.5 + Math.sin(a) * r * 0.9; if (a === 0) c.moveTo(x, y); else c.lineTo(x, y); }
+    c.stroke(); c.strokeStyle = this.OL; c.lineWidth = st.lw;
+    this.face(c, st, -7.2, -5, 3.4, 1.25, { noBrow: false });
+  },
+
+  turtle(c, st) {
+    const S = st.spec, sw = Math.sin(st.ph) * st.mv;
+    for (const [lx, l] of [[-4, sw], [5, -sw]]) this.sh(c, S.c, () => c.ellipse(lx, -1.6 - Math.max(0, l) * 0.8, 2, 1.8, 0, 0, Math.PI * 2));
+    this.sh(c, S.c, () => c.ellipse(9.5, -3.6, 1.8, 1, 0.3, 0, Math.PI * 2));
+    this.sh(c, this.grad(c, 2, -7, 8, shade(S.shell, 1.25), S.shell), () => { c.ellipse(2, -4.5, 8.4, 6.4, 0, Math.PI, Math.PI * 2); c.closePath(); });
+    c.strokeStyle = shade(S.shell, 0.65); c.lineWidth = 0.9;
+    c.beginPath(); c.ellipse(2, -6, 3, 2.2, 0, 0, Math.PI * 2); c.moveTo(-1, -6); c.lineTo(-5, -5); c.moveTo(5, -6); c.lineTo(9, -5); c.moveTo(2, -8.2); c.lineTo(2, -10.4); c.stroke();
+    c.strokeStyle = this.OL; c.lineWidth = st.lw;
+    this.sh(c, shade(S.shell, 0.8), () => c.roundRect(-7, -5, 18, 1.8, 0.9));
+    const hx = -8.5, hy = -8 + Math.sin(st.ph) * 0.4 * st.mv;
+    this.sh(c, this.grad(c, hx, hy, 5.6, shade(S.c, 1.15), S.c), () => c.ellipse(hx, hy, 5.6, 5.2, 0, 0, Math.PI * 2));
+    this.face(c, st, hx - 0.6, hy - 0.4, 4.4, 1.5);
+  },
+
+  octo(c, st) {
+    const S = st.spec, t = st.time * (st.mv ? 7 : 2.5);
+    c.save(); c.translate(0, Math.sin(st.time * 2) * 0.8);
+    for (let i = 0; i < 5; i++) {
+      const x = -6 + i * 3, w = Math.sin(t + i * 1.2) * 1.5;
+      this.sh(c, shade(S.c, i % 2 ? 0.9 : 1), () => { c.moveTo(x - 1.4, -6); c.quadraticCurveTo(x - 1.2 + w, -2, x + w * 1.4, -0.4); c.quadraticCurveTo(x + 1.4 + w, -2, x + 1.4, -6); c.closePath(); });
+    }
+    this.sh(c, this.grad(c, 0, -12, 8.5, shade(S.c, 1.12), S.c), () => c.ellipse(0, -12, 8.6, 8, 0, 0, Math.PI * 2));
+    c.fillStyle = 'rgba(255,255,255,.35)'; c.beginPath(); c.arc(3.5, -16, 1.2, 0, Math.PI * 2); c.arc(5.5, -13.5, 0.7, 0, Math.PI * 2); c.fill();
+    this.face(c, st, -1, -10.5, 5.6, 1.8);
+    c.restore();
+  },
+
+  ghost(c, st) {
+    const S = st.spec, t = st.time * 3;
+    c.save(); c.translate(0, -3);
+    this.sh(c, 'rgba(255,255,255,.95)', () => {
+      c.moveTo(-8, -10); c.arc(0, -11, 8, Math.PI, 0); c.lineTo(8, -2);
+      for (let i = 0; i < 4; i++) { const x0 = 8 - i * 4; c.quadraticCurveTo(x0 - 1, 1 + Math.sin(t + i) * 1.2, x0 - 2, -1); c.quadraticCurveTo(x0 - 3, -3, x0 - 4, -1.5); }
+      c.closePath();
+    });
+    for (const d of [-1, 1]) this.sh(c, '#ffffff', () => c.ellipse(d * 8.4, -7 + Math.sin(t + d) * 0.6, 1.8, 1.3, d * 0.4, 0, Math.PI * 2));
+    this.face(c, st, -1, -11, 5.4, 1.8);
+    c.restore();
+  },
+};
+
+// ============================================================
+// TitleScene — 시작 화면 배경: 게임과 같은 그림체의 하늘/언덕/땅 위에서
+// 내 캐릭터(🎨 로 고른 모양)가 걸어가며 다가오는 아기 몬스터를 콩! 무찌르고 떨어진 것을 줍는다
+// ============================================================
+const TitleScene = {
+  FOES: ['wolf', 'spider', 'fox', 'snake', 'bat', 'bear', 'scorpion', 'ghost', 'tiger', 'crab'],
+  init() {
+    if (/[?&]server=/.test(location.search)) return; // 채널 서버는 그리지 않는다
+    this.title = $('#title');
+    this.canvas = $('#title-scene');
+    if (!this.canvas) return;
+    this.ctx = this.canvas.getContext('2d');
+    this.scroll = 0;
+    this.hero = { x: 0, y: 0, dir: 'right', moving: true, walkT: 0, swingT: 0 };
+    this.foe = null;
+    this.nextFoe = 1.2;
+    this.foeIndex = Math.floor(Math.random() * this.FOES.length);
+    this.cool = 0;
+    this.parts = [];
+    this.drops = [];
+    this.clouds = [0.1, 0.45, 0.8].map((f, i) => ({ f, y: 0.08 + i * 0.07 + (i % 2) * 0.04, s: 0.8 + (i % 2) * 0.4, v: 6 + i * 3 }));
+    this.resize();
+    addEventListener('resize', () => this.resize());
+    this.last = performance.now();
+    const loop = now => {
+      requestAnimationFrame(loop);
+      const dt = Math.max(0, Math.min(0.05, (now - this.last) / 1000));
+      this.last = now;
+      if (this.title.classList.contains('hidden') || document.hidden) return;
+      this.update(dt);
+      this.draw(now / 1000);
+    };
+    requestAnimationFrame(loop);
+  },
+
+  resize() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const W = this.title.clientWidth || innerWidth, H = this.title.clientHeight || innerHeight;
+    this.W = W; this.H = H; this.dpr = dpr;
+    this.canvas.width = Math.round(W * dpr);
+    this.canvas.height = Math.round(H * dpr);
+    this.ts = Math.round(Math.max(40, Math.min(80, Math.min(W, H) / 9)));
+    this.k = this.ts / T; // 월드 px → 화면 px
+    this.rows = Math.max(5, Math.ceil((H * 0.42) / this.ts));
+    this.groundTop = H - this.rows * this.ts;
+    this.pathRow = -1;
+    this.layout();
+  },
+
+  // 단추/패널에 가리지 않는 곳에서 싸운다: 패널 아래에 자리가 있으면 거기 길에서, 없으면 왼쪽 빈자리에서
+  layout() {
+    const { W, H, ts, rows, groundTop } = this;
+    let left = W, bottom = 0;
+    for (const sel of ['.title-card', '#mp-panel', '#title-msg']) {
+      const el = $(sel);
+      if (!el || el.classList.contains('hidden') || !el.offsetWidth) continue;
+      const b = el.getBoundingClientRect();
+      if (b.height < 4) continue;
+      left = Math.min(left, b.left);
+      bottom = Math.max(bottom, b.bottom);
+    }
+    let row = rows - 2;
+    for (let p = 1; p < rows; p++) if (groundTop + (p + 0.72) * ts - ts * 0.85 >= bottom - 12) { row = p; break; }
+    const below = groundTop + (row + 0.72) * ts - ts * 0.85 >= bottom - 12;
+    this.heroSX = below ? Math.max(46, W * 0.3) : Math.max(36, left * 0.3);
+    this.spawnSX = below ? W + 40 : Math.max(left + 20, this.heroSX + 90);
+    if (row !== this.pathRow) { this.pathRow = row; this.buildStrip(); }
+  },
+
+  // 땅 줄무늬 (N 칸 너비, 옆으로 이어 붙여 흘려 보낸다): 맨 위 줄은 나무, 아래서 둘째 줄은 길
+  buildStrip() {
+    const N = 24, R = this.rows, px = this.ts * this.dpr;
+    const map = [];
+    const pathRow = this.pathRow;
+    for (let y = 0; y < R; y++) for (let x = 0; x < N; x++) {
+      const h = hash(x, y, 77);
+      let t = TILE.GRASS;
+      if (y === pathRow) t = TILE.PATH;
+      else if (y === 0) t = h < 0.55 ? TILE.TREE : h < 0.7 ? TILE.FLOWER : TILE.GRASS;
+      else if (y === pathRow - 1 || y === pathRow + 1) t = h < 0.12 ? TILE.FLOWER : TILE.GRASS;
+      else t = h < 0.08 ? TILE.ROCK : h < 0.25 ? TILE.FLOWER : h < 0.3 ? TILE.CLOVER : h < 0.36 ? TILE.TREE : TILE.GRASS;
+      map.push(t);
+    }
+    const fake = {
+      w: N, h: R,
+      tile: (x, y) => map[((y + R) % R) * N + ((x % N) + N) % N],
+      region: () => REGION.MEADOW,
+    };
+    const c = document.createElement('canvas');
+    c.width = N * px;
+    c.height = R * px;
+    const g = c.getContext('2d');
+    g.setTransform(px / T, 0, 0, px / T, 0, 0);
+    for (let y = 0; y < R; y++) for (let x = 0; x < N; x++) World.drawTileHD.call(fake, g, x, y, fake.tile(x, y), REGION.MEADOW);
+    this.strip = c;
+    this.stripW = N * T; // 월드 px
+    this.pathY = (pathRow + 0.72) * T; // 땅 줄무늬 안에서 발바닥 높이 (월드 px)
+  },
+
+  spawn() {
+    const type = this.FOES[this.foeIndex++ % this.FOES.length];
+    const def = MONSTERS[type];
+    this.foe = {
+      type, def, x: this.spawnSX / this.k, hp: 2, phase: Math.random() * 6, animMv: 1, animT: 0, hitT: 0, dead: false,
+      faceRight: false, vx: 0,
+    };
+  },
+
+  update(dt) {
+    const H = this.hero, k = this.k;
+    this.layoutT = (this.layoutT || 0) - dt;
+    if (this.layoutT <= 0) { this.layoutT = 0.5; this.layout(); }
+    H.x = this.heroSX / k;
+    H.swingT = Math.max(0, H.swingT - dt);
+    const f = this.foe;
+    const fighting = f && f.x - H.x < 30 + f.def.size * 0.3;
+    H.moving = !fighting && !this.drops.length;
+    const speed = H.moving ? 44 : 0;
+    this.scroll += speed * dt;
+    if (H.moving) H.walkT += dt;
+    // 몬스터: 땅과 함께 흘러오며 스스로도 걸어온다
+    if (!f) {
+      this.nextFoe -= dt;
+      if (this.nextFoe <= 0) this.spawn();
+    } else {
+      f.hitT = Math.max(0, f.hitT - dt);
+      f.x += f.vx * dt;
+      f.vx *= Math.pow(0.02, dt);
+      if (!fighting) f.x -= speed * dt + 18 * dt;
+      f.animMv += ((fighting ? 0 : 1) - f.animMv) * Math.min(1, dt * 8);
+      f.animT += dt * (fighting ? 0.4 : 1.6);
+      if (fighting) {
+        this.cool -= dt;
+        if (this.cool <= 0 && f.hitT <= 0) { H.swingT = 0.25; this.cool = 0.75; this.hitAt = 0.12; }
+      }
+      if (this.hitAt != null) {
+        this.hitAt -= dt;
+        if (this.hitAt <= 0) { this.hitAt = null; this.hit(f); }
+      }
+    }
+    // 떨어진 것: 통통 튀다가 캐릭터에게 날아간다
+    for (const d of this.drops) {
+      d.t += dt;
+      if (d.t < 0.7) { d.vy += 520 * dt; d.y += d.vy * dt; d.x += d.vx * dt; if (d.y > 0) { d.y = 0; d.vy *= -0.45; } }
+      else { const a = Math.min(1, (d.t - 0.7) / 0.35); d.x += (H.x - d.x) * a; d.y += (-14 - d.y) * a; }
+      if (d.t > 1.1 && !d.got) { d.got = true; this.burst(H.x, -16, 'sparkle'); }
+    }
+    this.drops = this.drops.filter(d => !d.got);
+    for (const p of this.parts) { p.t += dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vy += (p.g || 0) * dt; }
+    this.parts = this.parts.filter(p => p.t < p.life);
+    for (const c of this.clouds) c.f -= c.v * dt / this.W;
+  },
+
+  hit(f) {
+    f.hp--;
+    f.hitT = 0.35;
+    f.vx = 70;
+    this.burst(f.x - 6, -f.def.size * 0.5, 'star');
+    if (f.hp > 0) return;
+    this.burst(f.x, -f.def.size * 0.45, 'poof');
+    const key = Object.keys(f.def.drops || {})[0];
+    this.drops.push({ x: f.x, y: -8, vx: -30, vy: -160, t: 0, def: ITEMS[key] });
+    this.foe = null;
+    this.nextFoe = 1.6;
+    this.cool = 0;
+  },
+
+  burst(x, y, kind) {
+    const n = kind === 'poof' ? 10 : kind === 'star' ? 6 : 8;
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + Math.random() * 0.4, sp = kind === 'poof' ? 40 + Math.random() * 30 : 60 + Math.random() * 50;
+      this.parts.push({ kind, x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - (kind === 'poof' ? 20 : 30), g: kind === 'star' ? 260 : 0, t: 0, life: kind === 'poof' ? 0.55 : 0.6, r: kind === 'poof' ? 4 + Math.random() * 3 : 4 });
+    }
+  },
+
+  // ---------- 그리기 ----------
+  draw(time) {
+    const c = this.ctx, { W, H, dpr, k } = this, OL = '#3a2618';
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    c.lineJoin = 'round';
+    c.lineCap = 'round';
+    // 하늘
+    const sky = c.createLinearGradient(0, 0, 0, this.groundTop + 20);
+    sky.addColorStop(0, '#6cc3f5');
+    sky.addColorStop(1, '#d4f1ff');
+    c.fillStyle = sky;
+    c.fillRect(0, 0, W, H);
+    // 해 (방긋)
+    const sr = Math.min(W, H) * 0.07, sx = W * 0.86, sy = Math.max(sr + 12, H * 0.12);
+    c.save();
+    c.translate(sx, sy);
+    c.rotate(time * 0.15);
+    c.fillStyle = '#ffe680';
+    for (let i = 0; i < 10; i++) { c.rotate(Math.PI / 5); c.beginPath(); c.moveTo(-sr * 0.22, -sr * 1.08); c.lineTo(0, -sr * 1.45); c.lineTo(sr * 0.22, -sr * 1.08); c.fill(); }
+    c.restore();
+    c.beginPath(); c.arc(sx, sy, sr, 0, Math.PI * 2);
+    const sg = c.createRadialGradient(sx - sr * 0.3, sy - sr * 0.3, sr * 0.1, sx, sy, sr);
+    sg.addColorStop(0, '#fff6b0'); sg.addColorStop(1, '#ffc928');
+    c.fillStyle = sg; c.fill(); c.strokeStyle = '#d98a00'; c.lineWidth = 2; c.stroke();
+    c.strokeStyle = '#7a4a10'; c.lineWidth = Math.max(1.5, sr * 0.07);
+    for (const d of [-1, 1]) { c.beginPath(); c.arc(sx + d * sr * 0.33, sy - sr * 0.05, sr * 0.13, Math.PI * 1.1, Math.PI * 1.9); c.stroke(); }
+    c.beginPath(); c.arc(sx, sy + sr * 0.18, sr * 0.22, Math.PI * 0.15, Math.PI * 0.85); c.stroke();
+    c.fillStyle = 'rgba(255,120,120,.45)';
+    for (const d of [-1, 1]) { c.beginPath(); c.ellipse(sx + d * sr * 0.55, sy + sr * 0.2, sr * 0.14, sr * 0.08, 0, 0, Math.PI * 2); c.fill(); }
+    // 구름 (뭉게뭉게, 천천히 흘러간다)
+    for (const cl of this.clouds) {
+      const cw = Math.min(W, H) * 0.22 * cl.s;
+      let x = ((cl.f % 1.4) + 1.4) % 1.4 * (W + cw * 2) - cw, y = H * cl.y;
+      const puffs = [[0, 0, 0.32], [0.3, -0.18, 0.36], [0.62, -0.05, 0.3], [0.88, 0.06, 0.22]];
+      c.beginPath();
+      for (const [px, py, pr] of puffs) { c.moveTo(x + px * cw + pr * cw, y + py * cw); c.arc(x + px * cw, y + py * cw, pr * cw, 0, Math.PI * 2); }
+      c.fillStyle = '#a9d8f2'; c.save(); c.translate(0, cw * 0.06); c.fill(); c.restore();
+      c.fillStyle = '#ffffff'; c.fill();
+    }
+    // 언덕 (천천히 흐른다)
+    const hillW = W * 0.7, base = this.groundTop + this.ts * 0.35, off = (this.scroll * k * 0.25) % hillW;
+    for (const [col, hgt, shift] of [['#a5d97c', this.ts * 1.9, 0.5], ['#8fcf68', this.ts * 1.3, 0]]) {
+      c.beginPath();
+      for (let i = -1; i < W / hillW + 2; i++) {
+        const hx = i * hillW - off + shift * hillW;
+        c.moveTo(hx - hillW * 0.55, base);
+        c.ellipse(hx, base, hillW * 0.55, hgt, 0, Math.PI, 0);
+      }
+      c.fillStyle = col; c.fill(); c.strokeStyle = 'rgba(58,38,24,.55)'; c.lineWidth = 2; c.stroke();
+    }
+    // 땅 (게임과 같은 그림의 칸들)
+    const sw = this.stripW * k, sx0 = -((((this.scroll * k) % sw) + sw) % sw);
+    for (let x = sx0; x < W; x += sw) c.drawImage(this.strip, x, this.groundTop, sw, this.rows * this.ts);
+    c.fillStyle = 'rgba(58,38,24,.35)';
+    c.fillRect(0, this.groundTop - 1, W, 2);
+
+    // 캐릭터와 몬스터 (월드 좌표로)
+    const gy = this.groundTop + this.pathY * k;
+    c.save();
+    c.translate(0, gy);
+    c.scale(k, k);
+    const f = this.foe;
+    if (f) {
+      c.fillStyle = 'rgba(0,0,0,.2)';
+      c.beginPath(); c.ellipse(f.x, 0, f.def.size * 0.4, f.def.size * 0.12, 0, 0, Math.PI * 2); c.fill();
+      c.save();
+      c.translate(f.x, 0);
+      if (f.def.ghost) { c.globalAlpha = 0.8; c.translate(0, Math.sin(time * 2.5) * 3 - 3); }
+      if (f.hitT > 0) c.scale(1 / (1 + Math.sin(f.hitT * 40) * 0.08), 1 + Math.sin(f.hitT * 40) * 0.08);
+      Critter.draw(c, f.type, f.def.size * 1.12, f, time);
+      c.restore();
+    }
+    for (const d of this.drops) {
+      c.font = `16px ${FONT_EMOJI}`;
+      c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillStyle = '#000';
+      const def = d.def;
+      if (def && (def.icon || def.tile)) c.drawImage(itemIcon(def, 24).canvas, d.x - 8, d.y - 16, 16, 16);
+      else c.fillText(def?.emoji || '⭐', d.x, d.y - 8);
+    }
+    // 내 캐릭터 (게임 그림 그대로)
+    const saved = Render.ctx;
+    Render.ctx = c;
+    try { Render.drawCharacter({ ...this.hero, y: -6 }, LOOKS[Game.lookIndex ?? 0] || LOOKS[0], 'sword', '', true, null, ['shield']); }
+    finally { Render.ctx = saved; }
+    // 효과: 별, 연기, 반짝
+    for (const p of this.parts) {
+      const a = 1 - p.t / p.life;
+      c.globalAlpha = a;
+      if (p.kind === 'poof') {
+        c.fillStyle = '#ffffff'; c.strokeStyle = 'rgba(58,38,24,.4)'; c.lineWidth = 0.8;
+        c.beginPath(); c.arc(p.x, p.y, p.r * (1 + p.t * 2), 0, Math.PI * 2); c.fill(); c.stroke();
+      } else {
+        c.fillStyle = p.kind === 'star' ? '#ffd54f' : '#fff59d'; c.strokeStyle = OL; c.lineWidth = 0.6;
+        c.beginPath();
+        for (let i = 0; i < 10; i++) { const r = i % 2 ? p.r * 0.45 : p.r * 1.1, ang = i * Math.PI / 5 - Math.PI / 2 + p.t * 6; c.lineTo(p.x + Math.cos(ang) * r, p.y + Math.sin(ang) * r); }
+        c.closePath(); c.fill(); c.stroke();
+      }
+    }
+    c.globalAlpha = 1;
+    c.restore();
+  },
+};
+
 const EmojiSticker = {
   cache: new Map(),
   get(emoji, size, scale, white = false) {
@@ -5892,27 +6635,34 @@ const Render = {
     ctx.ellipse(m.x, m.y + s * 0.35, s * 0.4, s * 0.12, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    // 몸: 선명한 이모지 그림 + 스티커 테두리 (화면 해상도). 걸으면 통통, 맞으면 하얗게 번쩍
-    const squash = m.hitT > 0 ? 1 + Math.sin(m.hitT * 40) * 0.08 : 1 + Math.sin(time * 6 + m.phase) * 0.025;
+    // 몸: 아기 동물 그림 (화면 해상도). 움직이면 다리/꼬리/귀가 움직이고, 맞으면 눈물
+    const a = m.anim || (m.anim = { x: m.x, y: m.y, t: time });
+    const dt = Math.min(0.1, Math.max(0, time - a.t)), speed = dt > 0 ? Math.hypot(m.x - a.x, m.y - a.y) / dt : 0;
+    a.x = m.x; a.y = m.y; a.t = time;
+    m.animMv = (m.animMv || 0) + (Math.min(1, speed / (T * 0.8)) - (m.animMv || 0)) * Math.min(1, dt * 10);
+    m.animT = (m.animT || 0) + dt * (0.5 + Math.min(2, speed / (T * 1.5)));
+    const known = CRITTERS[m.type] || CRITTER_BY_EMOJI[m.def.emoji];
+    const squash = m.hitT > 0 ? 1 + Math.sin(m.hitT * 40) * 0.08 : 1;
     this.hd(c => {
+      if (known) {
+        c.translate(m.x, m.y + s * 0.35 - hop);
+        if (m.faceRight) c.scale(-1, 1); // 왼쪽을 보는 그림
+        c.scale(1 / squash, squash);
+        if (m.def.ghost) { c.globalAlpha = 0.78; c.translate(0, Math.sin(time * 2.5 + m.phase) * 3 - 3); }
+        if (m.hitT > 0 && Math.floor(m.hitT * 20) % 2) c.globalAlpha *= 0.55;
+        Critter.draw(c, m.type, s * 1.12, m, time);
+        return;
+      }
       c.translate(m.x, m.y - s * 0.15 + bob + s * 0.45);
-      if (m.faceRight) c.scale(-1, 1); // 이모지는 대부분 왼쪽을 본다
+      if (m.faceRight) c.scale(-1, 1);
       c.scale(1 / squash, squash);
       c.translate(0, -s * 0.45);
-      if (m.def.ghost) { c.globalAlpha = 0.72; c.translate(0, Math.sin(time * 2.5 + m.phase) * 4); } // 유령: 반투명, 둥실둥실
       const spr = EmojiSticker.get(m.def.emoji, s, this.scale * this.dpr, m.hitT > 0 && Math.floor(m.hitT * 20) % 2);
       if (spr) c.drawImage(spr, -s * 0.62, -s * 0.62, s * 1.24, s * 1.24);
-      else {
-        c.textAlign = 'center';
-        c.textBaseline = 'middle';
-        c.fillStyle = '#000';
-        c.font = `${s}px ${FONT_EMOJI}`;
-        c.fillText(m.def.emoji, 0, 0);
-      }
     });
 
     // 체력 막대: 처음엔 빨간 칸이 가득, 맞을 때마다 오른쪽 칸부터 비어 회색이 된다
-    const max = m.def.hp, cw = m.def.boss ? 6 : 8, ch = 6, w = max * cw, top = m.y - s * 0.15 - s * 0.62 - 10;
+    const max = m.def.hp, cw = m.def.boss ? 6 : 8, ch = 6, w = max * cw, top = known ? m.y + s * 0.35 - s * 1.12 * (m.def.ghost ? 1.05 : 0.98) - 12 - hop : m.y - s * 0.15 - s * 0.62 - 10;
     const left = m.x - w / 2, hp = Math.max(0, Math.ceil(m.hp));
     ctx.fillStyle = '#3e2723';
     ctx.fillRect(left - 2, top - 2, w + 2, ch + 4);
@@ -6786,6 +7536,7 @@ const Game = {
     Store.set(KEYS.look, this.lookIndex);
     TabStore.set(KEYS.look, this.lookIndex);
     Render.drawLookPreview();
+    TitleScene.init();
     $('#btn-look').addEventListener('click', () => {
       this.lookIndex = (this.lookIndex + 1) % LOOKS.length;
       Store.set(KEYS.look, this.lookIndex);

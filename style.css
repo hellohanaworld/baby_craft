@@ -472,6 +472,7 @@ body:not(.touch) #btn-talk::after { content: 'C'; }
 }
 #title > :not(.title-bg) { position: relative; z-index: 1; }
 .title-bg { position: absolute; inset: 0; pointer-events: none; }
+#title-scene { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .sun {
   position: absolute; top: 7vh; right: 9vw;
   width: 13vmin; height: 13vmin;
