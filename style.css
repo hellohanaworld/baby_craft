@@ -662,6 +662,8 @@ body.playing .top-left { display: flex; }
 .talk-input { width: min(320px, 46vw); height: 50px; padding: 0 12px; border: 3px solid var(--wood); border-radius: 14px; font: 900 20px/1 var(--font-ui); color: #3e2723; background: #fff; }
 .talk-count { font: 900 14px/1 var(--font-ui); color: #8d6e63; min-width: 40px; }
 .talk-panel .talk-send { width: 54px; height: 54px; min-width: 0; min-height: 0; border-radius: 50%; font-size: 26px; }
+.talk-panel .talk-mic { width: 54px; height: 54px; min-width: 0; min-height: 0; border-radius: 50%; font-size: 26px; background: #e3f2fd; border-color: #1e88e5; }
+.talk-panel .talk-mic.on { background: #ef5350; border-color: #b71c1c; animation: bump .6s infinite; }
 @media (max-height: 500px) { .talk-input { height: 42px; font-size: 17px; } .talk-panel .talk-send { width: 44px; height: 44px; font-size: 22px; } }
 /* ? 단축키 설명: 작은 지도 오른쪽 아래 */
 .help-btn {
