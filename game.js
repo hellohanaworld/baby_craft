@@ -131,7 +131,7 @@ const ITEMS = {
   sapling: { emoji: '🌱', ko: '묘목',   en: 'sapling', kind: 'block', tile: 'SAPLING', weight: 0 },
   brick:   { emoji: '🧱', ko: '벽돌',   en: 'brick',   kind: 'block', tile: 'BRICK',   weight: 0 },
   gate:    { emoji: '🚪', ko: '문',     en: 'door',    kind: 'block', tile: 'GATE',    weight: 0 }, // 사람은 지나가고 몬스터는 못 지나간다
-  bridge:  { emoji: '🌉', ko: '다리',   en: 'bridge',  kind: 'block', tile: 'BRIDGE',  weight: 0 }, // 물 위에만 놓는다
+  bridge:  { emoji: '🌉', ko: '다리',   en: 'bridge',  kind: 'block', tile: 'BRIDGE',  weight: 0 }, // 물/낭떠러지/바다 위에만 놓는다
   torch:   { emoji: '🔥', ko: '횃불',   en: 'torch',   kind: 'block', tile: 'TORCH',   weight: 0 }, // 둘레에 몬스터가 못 온다
   fence:   { emoji: '🌵', ko: '가시 울타리', en: 'spike fence', kind: 'block', tile: 'THORN', weight: 0 }, // 막고, 부딪친 사나운 동물은 따끔
   // 맵에 떠 있는 ❤️ (HEART_COUNT 개). 다쳤을 때만 주워서 바로 먹는다 (가방에 넣지 않는다)
@@ -361,7 +361,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 90;
+const GAME_V = 92;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -587,6 +587,18 @@ const SENTENCE_EN = ['I love you', 'Good morning', 'Thank you', 'I am happy', 'L
 
 const Sentences = {
   recent: [],
+  custom: null, // sentences.txt 에 부모가 적어 둔 문장 (있으면 이것만 나온다)
+
+  // sentences.txt: 한 줄에 한 문장. 빈 줄과 # 으로 시작하는 줄은 건너뛴다. 파일이 없거나 비어 있으면 원래 문장
+  async load() {
+    try {
+      const res = await fetch('sentences.txt', { cache: 'no-cache' });
+      if (!res.ok) return;
+      const list = (await res.text()).split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+      if (list.length) { this.custom = [...new Set(list)]; this.recent = []; }
+      console.log(`[Sentences] sentences.txt 사용: ${list.length}개`);
+    } catch (err) { console.log('[Sentences] sentences.txt 없음, 원래 문장 사용', err); }
+  },
 
   all() {
     const P = SENTENCE_PARTS, out = [...SENTENCE_FIXED];
@@ -604,7 +616,7 @@ const Sentences = {
     const en = Store.settings.lang === 'en';
     if (!this.pool) this.pool = this.all();
     // 정해 둔 문장 반, 맞춰 만든 문장 반 (만든 것이 훨씬 많아서 섞기만 하면 정해 둔 문장이 잘 안 나온다)
-    const pool = en ? SENTENCE_EN : Math.random() < 0.5 ? SENTENCE_FIXED : this.pool.filter(x => !SENTENCE_FIXED.includes(x));
+    const pool = en ? SENTENCE_EN : this.custom ? this.custom : Math.random() < 0.5 ? SENTENCE_FIXED : this.pool.filter(x => !SENTENCE_FIXED.includes(x));
     const choices = pool.filter(s => !this.recent.includes(s));
     const text = choices[Math.floor(Math.random() * choices.length)] || pool[0];
     this.recent = [text, ...this.recent].slice(0, Math.min(20, pool.length - 1));
@@ -1435,16 +1447,17 @@ const TILE = {
   CLIFF: 18, CHEST: 19, // 3탄: 미로 벽 절벽 (캘 수 없다) / 미로 끝 보물 상자
   STATION: 20, // 2탄 ⛺ 텐트 / 3탄 ⚒️ 대장간 제작대 (부딪치면 제작대가 열린다. 그림은 칸 위로 크게)
   SAPLING: 21, // 심은 묘목 (조금 지나면 나무로 자란다. 자라다가 사람이 끼지 않게 막는 칸)
-  JUNGLE: 22, CHASM: 23, SEA: 24, // 4탄 동글동글 덤불 벽 / 5탄 낭떠러지 / 6탄 깊은 바다 (다리를 못 놓는다). 모두 캘 수 없다
+  JUNGLE: 22, CHASM: 23, SEA: 24, // 4탄 동글동글 덤불 벽 / 5탄 낭떠러지 / 6탄 깊은 바다. 캘 수 없다 (낭떠러지/바다 위에는 🌉 다리를 놓는다)
+  CRACK: 25, BUSH: 26, // 3탄 금 간 바위 벽 / 4탄 얇은 덤불 벽: 부수면 길이 생긴다 (미로 벽의 절반쯤)
 };
-const BLOCKING = new Set([TILE.TREE, TILE.WATER, TILE.ROCK, TILE.HOUSE, TILE.BRICK, TILE.TORCH, TILE.LOCK_TREE, TILE.GOLD_TREE, TILE.THORN, TILE.CLIFF, TILE.CHEST, TILE.STATION, TILE.SAPLING, TILE.JUNGLE, TILE.CHASM, TILE.SEA]);
+const BLOCKING = new Set([TILE.TREE, TILE.WATER, TILE.ROCK, TILE.HOUSE, TILE.BRICK, TILE.TORCH, TILE.LOCK_TREE, TILE.GOLD_TREE, TILE.THORN, TILE.CLIFF, TILE.CHEST, TILE.STATION, TILE.SAPLING, TILE.JUNGLE, TILE.CHASM, TILE.SEA, TILE.CRACK, TILE.BUSH]);
 const MONSTER_BLOCKING = new Set([...BLOCKING, TILE.GATE]); // 문은 몬스터만 막는다
-const ARROW_BLOCKING = new Set([TILE.TREE, TILE.ROCK, TILE.HOUSE, TILE.BRICK, TILE.GATE, TILE.TORCH, TILE.LOCK_TREE, TILE.GOLD_TREE, TILE.CLIFF, TILE.CHEST, TILE.STATION, TILE.JUNGLE]);
+const ARROW_BLOCKING = new Set([TILE.TREE, TILE.ROCK, TILE.HOUSE, TILE.BRICK, TILE.GATE, TILE.TORCH, TILE.LOCK_TREE, TILE.GOLD_TREE, TILE.CLIFF, TILE.CHEST, TILE.STATION, TILE.JUNGLE, TILE.CRACK, TILE.BUSH]);
 const CHUNK = 16; // 그림 조각 크기 (칸)
 const MINI_COLORS = ['#7ccf6f', '#2e7d32', '#3b8de0', '#e9d68f', '#8d939b', '#f48fb1', '#c0392b', '#c0392b', '#c8a06a',
   '#b5523b', '#8d5a2b', '#a0703f', '#ffb300',
   '#5fbf4f', '#5fbf4f', '#2e7d32', '#ffd54f', '#33691e', '#5d4037', '#ffb300', '#e65100', '#66bb6a',
-  '#1b5e20', '#2b1a12', '#0d47a1']; // 네잎클로버는 작은 지도에서 세잎클로버와 같은 색 (찾는 재미)
+  '#1b5e20', '#2b1a12', '#0d47a1', '#a1907f', '#558b2f']; // 네잎클로버는 작은 지도에서 세잎클로버와 같은 색 (찾는 재미)
 // 캐기: 칸 → 나오는 것, 맨손 횟수, 도구 횟수(tools 를 들었을 때), 캔 뒤 칸
 const DIG = {
   [TILE.FLOWER]: { gives: ['flower'], hand: 1 },
@@ -1458,7 +1471,11 @@ const DIG = {
   [TILE.THORN]: { gives: ['fence'], hand: 'TREE_HITS', tool: 1, tools: ['axe'] },
   [TILE.LUCKY]: { gives: ['clover'], hand: 1, after: TILE.CLOVER }, // 뽑으면 세잎클로버가 남는다
   [TILE.GOLD_TREE]: { gives: [], hand: 'TREE_HITS', tool: 1, tools: ['axe'] }, // 나오는 것 없이 길만 열린다
+  [TILE.CRACK]: { gives: ['stone'], hand: 'TREE_HITS', tool: 1, tools: ['axe', 'sword'] }, // 금 간 바위 벽: 부수면 길
+  [TILE.BUSH]: { gives: ['wood'], hand: 'TREE_HITS', tool: 1, tools: ['axe', 'sword'] },   // 얇은 덤불 벽: 베면 길 + 통나무 (다리 재료)
 };
+// 🌉 다리를 놓을 수 있는 칸: 물, 5탄 낭떠러지, 6탄 깊은 바다 (캐면 원래 칸으로)
+const BRIDGE_ON = new Set([TILE.WATER, TILE.CHASM, TILE.SEA]);
 // 땅 (풀밭, 모래, 물, 흙 길): 움직일 수 없다. 캐지도 못하고 아이템도 안 나온다. 블록은 풀밭/모래 위에만 놓는다
 const PLACE_ON = new Set([TILE.GRASS, TILE.SAND]);
 const LAND = new Set([TILE.GRASS, TILE.SAND, TILE.WATER, TILE.PATH]);
@@ -2079,6 +2096,7 @@ const World = {
     this.buildStage2(t, W, SH, SW);
     this.buildStage3(t, W, SH, SW);
     this.buildMazes456(t, W, SH, SW);
+    this.crackWalls(t, W);
     this.buildStations(t, W);
     this.base = t.slice();
     this.edited();
@@ -2437,6 +2455,31 @@ const World = {
     this.mazes.push({ stage: 5, goal: goal6, start: { x: SW + 1, y: gy5 }, gate: null, forge: { x: SW + 2, y: gy5 + 1 } });
   },
 
+  // 3탄/4탄 미로: 방과 방 사이 벽 토막 중 절반을 부술 수 있는 벽으로 (3탄 금 간 바위, 4탄 얇은 덤불).
+  // 벽 토막 = 양옆(또는 위아래)이 다 길인 벽 칸이 이어진 것. 탄 사이 테두리는 그대로
+  crackWalls(t, W) {
+    const H = this.h, SW = CONFIG.STAGE_W, floor = v => v === TILE.GRASS || v === TILE.SAND || v === TILE.PATH;
+    const kinds = [[TILE.CLIFF, TILE.CRACK, REGION.MAZE], [TILE.JUNGLE, TILE.BUSH, REGION.JUNGLE]];
+    const border = (x, y) => x % SW === SW - 1 || y === CONFIG.STAGE_H - 1 || y === CONFIG.MAZE_Y - 1 || x <= 0 || y <= 0 || x >= W - 1 || y >= H - 1;
+    const done = new Uint8Array(W * H);
+    for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) {
+      const i = y * W + x, kind = kinds.find(k => k[0] === t[i] && k[2] === this.regions[i]);
+      if (!kind || done[i] || border(x, y)) continue;
+      // 가로로 막은 벽 (위아래가 길) 이면 가로로 이어진 칸, 세로로 막은 벽 (양옆이 길) 이면 세로로 이어진 칸
+      const ud = floor(t[i - W]) && floor(t[i + W]), lr = floor(t[i - 1]) && floor(t[i + 1]);
+      if (!ud && !lr) continue;
+      const [dx, dy] = ud ? [1, 0] : [0, 1], seg = [];
+      for (let cx = x, cy = y; ; cx += dx, cy += dy) {
+        const k = cy * W + cx;
+        if (t[k] !== kind[0] || done[k] || border(cx, cy)) break;
+        if (ud ? !(floor(t[k - W]) && floor(t[k + W])) : !(floor(t[k - 1]) && floor(t[k + 1]))) break;
+        seg.push(k);
+      }
+      seg.forEach(k => { done[k] = 1; });
+      if (rng() < 0.5) seg.forEach(k => { t[k] = kind[1]; });
+    }
+  },
+
   // 탄마다 제작대 하나 (1탄은 집 안): 2탄 ⛺ 클로버 텐트 (들판 가운데 길 옆), 3탄 ⚒️ 대장간 (미로 입구 방 구석).
   // 난수를 쓰지 않는다 (맵 만들기 맨 끝)
   buildStations(t, W) {
@@ -2537,7 +2580,7 @@ const World = {
     if (this.recent.length > 40) this.recent.shift();
     this.tiles[i] = v;
     const x = i % this.w, y = Math.floor(i / this.w);
-    this.chunks.delete(`${Math.floor(x / CHUNK)},${Math.floor(y / CHUNK)}`);
+    for (const [dx, dy] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) this.chunks.delete(`${Math.floor((x + dx) / CHUNK)},${Math.floor((y + dy) / CHUNK)}`);
     this.miniPixel(x, y);
     this.floodFill(this.door.x, this.door.y + 2);
     this.findTorches();
@@ -2820,7 +2863,10 @@ const World = {
         p(21, 14, '#f1c40f', 2, 3); p(21, 14, '#fff59d');
         break;
       case TILE.BRIDGE:
-        waterBase();
+        // 5탄 골짜기 다리는 낭떠러지 위, 6탄은 바다 위, 나머지는 물 위
+        if (region === REGION.CANYON && !bare) { fill('#2b1a12'); for (let j = 0; j < T; j++) for (let i = 0; i < T; i++) if (nz(i, j, 11) > 0.9) p(i, j, '#3e2a1e'); }
+        else if (World.base && World.base[y * this.w + x] === TILE.SEA && !bare) { fill('#1565c0'); specks(18, ['#1976d2', '#0d47a1'], 360, 2, 1); }
+        else waterBase();
         for (let k = 0; k < 4; k++) {
           const bx = k * 8;
           p(bx, 5, '#a0703f', 7, 22); p(bx, 5, '#c08a50', 1, 22); p(bx + 6, 5, '#7a5230', 1, 22);
@@ -2854,12 +2900,14 @@ const World = {
         for (const x of [4, 15, 26]) p(x, 26, '#3e2723');
         break;
       }
+      case TILE.CRACK:
       case TILE.CLIFF: {
         // 절벽: 위는 울퉁불퉁한 바위 땅, 아래가 길이면 깎아지른 절벽 면 (어두운 줄무늬)
-        fill('#8d7b6b');
+        const cracked = type === TILE.CRACK;
+        fill(cracked ? '#a1907f' : '#8d7b6b');
         specks(36, ['#7a6a5b', '#a1907f', '#6f6052'], 41);
         specks(4, ['#7a6a5b'], 46, 3, 1);
-        const open = v => v !== TILE.CLIFF && v !== TILE.TREE;
+        const open = v => v !== TILE.CLIFF && v !== TILE.CRACK && v !== TILE.TREE;
         if (open(this.tile(x, y - 1))) { p(0, 0, '#b3a291', 32, 3); p(0, 3, '#9c8b7a', 32, 1); }
         if (open(this.tile(x, y + 1))) {
           p(0, 20, '#5d4037', 32, 12);
@@ -2869,14 +2917,27 @@ const World = {
         }
         if (open(this.tile(x - 1, y))) p(0, 0, '#6f6052', 2, 32);
         if (open(this.tile(x + 1, y))) p(30, 0, '#6f6052', 2, 32);
+        if (cracked) {
+          // 쩍 갈라진 금 (부술 수 있어요): 어두운 지그재그 + 밝은 테두리
+          let cx = 15;
+          for (let cy = 3; cy < 29; cy++) {
+            cx = clamp(cx + (cy % 4 === 0 ? 2 : cy % 4 === 2 ? -2 : 0), 6, 26);
+            p(cx, cy, '#2b2118', 2, 1); p(cx + 2, cy, '#d7c8b6');
+            if (cy === 12) for (let k = 1; k < 7; k++) p(cx - k, cy + (k >> 1), '#2b2118');
+            if (cy === 20) for (let k = 1; k < 7; k++) p(cx + 2 + k, cy + (k >> 1), '#2b2118');
+          }
+        }
         break;
       }
+      case TILE.BUSH:
       case TILE.JUNGLE: {
         // 정글 덤불: 둥근 잎 덩어리. 옆이 길이면 그쪽 모서리를 둥글게 깎아 동글동글하게 (길 쪽으로 이끼 흙이 보인다)
+        // 얇은 덤불(BUSH)은 연두색 + 가는 나뭇가지: 베면 길이 생긴다
         grass();
-        const wall = (dx, dy) => this.tile(x + dx, y + dy) === TILE.JUNGLE;
+        const thin = type === TILE.BUSH;
+        const wall = (dx, dy) => { const v = this.tile(x + dx, y + dy); return v === TILE.JUNGLE || v === TILE.BUSH; };
         const L = wall(-1, 0), R = wall(1, 0), U = wall(0, -1), D = wall(0, 1);
-        const leaf = gr.leaf, deep = shade(leaf[0], 0.72);
+        const leaf = thin ? ['#7cb342', '#9ccc65', '#c5e1a5'] : gr.leaf, deep = shade(leaf[0], 0.72);
         const rad = 11;
         for (let j = 0; j < T; j++) for (let i = 0; i < T; i++) {
           // 모서리 둥글게: 두 옆이 다 길이면 그 모서리를 원으로 깎는다
@@ -2895,11 +2956,12 @@ const World = {
           blob(bx, by, 4, 4, 0, (dx, dy) => (dx + dy < -0.6 ? '#a5d6a7' : dx + dy < 0.2 ? leaf[2] : null));
         }
         if (r(320) < 0.25) { const fx = 6 + ri(321, 20), fy = 6 + ri(322, 20); p(fx, fy, '#ec407a', 2, 2); p(fx, fy, '#f8bbd0'); } // 정글 꽃
+        if (thin) for (const [sx, sy, len] of [[6, 22, 9], [16, 9, 8], [20, 20, 7]]) for (let k = 0; k < len; k++) p(sx + k, sy - (k >> 1), '#6d4c41'); // 가는 나뭇가지
         break;
       }
       case TILE.CHASM: {
-        // 낭떠러지: 깊은 골짜기 (아래로 갈수록 어둡다). 옆이 길이면 그쪽 가장자리는 깎아지른 바위 끝
-        const open = (dx, dy) => this.tile(x + dx, y + dy) !== TILE.CHASM;
+        // 낭떠러지: 깊은 골짜기 (아래로 갈수록 어둡다). 옆이 길이면 그쪽 가장자리는 깎아지른 바위 끝 (🌉 다리를 놓으면 건넌다)
+        const open = (dx, dy) => { const v = this.tile(x + dx, y + dy); return v !== TILE.CHASM && v !== TILE.BRIDGE; };
         fill('#2b1a12');
         for (let j = 0; j < T; j++) for (let i = 0; i < T; i++) if (nz(i, j, 11) > 0.9) p(i, j, '#3e2a1e');
         if (r(330) < 0.3) p(4 + ri(331, 22), 6 + ri(332, 20), '#4e342e', 3, 1); // 저 아래 돌
@@ -5398,7 +5460,7 @@ const Game = {
       return;
     }
     try {
-      await Words.load();
+      await Promise.all([Words.load(), Sentences.load()]);
       if (!Words.all.length) throw new Error('단어가 없어요');
     } catch (err) {
       console.error('[Words] 불러오기 실패', err);
@@ -5985,7 +6047,9 @@ const Game = {
     this.dig = { i: -1, n: 0 };
     this.busy = true;
     // 놓았던 블록을 캐면 그 아래 원래 땅 (모래 위에 놓았으면 모래)
-    const ok = await Multi.editTile(i, tt, dig.after ?? (World.base[i] === TILE.SAND ? TILE.SAND : TILE.GRASS));
+    // 다리를 캐면 아래 원래 칸 (낭떠러지/바다), 원래 있던 다리면 물
+    const under = tt === TILE.BRIDGE && (World.base[i] === TILE.CHASM || World.base[i] === TILE.SEA) ? World.base[i] : null;
+    const ok = await Multi.editTile(i, tt, under ?? dig.after ?? (World.base[i] === TILE.SAND ? TILE.SAND : TILE.GRASS));
     this.busy = false;
     if (ok) dig.gives.forEach(type => this.addItem(type));
     if (ok && tt === TILE.LUCKY) this.onClover();
@@ -6023,7 +6087,7 @@ const Game = {
     const names = [['🍀', '클로버 들판', 'Clover Field'], ['🧭', '절벽 미로', 'Cliff Maze'], ['🌴', '정글 미로', 'Jungle Maze'], ['🏔️', '골짜기 미로', 'Canyon Maze'], ['🌊', '바다 미로', 'Sea Maze']][gi] || ['🍀', '', ''];
     toast(`${names[0]} ${n}탄!`);
     if (Store.settings.lang === 'en') Speech.speak(`Stage ${n}, the ${names[2]}, is open!`, 'en');
-    else Speech.speak(`${n}탄 ${names[1]}${josa(names[1], '이', '가')} 열렸어요!${n === 6 ? ' 끊어진 다리는 다리를 놓아서 건너요!' : ''}`, 'ko');
+    else Speech.speak(`${n}탄 ${names[1]}${josa(names[1], '이', '가')} 열렸어요!${n === 3 || n === 4 ? ' 금 간 벽은 부술 수 있어요!' : n === 5 ? ' 낭떠러지에 다리를 놓아서 건널 수 있어요!' : n === 6 ? ' 바다에 다리를 놓아서 건너요!' : ''}`, 'ko');
   },
 
   // 그 탄의 보스를 잡았다 (모든 기기)
@@ -6038,8 +6102,9 @@ const Game = {
   canPlace(tx, ty) {
     if (tx <= 0 || ty <= 0 || tx >= World.w - 1 || ty >= World.h - 1) return false;
     const tt = World.tile(tx, ty), def = ITEMS[this.heldBlock], next = def && TILE[def.tile];
-    // 다리는 물 위에만, 나머지는 풀밭/모래에만
-    if (next === TILE.BRIDGE ? tt !== TILE.WATER : !PLACE_ON.has(tt)) return false;
+    // 다리는 물/낭떠러지/바다 위에만 (탄 사이 테두리는 안 된다), 나머지는 풀밭/모래에만
+    if (next === TILE.BRIDGE ? !BRIDGE_ON.has(tt) : !PLACE_ON.has(tt)) return false;
+    if (next === TILE.BRIDGE && tt !== TILE.WATER && (tx % CONFIG.STAGE_W === CONFIG.STAGE_W - 1 || ty === CONFIG.MAZE_Y - 1 || ty === CONFIG.STAGE_H - 1)) return false;
     if (tx === World.door.x && ty > World.door.y && ty <= World.door.y + 4) return false;
     const x0 = tx * T, y0 = ty * T;
     const overlaps = (x, y, r) => x + r > x0 && x - r < x0 + T && y + r > y0 && y - r < y0 + T;
@@ -6140,6 +6205,8 @@ const Game = {
     if (Store.settings.lang === 'en') Speech.speak(last ? 'You solved every maze! You are amazing!' : 'You found the treasure! The next gate is open!', 'en');
     else Speech.speak(last ? '마지막 바다 미로까지 탈출! 정말 대단해요!' : '보물을 찾았어요! 다음 탄 문이 열렸어요!', 'ko');
     for (let i = 0; i < (last ? 3 : 1); i++) this.addItem('gem');
+    // 다음 탄이 골짜기/바다면 🌉 다리 5개 (낭떠러지와 바다에 놓아서 건넌다)
+    if (mz.stage === 3 || mz.stage === 4) for (let i = 0; i < 5; i++) this.addItem('bridge');
     // 다음 탄 가는 🔒 나무 → ✨ 황금 나무 (모두의 기기에 알림)
     const g = !last && World.stageGates[mz.gate];
     if (g && World.tile(g.x, g.y) === TILE.LOCK_TREE) Multi.editTile(g.y * World.w + g.x, TILE.LOCK_TREE, TILE.GOLD_TREE);

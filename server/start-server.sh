@@ -13,6 +13,11 @@ mkdir -p "$HERE/logs"
 CHROME="$(command -v chromium || command -v chromium-browser || command -v google-chrome || true)"
 [ -n "$CHROME" ] || { echo '크롬(chromium)을 찾지 못했어요'; exit 1; }
 
+# 예전에 켜 둔 서버가 남아 있으면 먼저 끈다 (같은 채널 크롬이 살아 있으면 새 크롬이 프로필을 못 써서 옛 버전이 계속 돈다)
+for ch in "${CHANNELS[@]}"; do pkill -f -- "\.profile-$ch.*server=$ch" 2>/dev/null && echo "예전 채널 $ch 서버를 껐어요" || true; done
+pkill -f -- "http\.server $PORT .*--directory $ROOT" 2>/dev/null || true
+sleep 1
+
 python3 -m http.server "$PORT" --bind 127.0.0.1 --directory "$ROOT" 2>"$HERE/logs/web.log" &
 PIDS=($!)
 trap 'kill "${PIDS[@]}" 2>/dev/null; echo "서버를 껐어요."' EXIT

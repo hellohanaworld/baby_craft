@@ -22,6 +22,25 @@ $Chrome = @(
 ) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
 if (-not $Chrome) { throw '크롬을 찾지 못했어요 (Google Chrome 설치 필요)' }
 
+# 0) 예전에 켜 둔 서버가 남아 있으면 먼저 끈다
+#    - 같은 채널의 크롬이 살아 있으면 새 크롬은 같은 프로필 폴더를 못 써서 바로 꺼지고, 옛 버전 게임이 계속 돈다
+#    - 같은 포트의 웹 서버가 여러 개 겹쳐 뜨지 않게
+function Stop-OldTree([int]$id) {
+  # 자식(크롬 렌더러 등)까지 모두
+  Get-CimInstance Win32_Process -Filter "ParentProcessId=$id" -ErrorAction SilentlyContinue | ForEach-Object { Stop-OldTree $_.ProcessId }
+  Stop-Process -Id $id -Force -ErrorAction SilentlyContinue
+}
+$killed = $false
+foreach ($ch in $Channels) {
+  $old = Get-CimInstance Win32_Process -Filter "name='chrome.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -and $_.CommandLine.Contains(".profile-$ch") -and $_.CommandLine.Contains("server=$ch") }
+  foreach ($p in $old) { Write-Host "예전 채널 $ch 서버를 끕니다 (pid $($p.ProcessId))"; Stop-OldTree $p.ProcessId; $killed = $true }
+}
+$oldWeb = Get-CimInstance Win32_Process -Filter "name='python.exe'" -ErrorAction SilentlyContinue |
+  Where-Object { $_.CommandLine -and $_.CommandLine -match "http\.server\s+$Port\b" -and $_.CommandLine.Contains($Root) }
+foreach ($p in $oldWeb) { Write-Host "예전 웹 서버를 끕니다 (pid $($p.ProcessId))"; Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }
+if ($killed -or $oldWeb) { Start-Sleep -Seconds 2 } # 로그 파일과 포트가 풀릴 때까지
+
 # 1) 게임 파일을 이 컴퓨터 안에서만 보여 주는 웹 서버 (127.0.0.1: 밖에서는 못 들어온다)
 $web = Start-Process python -ArgumentList '-m', 'http.server', $Port, '--bind', '127.0.0.1', '--directory', "`"$Root`"" `
   -WindowStyle Hidden -PassThru -RedirectStandardError (Join-Path $Logs 'web.log')
