@@ -361,7 +361,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 93;
+const GAME_V = 94;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -406,7 +406,7 @@ const TabStore = {
 };
 
 // room: 지난번 방 번호 { host: 내가 만든 방, join: 들어간 방 } (새로고침해도 같은 번호로)
-const KEYS = { room: 'bc.room', settings: 'bc.settings', stats: 'bc.stats', log: 'bc.log', csv: 'bc.wordsCsv', look: 'bc.look', name: 'bc.name', world: 'bc.world' };
+const KEYS = { quiz: 'bc.quiz', room: 'bc.room', settings: 'bc.settings', stats: 'bc.stats', log: 'bc.log', csv: 'bc.wordsCsv', look: 'bc.look', name: 'bc.name', world: 'bc.world' };
 
 const Store = {
   settings: null,
@@ -621,6 +621,120 @@ const Sentences = {
     const text = choices[Math.floor(Math.random() * choices.length)] || pool[0];
     this.recent = [text, ...this.recent].slice(0, Math.min(20, pool.length - 1));
     return { id: `s:${text}`, word: text, lang: en ? 'en' : 'ko', emoji: '📝', level: 0, alts: [] };
+  },
+};
+
+// ============================================================
+// Quiz — 1분마다 퀴즈를 돌아가며: 1) 📝 한글 문장 → 2) 🔢 산수 (더하기와 곱하기를 번갈아) → 3) 🔤 알파벳 읽기
+//        산수와 알파벳은 처음엔 쉽게, 한 번에 맞히면 조금씩 어렵게 (3번 연속 → 한 단계 위, 따라 읽기로 넘기면 한 단계 아래)
+// ============================================================
+const QUIZ_KINDS = ['sentence', 'math', 'abc'];
+const QUIZ_MAX_LV = 5;
+
+// 말한 것에서 숫자 찾기: "24", "이십사", "스물넷" → [24]
+function spokenNumbers(text) {
+  const s = (text || '').replace(/\s/g, ''), out = [];
+  for (const m of s.match(/\d+/g) || []) out.push(Number(m));
+  // 한자어 수: 백/십/일~구 (이십사, 백이, 칠)
+  const D = { 일: 1, 이: 2, 삼: 3, 사: 4, 오: 5, 육: 6, 륙: 6, 칠: 7, 팔: 8, 구: 9 };
+  for (const m of s.matchAll(/(?:([이삼사오육칠팔구])?백)?(?:([이삼사오육칠팔구])?십)?([일이삼사오육륙칠팔구])?/g)) {
+    if (!m[0]) continue;
+    out.push((m[0].includes('백') ? (m[1] ? D[m[1]] : 1) * 100 : 0) + (m[0].includes('십') ? (m[2] ? D[m[2]] : 1) * 10 : 0) + (m[3] ? D[m[3]] : 0));
+  }
+  if (/영|공/.test(s)) out.push(0);
+  // 고유어 수: 열, 스물, 서른 ... + 하나~아홉 (스물넷, 열둘, 아홉)
+  const TENS = { 열: 10, 스물: 20, 스무: 20, 서른: 30, 마흔: 40, 쉰: 50, 예순: 60, 일흔: 70, 여든: 80, 아흔: 90 };
+  const ONES = { 하나: 1, 한: 1, 둘: 2, 두: 2, 셋: 3, 세: 3, 석: 3, 넷: 4, 네: 4, 다섯: 5, 여섯: 6, 일곱: 7, 여덟: 8, 아홉: 9 };
+  const re = new RegExp(`(${Object.keys(TENS).join('|')})?(${Object.keys(ONES).sort((a, b) => b.length - a.length).join('|')})?`, 'g');
+  for (const m of s.matchAll(re)) if (m[0]) out.push((TENS[m[1]] || 0) + (ONES[m[2]] || 0));
+  return out;
+}
+// 숫자 뒤 조사 (12는, 3은): 끝소리에 받침이 있으면 '은'
+const numJosa = n => (n % 10 === 0 || [1, 3, 6, 7, 8].includes(n % 10) ? '은' : '는');
+
+const ABC_NAMES = {
+  a: ['에이', '애이'], b: ['비', '삐'], c: ['씨', '시'], d: ['디', '띠'], e: ['이'], f: ['에프', '애프', '에후'], g: ['지', '쥐'],
+  h: ['에이치', '에이취', '에치', '에취'], i: ['아이'], j: ['제이', '재이'], k: ['케이', '캐이'], l: ['엘', '앨'], m: ['엠', '앰'],
+  n: ['엔', '앤'], o: ['오'], p: ['피'], q: ['큐'], r: ['알', '아르'], s: ['에스', '애스'], t: ['티'], u: ['유'],
+  v: ['브이', '뷔'], w: ['더블유', '더블류', '더블'], x: ['엑스', '액스'], y: ['와이'], z: ['지', '제트', '쥐', '즤', '젯'],
+};
+const rint = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
+
+const Quiz = {
+  get st() {
+    if (!this._st) this._st = Object.assign({ turn: 0, add: 1, mul: 1, abc: 1, addN: 0, mulN: 0, abcN: 0, mathOp: 'add' }, Store.get(KEYS.quiz, {}) || {});
+    return this._st;
+  },
+  save() { Store.set(KEYS.quiz, this.st); },
+
+  // 다음 퀴즈 종류 (영어 설정이면 문장만)
+  nextKind() {
+    if (Store.settings.lang === 'en') return 'sentence';
+    const k = QUIZ_KINDS[this.st.turn % QUIZ_KINDS.length];
+    this.st.turn = (this.st.turn + 1) % QUIZ_KINDS.length;
+    this.save();
+    return k;
+  },
+
+  // 더하기: 1 (8+5, 12+13 받아올림 없음) → 2 (두 자리 받아올림 없음) → 3 (두 자리 + 한 자리 받아올림) → 4 (두 자리 받아올림, 100 안쪽) → 5 (두 자리끼리 아무거나)
+  // 곱하기: 1 (2~3 x 2~3) → 2 (2~5 단, 5까지) → 3 (2~9 단, 5까지) → 4 (구구단) → 5 (11~19 x 2~5)
+  makeMath() {
+    const st = this.st, op = st.mathOp;
+    st.mathOp = op === 'add' ? 'mul' : 'add';
+    this.save();
+    const lv = st[op];
+    let a, b;
+    if (op === 'add') {
+      const noCarry = (lo, hi) => { do { a = rint(lo, hi); b = rint(lo, hi); } while ((a % 10) + (b % 10) > 9); };
+      if (lv <= 1) { if (Math.random() < 0.5) { a = rint(2, 9); b = rint(2, 9); } else noCarry(10, 15); }
+      else if (lv === 2) noCarry(10, 39);
+      else if (lv === 3) { do { a = rint(11, 49); b = rint(3, 9); } while ((a % 10) + b < 10); }
+      else if (lv === 4) { do { a = rint(12, 59); b = rint(12, 39); } while ((a % 10) + (b % 10) < 10 || a + b >= 100); }
+      else { a = rint(10, 99); b = rint(10, 99); }
+    } else {
+      if (lv <= 1) { a = rint(2, 3); b = rint(2, 3); }
+      else if (lv === 2) { a = rint(2, 5); b = rint(2, 5); }
+      else if (lv === 3) { a = rint(2, 9); b = rint(2, 5); }
+      else if (lv === 4) { a = rint(2, 9); b = rint(2, 9); }
+      else { a = rint(11, 19); b = rint(2, 5); }
+    }
+    const ans = op === 'add' ? a + b : a * b, sign = op === 'add' ? '+' : '×', ko = op === 'add' ? '더하기' : '곱하기';
+    return {
+      id: `q:${op}`, kind: op, word: `${a} ${sign} ${b} = ?`, answer: `${a} ${sign} ${b} = ${ans}`, lang: 'ko', emoji: '🔢', level: lv, alts: [],
+      speak: `${a} ${ko} ${b}${numJosa(b)} ${ans}`, ask: `${a} ${ko} ${b}${numJosa(b)}?`, speakLang: 'ko', listen: 'ko',
+      check: heard => spokenNumbers(heard).includes(ans),
+    };
+  },
+
+  // 알파벳: 1 (A~E) → 2 (A~J) → 3 (A~O) → 4 (A~T) → 5 (A~Z), 대문자/소문자 아무거나
+  makeAbc() {
+    const lv = this.st.abc, n = [5, 10, 15, 20, 26][lv - 1] || 26;
+    let ch;
+    do { ch = 'abcdefghijklmnopqrstuvwxyz'[rint(0, n - 1)]; } while (ch === this.lastAbc && n > 1);
+    this.lastAbc = ch;
+    const shown = Math.random() < 0.5 ? ch.toUpperCase() : ch, names = ABC_NAMES[ch];
+    return {
+      id: 'q:abc', kind: 'abc', word: shown, lang: 'en', emoji: '🔤', level: lv, alts: [],
+      speak: names[0], speakLang: 'ko', listen: 'ko',
+      check: heard => {
+        const c = (heard || '').normalize('NFC').toLowerCase().replace(/[^\p{L}]/gu, '').replace(/(이에요|예요|이요|요)$/, '');
+        return c === ch || names.some(nm => c === nm || c === nm + nm);
+      },
+    };
+  },
+
+  // 맞힌 결과로 난이도 조절
+  result(word, res) {
+    const key = word.kind, st = this.st;
+    if (!key || !(key in st)) return;
+    if (res && res.method === 'speech' && res.tries === 0) {
+      if (++st[`${key}N`] >= 3) { st[key] = Math.min(QUIZ_MAX_LV, st[key] + 1); st[`${key}N`] = 0; }
+    } else if (res && String(res.method).startsWith('follow')) {
+      st[key] = Math.max(1, st[key] - 1);
+      st[`${key}N`] = 0;
+    } else st[`${key}N`] = 0;
+    this.save();
+    console.log(`[Quiz] ${key} 단계 ${st[key]} (연속 ${st[`${key}N`]})`);
   },
 };
 
@@ -1037,7 +1151,7 @@ const Card = {
     e.reveal.textContent = '';
     e.praise.textContent = '';
     e.heard.textContent = '';
-    e.follow.textContent = `👂 ${FOLLOW_TEXT[word.lang]}`;
+    e.follow.textContent = `👂 ${FOLLOW_TEXT[word.speakLang || word.lang]}`;
     e.overlay.classList.remove('hidden');
     this.fitWord();
     this.updateUI();
@@ -1088,7 +1202,7 @@ const Card = {
     if (!this.canListen()) return;
     this.startedAt = performance.now();
     this.heard = false;
-    this.listener = Speech.listen(this.word.lang, {
+    this.listener = Speech.listen(this.word.listen || this.word.lang, {
       onSound: () => {
         this.heard = true;
         if (!this.el.heard.textContent) this.el.heard.textContent = '🗣️ …';
@@ -1118,7 +1232,10 @@ const Card = {
       this.pass('follow');
       return;
     }
-    const r = Judge.judge(this.word.word, alts, Store.settings.strictness, this.word.alts, !final);
+    // 산수/알파벳 카드는 저마다 답을 확인한다 (보여 주는 글자와 말할 답이 다르다)
+    const r = this.word.check
+      ? (ok => ({ pass: ok, score: ok ? 1 : 0, how: 'check' }))(alts.some(a => this.word.check(a)))
+      : Judge.judge(this.word.word, alts, Store.settings.strictness, this.word.alts, !final);
     if (!r.pass && !final) return;
     this.gotAttempt = true;
     this.log(alts, r, 'speech');
@@ -1189,7 +1306,7 @@ const Card = {
     this.gotAttempt = true;
     this.setHint(false);
     this.el.speaker.classList.add('playing');
-    await Speech.speak(this.word.word, this.word.lang);
+    await Speech.speak(this.word.speak || this.word.word, this.word.speakLang || this.word.lang);
     this.el.speaker.classList.remove('playing');
     this.scheduleListen(0);
   },
@@ -1221,11 +1338,13 @@ const Card = {
     const e = this.el;
     e.card.classList.add('success');
     e.reveal.textContent = this.word.emoji || '⭐';
-    e.praise.textContent = PRAISE[this.word.lang];
+    const sl = this.word.speakLang || this.word.lang;
+    e.praise.textContent = PRAISE[sl];
+    if (this.word.answer != null) e.word.textContent = this.word.answer; // 산수: 맞춘 뒤 답을 보여 준다
     this.fitWord(0.55);
     Sfx.success();
     burst();
-    const praise = Speech.speak(`${this.word.word}! ${PRAISE[this.word.lang]}`, this.word.lang);
+    const praise = Speech.speak(`${this.word.speak || this.word.word}! ${PRAISE[sl]}`, sl);
     // 맞춘 뒤에는 아무 곳이나 누르면(아무 키나) 칭찬 말을 끊고 바로 게임으로
     const skip = new Promise(resolve => {
       const since = performance.now();
@@ -6282,10 +6401,23 @@ const Game = {
     this.closeTalk(false);
     this.state = 'card';
     Input.reset();
-    const en = Store.settings.lang === 'en';
-    toast(tr('📝 계속하려면 문장을 읽어요!', '📝 Read the sentence to keep playing!'));
-    Speech.speak(en ? 'Read the sentence to keep playing!' : '계속하려면 문장을 읽어 봐요!', en ? 'en' : 'ko');
-    await Card.show(Sentences.pick());
+    const en = Store.settings.lang === 'en', kind = Quiz.nextKind();
+    let card;
+    if (kind === 'math') {
+      card = Quiz.makeMath();
+      toast('🔢 계속하려면 문제를 풀어요!');
+      Speech.speak(`문제를 풀어 봐요! ${card.ask}`, 'ko');
+    } else if (kind === 'abc') {
+      card = Quiz.makeAbc();
+      toast('🔤 계속하려면 알파벳을 읽어요!');
+      Speech.speak('이 알파벳은 뭘까요?', 'ko');
+    } else {
+      card = Sentences.pick();
+      toast(tr('📝 계속하려면 문장을 읽어요!', '📝 Read the sentence to keep playing!'));
+      Speech.speak(en ? 'Read the sentence to keep playing!' : '계속하려면 문장을 읽어 봐요!', en ? 'en' : 'ko');
+    }
+    const res = await Card.show(card);
+    Quiz.result(card, res);
     this.quizT = 0;
     if (this.state === 'card') this.state = 'play';
   },
