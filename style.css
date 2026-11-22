@@ -94,6 +94,7 @@ body:not(.touch) .bag-btn::after {
 .inv-slot .e { font-size: 30px; line-height: 1; }
 /* 블록 아이템 그림 (맵 칸 그림 그대로, 글자 크기에 맞춤) */
 .tile-icon { width: 1em; height: 1em; image-rendering: pixelated; vertical-align: -0.12em; border-radius: 0; } /* 아이템 그림 24x24 (24 의 배수 크기에서 픽셀이 고르다) */
+.tile-icon.hd { image-rendering: auto; } /* 블록 아이템: 새 그림체 (크게 그려 줄인 그림) */
 .inv-slot .names { display: flex; flex-direction: column; line-height: 1.05; }
 .inv-slot .n { font-size: 20px; font-weight: 800; color: var(--ink); }
 .inv-slot .s { font-size: 14px; color: #666; font-family: var(--font-en); }
