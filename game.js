@@ -193,6 +193,14 @@ const REGIONS = [
   { emoji: '🏔️', ko: '골짜기 미로', en: 'Canyon Maze' }, // 5탄: 낭떠러지 사이 좁은 길 (더 크고 구불구불)
   { emoji: '🌊', ko: '바다 미로', en: 'Sea Maze' },     // 6탄: 섬과 다리. 끊어진 다리는 🌉 다리를 놓아서 건넌다
 ];
+// 구역 색감 (soft-light 로 얹는 색 r, g, b, 세기): 숲은 깊은 초록, 호수는 맑은 파랑, 늪은 보라, 초원은 따뜻한 햇살,
+// 절벽은 흙빛, 정글은 눅눅한 초록, 골짜기는 노을, 바다는 청록
+const REGION_GRADE = {
+  DEFAULT: [255, 236, 190, 0.18],
+  [REGION.FOREST]: [40, 110, 70, 0.32], [REGION.LAKE]: [130, 200, 255, 0.28], [REGION.SWAMP]: [110, 70, 150, 0.38],
+  [REGION.MEADOW]: [255, 220, 120, 0.3], [REGION.CLOVER]: [210, 255, 150, 0.24], [REGION.MAZE]: [230, 170, 110, 0.26],
+  [REGION.JUNGLE]: [60, 170, 100, 0.32], [REGION.CANYON]: [255, 140, 70, 0.34], [REGION.SEA]: [60, 210, 220, 0.3],
+};
 // 땅 색 (풀 + 점, 물, 모래, 나뭇잎). DEFAULT 는 블록 그림 같은 구역 없는 그림
 const GROUND = {
   DEFAULT: { grass: ['#5cb85c', '#4fa64f', '#6fcb6a'], water: ['#3b8de0', '#74b9f0'], sand: ['#e9d68f', '#d8c27a', '#f3e3a6'], leaf: ['#2e7d32', '#43a047', '#66bb6a'] },
@@ -361,7 +369,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 96;
+const GAME_V = 100;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -1001,9 +1009,12 @@ const Speech = {
   voices: [],
   speaking: false,
 
+  best: {},        // 말 코드(ko-KR) → 고른 목소리
+  badVoices: new Set(), // 못 읽은 목소리 (인터넷 목소리가 끊겼을 때 등): 다음부터 빼고 고른다
+
   init() {
     if (!('speechSynthesis' in window)) return;
-    const load = () => { this.voices = speechSynthesis.getVoices(); };
+    const load = () => { this.voices = speechSynthesis.getVoices(); this.best = {}; };
     load();
     speechSynthesis.addEventListener('voiceschanged', load);
   },
@@ -1017,13 +1028,44 @@ const Speech = {
     } catch { /* 미지원 */ }
   },
 
-  pickVoice(code) {
-    const prefix = code.slice(0, 2).toLowerCase();
-    const vs = this.voices.filter(v => v.lang.replace('_', '-').toLowerCase().startsWith(prefix));
-    return vs.find(v => /google/i.test(v.name)) || vs.find(v => v.lang === code) || vs[0] || null;
+  // 기기/브라우저마다 가장 자연스러운 목소리를 점수로 고른다
+  //  - Edge: "Microsoft SunHi Online (Natural)" 같은 AI 목소리가 제일 좋다 (영어는 아이 목소리 Ana)
+  //  - 아이폰/아이패드/맥: 고품질(Premium) > 향상된(Enhanced) 유나, 장난 목소리(Bubbles, Zarvox 등)는 빼고
+  //  - 크롬/안드로이드: Google 목소리
+  voiceScore(v, code) {
+    const n = v.name, lang = v.lang.replace('_', '-').toLowerCase();
+    let sc = lang === code.toLowerCase() ? 10 : 0;
+    if (/natural|neural/i.test(n)) sc += 100;
+    else if (/premium|고품질|프리미엄/i.test(n)) sc += 90;
+    else if (/enhanced|향상/i.test(n)) sc += 80;
+    else if (/google/i.test(n)) sc += 60;
+    else if (/online/i.test(n)) sc += 50;
+    else if (/yuna|유나|samantha|ava|allison|susan|zoe/i.test(n)) sc += 40;
+    else if (/microsoft/i.test(n)) sc += 10; // 윈도우 기본 목소리 (Heami, Zira: 딱딱하다)
+    if (/sunhi|선히|ana\b|jenny|aria|ava/i.test(n)) sc += 6; // 부드러운 목소리 (Ana 는 아이 목소리)
+    if (/multilingual/i.test(n)) sc -= 5;
+    if (/albert|bad news|bahh|bells|boing|bubbles|cellos|good news|jester|organ|superstar|trinoids|whisper|wobble|zarvox|fred|junior|ralph|kathy|grandpa|grandma|eddy|flo|reed|rocko|sandy|shelley/i.test(n)) sc -= 200;
+    if (v.default) sc += 1;
+    return sc;
   },
 
-  speak(text, lang) {
+  pickVoice(code) {
+    if (this.best[code] && !this.badVoices.has(this.best[code].name)) return this.best[code];
+    const prefix = code.slice(0, 2).toLowerCase();
+    const vs = this.voices.filter(v => v.lang.replace('_', '-').toLowerCase().startsWith(prefix) && !this.badVoices.has(v.name));
+    let best = null, bestSc = -Infinity;
+    for (const v of vs) { const sc = this.voiceScore(v, code); if (sc > bestSc) { best = v; bestSc = sc; } }
+    if (best) {
+      this.best[code] = best;
+      console.log(`[Speech] ${code} 목소리: ${best.name} (점수 ${bestSc}, 후보 ${vs.length}개)`);
+    }
+    return best;
+  },
+
+  // AI/고품질 목소리는 원래 소리가 자연스러워서 높낮이를 건드리지 않는다
+  isNatural(v) { return !!v && /natural|neural|premium|enhanced|고품질|향상|google|online/i.test(v.name); },
+
+  speak(text, lang, retry = true) {
     return new Promise(resolve => {
       if (!('speechSynthesis' in window)) return resolve();
       if (speechSynthesis.speaking || speechSynthesis.pending) speechSynthesis.cancel();
@@ -1031,8 +1073,10 @@ const Speech = {
       u.lang = LANG_CODE[lang] || 'ko-KR';
       const voice = this.pickVoice(u.lang);
       if (voice) u.voice = voice;
-      u.rate = 0.85;
-      u.pitch = 1.1;
+      const natural = this.isNatural(voice);
+      u.rate = natural ? 0.92 : 0.85;
+      u.pitch = natural ? 1 : 1.1;
+      const t0 = performance.now();
       let done = false;
       // 안드로이드에서 onend 가 안 오는 경우가 있어 시간 제한을 둔다
       const timer = setTimeout(() => finish(), 1500 + text.length * 250);
@@ -1043,7 +1087,19 @@ const Speech = {
         setTimeout(() => { this.speaking = false; resolve(); }, CONFIG.TTS_TAIL_MS);
       };
       u.onend = finish;
-      u.onerror = finish;
+      u.onerror = e => {
+        // 인터넷 목소리가 바로 실패하면 (오프라인 등) 그 목소리를 빼고 다음으로 좋은 목소리로 한 번 더
+        const err = e && e.error;
+        if (retry && voice && !done && !['interrupted', 'canceled'].includes(err) && performance.now() - t0 < 3000) {
+          console.log(`[Speech] 목소리 실패 (${voice.name}: ${err}), 다른 목소리로`);
+          this.badVoices.add(voice.name);
+          done = true;
+          clearTimeout(timer);
+          this.speak(text, lang, false).then(resolve);
+          return;
+        }
+        finish();
+      };
       // 카드가 듣는 중에 안내 음성이 나오면 마이크를 잠깐 끈다 (게임 목소리를 아이 말로 듣지 않게). 음성이 끝나면 다시 켜진다
       if (Card.listener) { Card.stopListening(); Card.scheduleListen(300); }
       this.speaking = true;
@@ -1603,6 +1659,11 @@ const BLOCKING = new Set([TILE.TREE, TILE.WATER, TILE.ROCK, TILE.HOUSE, TILE.BRI
 const MONSTER_BLOCKING = new Set([...BLOCKING, TILE.GATE]); // 문은 몬스터만 막는다
 const ARROW_BLOCKING = new Set([TILE.TREE, TILE.ROCK, TILE.HOUSE, TILE.BRICK, TILE.GATE, TILE.TORCH, TILE.LOCK_TREE, TILE.GOLD_TREE, TILE.CLIFF, TILE.CHEST, TILE.STATION, TILE.JUNGLE, TILE.CRACK, TILE.BUSH]);
 const CHUNK = 16; // 그림 조각 크기 (칸)
+const BAYER4 = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map(v => (v + 0.5) / 16); // 점 섞기 순서 (도트 그림 디더링)
+// ☀️ 해는 왼쪽 위: 키 큰 칸은 오른쪽 아래 땅에 그림자를 드리운다 (둥근 것: 나무/바위/덤불, 네모: 벽/절벽/상자)
+const ROUND_CASTERS = new Set([TILE.TREE, TILE.LOCK_TREE, TILE.GOLD_TREE, TILE.ROCK, TILE.BUSH, TILE.JUNGLE]);
+const WALL_CASTERS = new Set([TILE.CLIFF, TILE.CRACK, TILE.BRICK, TILE.CHEST]);
+const NO_SHADOW_ON = new Set([...ROUND_CASTERS, ...WALL_CASTERS, TILE.HOUSE, TILE.DOOR, TILE.STATION]);
 const MINI_COLORS = ['#7ccf6f', '#2e7d32', '#3b8de0', '#e9d68f', '#8d939b', '#f48fb1', '#c0392b', '#c0392b', '#c8a06a',
   '#b5523b', '#8d5a2b', '#a0703f', '#ffb300',
   '#5fbf4f', '#5fbf4f', '#2e7d32', '#ffd54f', '#33691e', '#5d4037', '#ffb300', '#e65100', '#66bb6a',
@@ -2729,7 +2790,7 @@ const World = {
     if (this.recent.length > 40) this.recent.shift();
     this.tiles[i] = v;
     const x = i % this.w, y = Math.floor(i / this.w);
-    for (const [dx, dy] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) this.chunks.delete(`${Math.floor((x + dx) / CHUNK)},${Math.floor((y + dy) / CHUNK)}`);
+    for (const [dx, dy] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1], [1, 1]]) this.chunks.delete(`${Math.floor((x + dx) / CHUNK)},${Math.floor((y + dy) / CHUNK)}`);
     this.miniPixel(x, y);
     this.floodFill(this.door.x, this.door.y + 2);
     this.findTorches();
@@ -2796,9 +2857,69 @@ const World = {
     for (let y = cy * CHUNK; y < Math.min(this.h, (cy + 1) * CHUNK); y++) {
       for (let x = cx * CHUNK; x < Math.min(this.w, (cx + 1) * CHUNK); x++) this.drawTile(g, x, y, this.tile(x, y), this.region(x, y));
     }
+    // 그림자: 바로 왼쪽 위 조각의 칸이 드리우는 것까지 (칸 하나 밖부터)
+    for (let y = Math.max(0, cy * CHUNK - 1); y < Math.min(this.h, (cy + 1) * CHUNK); y++) {
+      for (let x = Math.max(0, cx * CHUNK - 1); x < Math.min(this.w, (cx + 1) * CHUNK); x++) this.drawCastShadow(g, x, y);
+    }
     this.drawHouse(g); // 조각 밖은 잘린다
     this.chunks.set(key, c);
     return c;
+  },
+
+  // 키 큰 칸의 그림자를 오른쪽 / 아래 / 오른쪽 아래 칸의 땅에만 (그 칸이 키 큰 것이면 그리지 않는다)
+  drawCastShadow(g, x, y) {
+    const t = this.tile(x, y), round = ROUND_CASTERS.has(t);
+    if (!round && !WALL_CASTERS.has(t)) return;
+    const X = x * T, Y = y * T;
+    for (const [dx, dy] of [[1, 0], [0, 1], [1, 1]]) {
+      const nx = x + dx, ny = y + dy;
+      if (nx >= this.w || ny >= this.h || NO_SHADOW_ON.has(this.tile(nx, ny))) continue;
+      g.save();
+      g.beginPath();
+      g.rect(nx * T, ny * T, T, T);
+      g.clip();
+      g.fillStyle = 'rgba(16,32,24,.24)';
+      if (round) {
+        // 줄기 밑에서 오른쪽 아래로 길게 누운 타원
+        g.beginPath();
+        g.ellipse(X + T * 0.95, Y + T * 0.98, T * 0.62, T * 0.22, 0.42, 0, Math.PI * 2);
+        g.fill();
+      } else {
+        // 벽: 오른쪽 칸 왼쪽 띠 + 아래 칸 위쪽 띠 (계단처럼 2픽셀씩 엷어진다)
+        g.fillRect(X + T, Y + 4, 6, T);
+        g.fillRect(X + 4, Y + T, T, 5);
+        g.fillStyle = 'rgba(16,32,24,.12)';
+        g.fillRect(X + T + 6, Y + 6, 3, T);
+        g.fillRect(X + 6, Y + T + 5, T, 3);
+      }
+      g.restore();
+    }
+  },
+
+  // 구역 경계: 옆 구역의 풀색을 점점이 섞어서 (가장자리 12픽셀) 계단 모양 경계 대신 자연스럽게 이어진다
+  blendBorder(p, nz, x, y, region) {
+    if (region == null || !this.tiles) return;
+    const W = 12;
+    for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+      const nx = x + dx, ny = y + dy;
+      if (nx < 0 || ny < 0 || nx >= this.w || ny >= this.h) continue;
+      const nr = this.region(nx, ny);
+      if (nr === region || !GROUND[nr]) continue;
+      // 대각선은 두 옆이 모두 우리 구역일 때만 (모서리 한 점)
+      if (dx && dy && (this.region(x + dx, y) !== region || this.region(x, y + dy) !== region)) continue;
+      const ng = GROUND[nr].grass;
+      for (let j = 0; j < T; j++) {
+        const ey = dy < 0 ? j : dy > 0 ? T - 1 - j : -1;
+        if (!dx && ey >= W) continue;
+        for (let i = 0; i < T; i++) {
+          const ex = dx < 0 ? i : dx > 0 ? T - 1 - i : -1;
+          const d = ex >= 0 && ey >= 0 ? Math.hypot(ex, ey) : Math.max(ex, ey);
+          if (d >= W) continue;
+          const w = 0.5 * (1 - d / W) + (nz(i, j, 11) - 0.5) * 0.3;
+          if (w > BAYER4[(j & 3) * 4 + (i & 3)]) p(i, j, nz(i, j, 12) < 0.65 ? ng[0] : ng[nz(i, j, 13) < 0.5 ? 1 : 2]);
+        }
+      }
+    }
   },
 
   // 작은 지도 (한 칸 = 1px)
@@ -2848,6 +2969,7 @@ const World = {
       const [g0, g1, g2] = gr.grass, dark = shade(g0, 0.84);
       fill(g0);
       specks(34, [g1, g2, g1], 1);
+      this.blendBorder(p, nz, x, y, region);
       // 풀잎: 짙은 세로 줄 + 밝은 끝
       for (let k = 0; k < 5; k++) {
         const bx = ri(200 + k, 30) + 1, by = ri(210 + k, 26) + 3;
@@ -3279,6 +3401,7 @@ const Items = {
   },
 
   take(it) {
+    Particles.sparkle(it.x, it.y - 6);
     this.list.splice(this.list.indexOf(it), 1);
     this.version++;
     // 몬스터가 떨어뜨린 것은 다시 생기지 않는다
@@ -3859,6 +3982,7 @@ const Monsters = {
     m.hitT = 0.25;
     Sfx.hit();
     Floaters.add(m.x, m.y - m.def.size * 0.6, '💥', 16);
+    Particles.hit(m.x, m.y - m.def.size * 0.2, m.def.boss);
   },
 
   // 몬스터 체력을 깎는다 (방장/혼자 기기). byOther: 때린 다른 사람 → 잡았으면 true, 카드는 그 사람 기기에서
@@ -3870,6 +3994,7 @@ const Monsters = {
     m.knock = { x: dx / d * kb, y: dy / d * kb, t: 0.15 };
     Sfx.hit();
     Floaters.add(m.x, m.y - m.def.size * 0.6, '💥', 16);
+    Particles.hit(m.x, m.y - m.def.size * 0.2, m.def.boss);
     if (m.hp > 0) return false;
     this.kill(m, byOther);
     return true;
@@ -3878,6 +4003,8 @@ const Monsters = {
   kill(m, byOther) {
     this.list.splice(this.list.indexOf(m), 1);
     Sfx.defeat();
+    Particles.poof(m.x, m.y - m.def.size * 0.15, m.def.size);
+    if (m.def.boss) Render.shake(0.4, 4);
     for (let i = 0; i < 4; i++) Floaters.add(m.x + randFloat(-14, 14), m.y - randFloat(0, 20), '✨', 14);
     for (const [type, n] of Object.entries(m.def.drops)) for (let i = 0; i < n; i++) Items.drop(type, m.x, m.y);
     if (m.type === 'eagle') {
@@ -3942,6 +4069,154 @@ const Cloud = {
 // ============================================================
 // Floaters — 💥 ✨ 처럼 잠깐 떠올랐다 사라지는 그림
 // ============================================================
+// ============================================================
+// Particles — 도트 효과: 걸을 때 먼지, 때릴 때 불꽃, 잡으면 연기, 캘 때 부스러기, 반딧불/나뭇잎/꽃잎
+// ============================================================
+const DUST_COLORS = {
+  [TILE.SAND]: ['#e9d68f', '#d8c27a'], [TILE.PATH]: ['#b08a5a', '#c9a776'], [TILE.BRIDGE]: ['#a1887f', '#8d6e63'],
+  DEFAULT: ['#d7ccc8', '#bcaaa4', '#e8e0d0'],
+};
+const CHIP_COLORS = {
+  [TILE.TREE]: ['#795548', '#5d4037', '#43a047', '#66bb6a'], [TILE.SAPLING]: ['#66bb6a', '#43a047'],
+  [TILE.BUSH]: ['#43a047', '#66bb6a', '#8d6e63'], [TILE.JUNGLE]: ['#2e7d32', '#43a047', '#81c784'],
+  [TILE.ROCK]: ['#9e9e9e', '#bdbdbd', '#757575'], [TILE.CRACK]: ['#9e9e9e', '#8d6e63', '#bdbdbd'], [TILE.BRICK]: ['#b5533c', '#8d3a28'],
+  [TILE.FLOWER]: ['#e74c3c', '#f1c40f', '#66bb6a'], [TILE.LUCKY]: ['#66bb6a', '#a5d6a7'], [TILE.SAND]: ['#e9d68f', '#d8c27a'],
+  DEFAULT: ['#8d6e63', '#a1887f', '#66bb6a'],
+};
+const Particles = {
+  list: [],
+  dustT: 0,
+  ambT: 0,
+
+  // n 개: speed [최소, 최대], life [최소, 최대], colors, size, gravity, up(처음 위로), angle/spread(방향), glow(빛), sway(흔들흔들)
+  add(x, y, n, o) {
+    for (let i = 0; i < n; i++) {
+      const a = o.angle != null ? o.angle + randFloat(-(o.spread ?? Math.PI), o.spread ?? Math.PI) : randFloat(0, Math.PI * 2);
+      const sp = randFloat(o.speed[0], o.speed[1]), j = o.jitter || 0;
+      this.list.push({
+        x: x + randFloat(-j, j), y: y + randFloat(-j, j), vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - (o.up || 0),
+        g: o.gravity || 0, drag: o.drag ?? 3, t: 0, life: randFloat(o.life[0], o.life[1]), size: o.size || 2,
+        color: o.colors[Math.floor(Math.random() * o.colors.length)], glow: !!o.glow, sway: o.sway || 0,
+        phase: Math.random() * 6.28, ground: !!o.ground, floor: o.floor ?? null,
+      });
+    }
+    if (this.list.length > 500) this.list.splice(0, this.list.length - 500);
+  },
+
+  update(dt) {
+    for (const q of this.list) {
+      q.t += dt;
+      q.vy += q.g * dt;
+      const k = Math.max(0, 1 - q.drag * dt);
+      q.vx *= k; q.vy *= k;
+      q.x += (q.vx + (q.sway ? Math.sin(q.t * 2.6 + q.phase) * q.sway : 0)) * dt;
+      q.y += q.vy * dt;
+      // 땅에 떨어지면 통 튀고 멈춘다 (부스러기)
+      if (q.floor != null && q.y > q.floor) { q.y = q.floor; q.vy *= -0.35; q.vx *= 0.6; }
+    }
+    this.list = this.list.filter(q => q.t < q.life);
+    this.ambient(dt);
+  },
+
+  // 도트 한 점씩 (세상 캔버스, 1 월드 px = 1 픽셀). ground: 발밑 먼지는 캐릭터보다 먼저
+  draw(ctx, ground) {
+    ctx.save();
+    for (const q of this.list) {
+      if (q.glow || q.ground !== ground) continue;
+      const f = q.t / q.life, sz = Math.max(1, Math.round(q.size * (1 - f * 0.5)));
+      ctx.globalAlpha = Math.min(1, f * 4 + (q.sway ? 0 : 0.6), (1 - f) * 1.6);
+      ctx.fillStyle = q.color;
+      ctx.fillRect(Math.round(q.x - sz / 2), Math.round(q.y - sz / 2), sz, sz);
+    }
+    ctx.restore();
+  },
+
+  // 빛나는 것 (반딧불, 반짝이): 어둠 위에 화면 해상도로 더해서 어두운 곳에서도 빛난다
+  drawGlow(ctx, sx, sy, k) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (const q of this.list) {
+      if (!q.glow) continue;
+      const f = q.t / q.life, tw = 0.55 + 0.45 * Math.sin(q.t * 7 + q.phase);
+      const a = Math.min(1, f * 5, (1 - f) * 3) * tw, x = sx(q.x), y = sy(q.y), r = Math.round(q.size * k * 2.2);
+      ctx.globalAlpha = a;
+      ctx.drawImage(this.glowSprite(q.color, r), x - r, y - r);
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = `rgba(255,255,230,${(a * 0.9).toFixed(2)})`;
+      const d = Math.max(2, Math.round(k * 0.8));
+      ctx.fillRect(Math.round(x - d / 2), Math.round(y - d / 2), d, d);
+    }
+    ctx.restore();
+  },
+
+  // 빛 한 덩이 그림 (색, 반지름마다 한 번 그려 두고 다시 쓴다)
+  glowSprite(color, r) {
+    const key = `${color}|${r}`, cache = this.glowCache || (this.glowCache = new Map());
+    if (!cache.has(key)) {
+      const c = document.createElement('canvas');
+      c.width = c.height = r * 2;
+      const g = c.getContext('2d'), grad = g.createRadialGradient(r, r, 0, r, r, r);
+      grad.addColorStop(0, color.replace('A', '1'));
+      grad.addColorStop(1, color.replace('A', '0'));
+      g.fillStyle = grad;
+      g.fillRect(0, 0, r * 2, r * 2);
+      cache.set(key, c);
+    }
+    return cache.get(key);
+  },
+
+  // ---------- 효과 모음 ----------
+  dust(x, y) {
+    const tt = World.tile(Math.floor(x / T), Math.floor(y / T));
+    if (tt === TILE.WATER || tt === TILE.SEA) return;
+    this.add(x, y, 2, { speed: [6, 16], angle: -Math.PI / 2, spread: 1.4, life: [0.35, 0.6], colors: DUST_COLORS[tt] || DUST_COLORS.DEFAULT, size: 2, jitter: 3, drag: 4, ground: true });
+  },
+  hit(x, y, boss = false) {
+    this.add(x, y, boss ? 14 : 9, { speed: [50, 120], life: [0.18, 0.35], colors: ['#ffffff', '#fff59d', '#ffd54f', '#ffb74d'], size: 2, drag: 6 });
+    if (boss) Render.shake(0.18, 2.5);
+  },
+  hurt(x, y) {
+    this.add(x, y, 10, { speed: [40, 90], life: [0.25, 0.45], colors: ['#ff5252', '#ff8a80', '#ffffff'], size: 2, drag: 5 });
+    Render.shake(0.22, 2);
+  },
+  poof(x, y, size = 24) {
+    const n = Math.round(10 + size / 3);
+    this.add(x, y, n, { speed: [20, 55], up: 12, life: [0.45, 0.8], colors: ['#ffffff', '#eeeeee', '#e0e0e0', '#cfd8dc'], size: 4, jitter: size * 0.25, drag: 3.5 });
+    this.add(x, y - 6, 8, { speed: [40, 90], up: 30, life: [0.5, 0.9], colors: ['#fff59d', '#ffd54f', '#ffffff'], size: 2, gravity: 90, drag: 1.5 });
+  },
+  chips(tx, ty, tt, big = false) {
+    const x = tx * T + T / 2, y = ty * T + T / 2;
+    this.add(x, y, big ? 16 : 7, { speed: [40, 100], up: 50, life: [0.5, 0.9], colors: CHIP_COLORS[tt] || CHIP_COLORS.DEFAULT, size: big ? 3 : 2, gravity: 260, drag: 1.2, jitter: 6, floor: ty * T + T - 2 });
+  },
+  sparkle(x, y) {
+    this.add(x, y, 8, { speed: [20, 50], up: 20, life: [0.4, 0.7], colors: ['#fffde7', '#fff59d', '#ffffff'], size: 2, drag: 3 });
+  },
+
+  // 구역마다 떠다니는 것 (화면 안에서): 어두운 곳 반딧불, 숲 나뭇잎, 초원/클로버 꽃잎, 바다 물보라 반짝
+  ambient(dt) {
+    if (Game.state !== 'play' && Game.state !== 'card') return;
+    this.ambT -= dt;
+    if (this.ambT > 0) return;
+    const r = World.regionAtPx(Player.x, Player.y), vw = Render.cssW / Render.scale, vh = Render.cssH / Render.scale;
+    const rx = () => Render.camX + Math.random() * vw, ry = () => Render.camY + Math.random() * vh;
+    const glowing = this.list.filter(q => q.glow).length;
+    if (DARK_REGIONS.has(r) && r !== REGION.SEA) {
+      this.ambT = 0.35;
+      if (glowing < 14) this.add(rx(), ry(), 1, { speed: [4, 12], life: [3, 6], colors: ['rgba(210,255,120,A)', 'rgba(255,240,140,A)'], size: 2, drag: 0.2, sway: 10, glow: true });
+    } else if (r === REGION.FOREST) {
+      this.ambT = 0.45;
+      this.add(rx(), ry(), 1, { speed: [0, 4], angle: Math.PI / 2, spread: 0.3, life: [5, 8], colors: ['#66bb6a', '#9ccc65', '#c5a35a', '#8d6e63'], size: 2, gravity: 0, drag: 0, sway: 14, up: -14 });
+    } else if (r === REGION.MEADOW || r === REGION.CLOVER) {
+      this.ambT = 0.5;
+      this.add(rx(), ry(), 1, { speed: [12, 22], angle: 0.2, spread: 0.2, life: [6, 10], colors: ['#ffffff', '#f8bbd0', '#fff59d', '#f48fb1'], size: 2, drag: 0, sway: 10 });
+    } else if (r === REGION.SEA || r === REGION.LAKE) {
+      this.ambT = 0.25;
+      const x = rx(), y = ry(), tt = World.tile(Math.floor(x / T), Math.floor(y / T));
+      if (tt === TILE.WATER || tt === TILE.SEA) this.add(x, y, 1, { speed: [0, 2], life: [0.5, 0.9], colors: ['rgba(255,255,255,A)'], size: 1.4, drag: 0, glow: true });
+    } else this.ambT = 0.5;
+  },
+};
+
 const Floaters = {
   list: [],
   add(x, y, text, size = 16, opt = {}) { this.list.push({ x, y, text, size, t: 0, life: 0.9, ...opt }); },
@@ -4019,6 +4294,8 @@ const Player = {
     this.swingT = Math.max(0, this.swingT - dt);
     if (!this.moving) { this.stepT = 0; return; }
     this.walkT += dt;
+    // 걸을 때 발밑 먼지 (점프 중에는 없다)
+    if ((Particles.dustT -= dt) <= 0 && !(this.jumpT > 0)) { Particles.dustT = 0.16; Particles.dust(this.x, this.y + 6); }
     if (Math.abs(v.x) > Math.abs(v.y)) this.dir = v.x < 0 ? 'left' : 'right';
     else this.dir = v.y < 0 ? 'up' : 'down';
     const speed = CONFIG.PLAYER_SPEED * T * (Game.buffLeft('speed') > 0 ? 1.5 : 1); // 🏃 파란 물약
@@ -4758,7 +5035,9 @@ const Render = {
     this.cssH = innerHeight;
     this.canvas.width = Math.round(this.cssW * this.dpr);
     this.canvas.height = Math.round(this.cssH * this.dpr);
-    this.scale = Math.min(this.cssW, this.cssH) / (CONFIG.VIEW_TILES * T);
+    // 도트 하나 = 화면 픽셀 정수 배 (2.8배처럼 들쭉날쭉하지 않게). 보이는 칸 수는 VIEW_TILES 쯤 (조금 달라질 수 있다)
+    const k = Math.max(1, Math.round(Math.min(this.cssW, this.cssH) * this.dpr / (CONFIG.VIEW_TILES * T)));
+    this.scale = k / this.dpr;
     if (Card.active) Card.fitWord(Card.passed ? 0.55 : 1);
   },
 
@@ -4773,6 +5052,17 @@ const Render = {
     const mapW = World.w * T, mapH = World.h * T;
     this.camX = mapW <= viewW ? (mapW - viewW) / 2 : clamp(Player.x - viewW / 2, 0, mapW - viewW);
     this.camY = mapH <= viewH ? (mapH - viewH) / 2 : clamp(Player.y - viewH / 2, 0, mapH - viewH);
+    // 흔들림 (보스를 때리거나 내가 맞았을 때)
+    const now = performance.now() / 1000;
+    if (this.shakeUntil > now) {
+      const a = this.shakeAmp * (this.shakeUntil - now) / this.shakeLen;
+      this.camX += randFloat(-a, a);
+      this.camY += randFloat(-a, a);
+    }
+    // 화면 픽셀 단위로 맞춰서 도트가 흔들리거나 번지지 않게
+    const q = this.scale * this.dpr;
+    this.camX = Math.round(this.camX * q) / q;
+    this.camY = Math.round(this.camY * q) / q;
 
     const s = this.scale * this.dpr;
     // 세상은 "1 월드 px = 1 픽셀" 인 작은 캔버스(lo)에 먼저 그리고 화면 크기로 키운다:
@@ -4791,9 +5081,11 @@ const Render = {
     this.ctx = lctx;
     this.deferred = [];
     try { this.drawWorld(time, viewW, viewH, mapW, mapH); } finally { this.ctx = main; }
+    this.drawGrade(lctx, lw, lh);
     main.imageSmoothingEnabled = false;
     main.setTransform(s, 0, 0, s, (ox - this.camX) * s, (oy - this.camY) * s);
     main.drawImage(lo, 0, 0);
+    this.drawVignette(main);
     main.setTransform(s, 0, 0, s, -this.camX * s, -this.camY * s);
     const later = this.deferred;
     this.deferred = null;
@@ -4802,6 +5094,7 @@ const Render = {
 
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     this.drawSwampDark();
+    Particles.drawGlow(ctx, wx => (wx - this.camX) * this.scale, wy => (wy - this.camY) * this.scale, this.scale);
     this.drawEdgeArrow(World.door.x * T + T / 2, World.door.y * T, '🏠', Craft.canMakeAny() ? '🔨' : '');
     const peers = Multi.visiblePeers();
     const boss = Monsters.bossIn(World.stageAtPx(Player.x, Player.y));
@@ -4813,6 +5106,53 @@ const Render = {
     }
     for (const p of peers) this.drawEdgeArrow(p.x, p.y, '🧑', '', p.name);
     this.drawMinimap(peers, boss);
+  },
+
+  // 🎨 빛과 색감: 왼쪽 위에서 비치는 햇빛 + 구역마다 다른 색 (구역을 옮기면 천천히 바뀐다)
+  drawGrade(g, w, h) {
+    const want = REGION_GRADE[World.regionAtPx(Player.x, Player.y)] || REGION_GRADE.DEFAULT;
+    const cur = this.grade || (this.grade = [...want]);
+    for (let i = 0; i < 4; i++) cur[i] += (want[i] - cur[i]) * 0.03;
+    g.save();
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.globalCompositeOperation = 'soft-light';
+    const sun = g.createLinearGradient(0, 0, w, h);
+    sun.addColorStop(0, 'rgba(255,244,200,.55)');
+    sun.addColorStop(0.55, 'rgba(255,244,200,0)');
+    sun.addColorStop(1, 'rgba(20,30,80,.45)');
+    g.fillStyle = sun;
+    g.fillRect(0, 0, w, h);
+    g.fillStyle = `rgba(${cur[0] | 0},${cur[1] | 0},${cur[2] | 0},${cur[3].toFixed(3)})`;
+    g.fillRect(0, 0, w, h);
+    g.restore();
+  },
+
+  // 화면 가장자리를 살짝 어둡게 (눈이 가운데로)
+  drawVignette(ctx) {
+    const w = this.canvas.width, h = this.canvas.height;
+    if (!this.vig || this.vig.w !== w || this.vig.h !== h) {
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      const g = c.getContext('2d'), r = Math.hypot(w, h) / 2;
+      const grad = g.createRadialGradient(w / 2, h / 2, r * 0.45, w / 2, h / 2, r);
+      grad.addColorStop(0, 'rgba(0,0,0,0)');
+      grad.addColorStop(1, 'rgba(10,15,30,.38)');
+      g.fillStyle = grad;
+      g.fillRect(0, 0, w, h);
+      this.vig = { w, h, c };
+    }
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(this.vig.c, 0, 0);
+    ctx.restore();
+  },
+
+  shake(sec, amp) {
+    const now = performance.now() / 1000;
+    if ((this.shakeUntil || 0) - now > sec && this.shakeAmp >= amp) return;
+    this.shakeLen = sec;
+    this.shakeAmp = amp;
+    this.shakeUntil = now + sec;
   },
 
   // 글자/이모지는 세상 그림(작은 캔버스) 위에 화면 해상도로 (세상을 그리는 중이 아니면 바로)
@@ -4832,6 +5172,7 @@ const Render = {
       }
     }
     this.drawTarget(time);
+    Particles.draw(ctx, true);
 
     // y 순서대로 그려서 앞뒤가 자연스럽게
     const drawables = Items.list.filter(it => !Items.pending.has(it.id)).map(it => ({ y: it.y, draw: () => this.drawItem(it, time) }));
@@ -4852,6 +5193,7 @@ const Render = {
       }
     }
     drawables.sort((a, b) => a.y - b.y).forEach(d => d.draw());
+    Particles.draw(ctx, false);
     Monsters.arrows.forEach(a => this.drawArrow(a));
     for (const p of peers) p.arrows.forEach(a => this.drawArrow(a));
     this.drawCraftHint(time);
@@ -4895,9 +5237,17 @@ const Render = {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.drawImage(c, 0, 0);
     ctx.restore();
-    // 횃불 빛: 따뜻한 주황빛을 살짝 더한다
+    // 횃불 빛: 따뜻한 주황빛을 살짝 더한다 (내 둘레도 촛불처럼 일렁이며 따뜻하게)
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
+    {
+      const r = T * k * 2.6 * (1 + Math.sin(now * 5) * 0.02 + Math.sin(now * 13) * 0.015);
+      const glow = ctx.createRadialGradient(px, py, 0, px, py, r);
+      glow.addColorStop(0, `rgba(255,200,120,${0.16 * this.dark})`);
+      glow.addColorStop(1, 'rgba(255,170,80,0)');
+      ctx.fillStyle = glow;
+      ctx.fillRect(px - r, py - r, r * 2, r * 2);
+    }
     for (const t of lit) {
       const x = sx(t.x), y = sy(t.y), r = CONFIG.TORCH_RADIUS * T * k;
       const glow = ctx.createRadialGradient(x, y, 0, x, y, r);
@@ -6092,6 +6442,7 @@ const Game = {
       left -= dt;
       this.update(dt);
       Floaters.update(dt);
+      Particles.update(dt);
     }
   },
 
@@ -6196,6 +6547,7 @@ const Game = {
     const need = dig.tools && dig.tools.includes(this.weapon) ? num(dig.tool) : num(dig.hand);
     Sfx.hit();
     Floaters.add(tx * T + T / 2, ty * T + T / 4, this.dig.n < need ? '💥' : '✨', 16);
+    Particles.chips(tx, ty, tt, this.dig.n >= need);
     if (this.dig.n < need || this.busy) return;
     this.dig = { i: -1, n: 0 };
     this.busy = true;
@@ -6514,6 +6866,7 @@ const Game = {
     this.hearts--;
     Player.invulnT = CONFIG.INVULN_SEC;
     Player.hitT = CONFIG.HIT_FLASH_SEC;
+    Particles.hurt(Player.x, Player.y - 12);
     const dx = Player.x - m.x, dy = Player.y - m.y, d = Math.hypot(dx, dy) || 1;
     Player.knock = { x: dx / d * CONFIG.KNOCKBACK * T, y: dy / d * CONFIG.KNOCKBACK * T, t: 0.15 };
     Sfx.hurt();
