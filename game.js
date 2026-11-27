@@ -258,6 +258,8 @@ const MONSTERS = {
   chicken:  { emoji: '🐔', ko: '닭',     en: 'hen',      hp: 2, speed: 2.0, size: 22, drops: { meat: 1 },          region: REGION.MEADOW, count: 3, calm: true, likes: 'carrot' },
   pig:      { emoji: '🐖', ko: '돼지',   en: 'pig',      hp: 3, speed: 1.7, size: 26, drops: { meat: 2 },          region: REGION.MEADOW, count: 2, calm: true, likes: 'apple' },
   deer:     { emoji: '🦌', ko: '사슴',   en: 'deer',     hp: 3, speed: 2.6, size: 28, drops: { meat: 1, leather: 1 }, region: REGION.MEADOW, count: 2, calm: true, likes: 'apple' },
+  // 젤리삐: 엎어 놓은 컵 모양의 노란 병아리 젤리 (말랑말랑 통통 뛴다)
+  jellippi: { emoji: '🐥', ko: '젤리삐', en: 'jelly chick', hp: 2, speed: 1.6, size: 24, drops: { honey: 1 },        region: REGION.MEADOW, count: 3, calm: true, likes: 'apple' },
   // 🍀 2탄 클로버 들판. eats: 네잎클로버를 찾아가서 먹는다 (먹으면 세잎클로버가 된다). 먹이를 주면 따라다니며 네잎클로버를 찾아 준다
   bunny:    { emoji: '🐇', ko: '토끼',   en: 'rabbit',   hp: 2, speed: 2.0, size: 24, drops: { meat: 1 },          region: REGION.CLOVER, count: 6, calm: true, eats: true, likes: 'carrot' },
   snail:    { emoji: '🐌', ko: '달팽이', en: 'snail',    hp: 2, speed: 0.8, size: 22, drops: { stone: 1 },         region: REGION.CLOVER, count: 3, calm: true, likes: 'carrot' }, // 달팽이 껍데기 → 돌
@@ -473,7 +475,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 122;
+const GAME_V = 123;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -2656,6 +2658,7 @@ const CRITTERS = {
   turtle:   { plan: 'turtle', c: '#a9d67c', shell: '#5f9e3a' },
   octopus:  { plan: 'octo', c: '#f59bbd' },
   ghost:    { plan: 'ghost', c: '#ffffff' },
+  jellippi: { plan: 'jelly', c: '#fdd835' },
 };
 const CRITTER_BY_EMOJI = { '🐉': 'dragon' };
 
@@ -3203,6 +3206,62 @@ const Critter = {
     this.sh(c, this.grad(c, 0, -12, 8.5, shade(S.c, 1.12), S.c), () => c.ellipse(0, -12, 8.6, 8, 0, 0, Math.PI * 2));
     this.gloss(c, 0, -12, 8.4);
     this.face(c, st, -1, -10.5, 5.6, 1.8);
+    c.restore();
+  },
+
+  // ---------- 젤리삐: 엎어 놓은 컵 모양 말랑 젤리 + 병아리 (부리, 머리 깃, 작은 날개, 주황 발) ----------
+  jelly(c, st) {
+    const { mv, ph } = st;
+    const hop = Math.max(0, Math.sin(ph)) * 3.2 * mv;          // 통통 뛰기
+    const land = mv ? Math.max(0, -Math.sin(ph)) : 0;          // 땅에 닿으면 납작
+    const br = Math.sin(st.time * 2.6) * 0.035;                // 가만히 있으면 말랑말랑 숨쉬기
+    const sx = 1 + land * 0.13 + br, sy = 1 - land * 0.13 - br + (hop > 0.5 ? 0.06 : 0);
+    // 그림자 쪽 발 (땅에 그대로)
+    for (const d of [-1, 1]) this.sh(c, this.grad(c, d * 4.2, -0.6, 2.4, '#ffb74d', '#fb8c00'), this.el(c, d * 4.4, -0.3, 2.4, 1.15));
+    c.save();
+    c.translate(0, -hop);
+    c.scale(sx, sy);
+    const body = () => {
+      c.moveTo(-11.5, -1.2);
+      c.bezierCurveTo(-12.6, -12.5, -7.2, -19.6, 0, -19.6);
+      c.bezierCurveTo(7.2, -19.6, 12.6, -12.5, 11.5, -1.2);
+      c.quadraticCurveTo(8, 1.1, 4, 0.1); c.quadraticCurveTo(0, 1.4, -4, 0.1); c.quadraticCurveTo(-8, 1.1, -11.5, -1.2);
+      c.closePath();
+    };
+    // 작은 날개 (몸 옆에서 살랑)
+    const flap = Math.sin(st.time * (mv ? 9 : 3) + 1) * (mv ? 0.9 : 0.35);
+    for (const d of [-1, 1]) this.sh(c, this.grad(c, d * 11, -8, 3.6, '#fff176', '#fbc02d'), this.el(c, d * 11.3, -7.4 - flap * d * 0.4, 2.6, 3.7, d * (0.5 + flap * 0.15)));
+    // 몸: 노란 젤리
+    this.sh(c, this.grad(c, -1, -10, 13, '#fff59d', '#fdd835'), body);
+    c.save(); c.beginPath(); body(); c.clip();
+    // 아래는 젤리 속이 비쳐 진하게, 테두리 안쪽에 밝은 빛
+    const ig = c.createLinearGradient(0, -20, 0, 1.5);
+    ig.addColorStop(0, 'rgba(255,255,255,0)'); ig.addColorStop(0.68, 'rgba(255,255,255,0)'); ig.addColorStop(1, 'rgba(245,160,20,.45)');
+    c.fillStyle = ig; c.fillRect(-14, -21, 28, 23);
+    c.strokeStyle = 'rgba(255,255,240,.55)'; c.lineWidth = 1.2;
+    c.beginPath(); c.moveTo(9.6, -4); c.bezierCurveTo(10.6, -10, 7.4, -15.4, 3, -17.4); c.stroke();
+    // 젤리 속 작은 방울
+    c.fillStyle = 'rgba(255,255,255,.6)';
+    for (const [bx, by, r] of [[6.2, -5, 1], [7.8, -8, 0.6], [-7.4, -3.6, 0.7]]) { c.beginPath(); c.arc(bx, by, r, 0, Math.PI * 2); c.fill(); }
+    c.restore();
+    // 반짝 (젤리 윤기)
+    c.save();
+    c.fillStyle = 'rgba(255,255,255,.7)';
+    c.beginPath(); c.ellipse(-6.2, -14.2, 3.4, 1.6, -0.7, 0, Math.PI * 2); c.fill();
+    c.fillStyle = 'rgba(255,255,255,.95)';
+    c.beginPath(); c.arc(-8.6, -11.2, 0.85, 0, Math.PI * 2); c.fill();
+    c.restore();
+    // 머리 깃 (꼬불 두 가닥)
+    c.save();
+    c.strokeStyle = '#f9a825'; c.lineWidth = 1.15;
+    c.beginPath(); c.moveTo(-0.4, -19.3); c.quadraticCurveTo(-2.8, -23, -0.2, -23.8);
+    c.moveTo(0.9, -19.4); c.quadraticCurveTo(2.8, -22.6, 4.4, -21.6); c.stroke();
+    c.restore();
+    // 착한 얼굴: 반짝 큰 눈 + 볼터치, 눈썹 없이 (입 대신 부리)
+    this.face(c, { ...st, fierce: false }, -1.4, -10.2, 6.2, 1.9, { noBrow: true, noMouth: true });
+    this.sh(c, this.grad(c, -1.4, -7.4, 2.2, '#ffcc80', '#fb8c00'), () => {
+      c.moveTo(-3.4, -7.7); c.quadraticCurveTo(-1.4, -9.2, 0.6, -7.7); c.quadraticCurveTo(-1.4, -5.1, -3.4, -7.7); c.closePath();
+    });
     c.restore();
   },
 
