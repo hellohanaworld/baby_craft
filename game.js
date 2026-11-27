@@ -310,6 +310,92 @@ function seededRandom(seed) {
 }
 const stripVS = s => (s || '').replace(/[︎️]/g, '');
 
+// ---------- 칸 가장자리를 둥글고 구불구불하게 (물가, 모래 가장자리) ----------
+// O: 옆 칸 값 (t/b/l/r/tl/tr/bl/br, 다른 것이 아니면 null). 하나도 없으면 null
+function edgeSides(nb, is) {
+  const at = (dx, dy) => { const v = nb(dx, dy); return is(v) ? v : null; };
+  const O = { t: at(0, -1), b: at(0, 1), l: at(-1, 0), r: at(1, 0), tl: at(-1, -1), tr: at(1, -1), bl: at(-1, 1), br: at(1, 1) };
+  return Object.values(O).some(v => v != null) ? O : null;
+}
+const EDGE_CORNERS = [[-1, -1, 't', 'l', 'tl'], [1, -1, 't', 'r', 'tr'], [-1, 1, 'b', 'l', 'bl'], [1, 1, 'b', 'r', 'br']];
+function mixHex(a, b, k) {
+  const p = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+  const A = p(a), B = p(b);
+  return '#' + A.map((v, i) => Math.round(v + (B[i] - v) * k).toString(16).padStart(2, '0')).join('');
+}
+// 한 쪽 가장자리의 구불구불 (양 끝은 0 이라 옆 칸과 이어진다). s: 0~1
+function edgeWave(x, y, side, s, amp, t = 0) {
+  const k = { t: 1, b: 2, l: 3, r: 4 }[side];
+  const c1 = hash(x, y, 300 + k) * 2 - 1, c2 = hash(x, y, 310 + k) * 2 - 1;
+  return amp * (c1 * Math.sin(Math.PI * s) * Math.cos(t) + c2 * 0.6 * Math.sin(Math.PI * 2 * s) * Math.cos(t * 0.8 + 1));
+}
+function edgePoint(X, Y, side, u, d) {
+  return side === 't' ? [X + u, Y + d] : side === 'b' ? [X + u, Y + T - d] : side === 'l' ? [X + d, Y + u] : [X + T - d, Y + u];
+}
+function arcShort(g, cx, cy, r, a0, a1) {
+  let diff = a1 - a0;
+  while (diff > Math.PI) diff -= Math.PI * 2;
+  while (diff < -Math.PI) diff += Math.PI * 2;
+  g.arc(cx, cy, r, a0, a1, diff < 0);
+}
+// 깊이 d 만큼 다른 것이 들어온 모양을 칠한다 (color(옆 칸 값) → 색). R: 볼록 모서리 둥글기
+function edgeFill(g, X, Y, x, y, O, d, R, color) {
+  g.save();
+  g.beginPath(); g.rect(X, Y, T, T); g.clip();
+  const amp = Math.min(2.4, 0.9 + d * 0.25);
+  for (const side of ['t', 'b', 'l', 'r']) {
+    if (O[side] == null) continue;
+    g.beginPath();
+    const [sx, sy] = edgePoint(X, Y, side, 0, -1);
+    g.moveTo(sx, sy);
+    for (let k = 0; k <= 12; k++) { const [px, py] = edgePoint(X, Y, side, T * k / 12, d + edgeWave(x, y, side, k / 12, amp)); g.lineTo(px, py); }
+    const [ex, ey] = edgePoint(X, Y, side, T, -1);
+    g.lineTo(ex, ey); g.closePath();
+    g.fillStyle = color(O[side]); g.fill();
+  }
+  for (const [dx, dy, a, b, dg] of EDGE_CORNERS) {
+    const cx = X + (dx > 0 ? T : 0), cy = Y + (dy > 0 ? T : 0);
+    if (O[a] != null && O[b] != null) {
+      // 볼록 모서리: R 네모에서 (R - d) 동그라미를 뺀 곳
+      g.beginPath(); g.moveTo(cx, cy); g.lineTo(cx - dx * R, cy); g.lineTo(cx - dx * R, cy - dy * d);
+      const ox = cx - dx * R, oy = cy - dy * R;
+      if (R > d) arcShort(g, ox, oy, R - d, Math.atan2(dy, 0), Math.atan2(0, dx));
+      g.lineTo(cx - dx * d, cy - dy * R); g.lineTo(cx, cy - dy * R); g.closePath();
+      g.fillStyle = color(O[a]); g.fill();
+    } else if (O[a] == null && O[b] == null && O[dg] != null) {
+      // 오목 모서리: 대각선 칸 모서리 둘레 동그라미
+      g.beginPath(); g.arc(cx, cy, d, 0, Math.PI * 2); g.fillStyle = color(O[dg]); g.fill();
+    }
+  }
+  g.restore();
+}
+// 같은 모양의 테두리 선 (거품): 깊이 d, 시간 t 로 출렁인다
+function edgeLine(g, X, Y, x, y, O, d, R, t) {
+  const amp = 1.8;
+  for (const side of ['t', 'b', 'l', 'r']) {
+    if (O[side] == null) continue;
+    const horiz = side === 't' || side === 'b';
+    const u0 = O[horiz ? 'l' : 't'] != null ? R : 0, u1 = T - (O[horiz ? 'r' : 'b'] != null ? R : 0);
+    for (let k = 0; k <= 10; k++) {
+      const s = k / 10, [px, py] = edgePoint(X, Y, side, u0 + (u1 - u0) * s, d + edgeWave(x, y, side, s, amp, t));
+      if (k === 0) g.moveTo(px, py); else g.lineTo(px, py);
+    }
+  }
+  for (const [dx, dy, a, b, dg] of EDGE_CORNERS) {
+    const cx = X + (dx > 0 ? T : 0), cy = Y + (dy > 0 ? T : 0);
+    if (O[a] != null && O[b] != null && R > d) {
+      const ox = cx - dx * R, oy = cy - dy * R, a0 = Math.atan2(dy, 0);
+      g.moveTo(ox + Math.cos(a0) * (R - d), oy + Math.sin(a0) * (R - d));
+      arcShort(g, ox, oy, R - d, a0, Math.atan2(0, dx));
+    } else if (O[a] == null && O[b] == null && O[dg] != null) {
+      // 안쪽(칸 가운데)을 도는 4분의 1 동그라미
+      const a0 = Math.atan2(0, -dx), a1 = Math.atan2(-dy, 0);
+      g.moveTo(cx + Math.cos(a0) * d, cy + Math.sin(a0) * d);
+      arcShort(g, cx, cy, d, a0, a1);
+    }
+  }
+}
+
 function hash(x, y, s) {
   let h = Math.imul(x, 374761393) ^ Math.imul(y, 668265263) ^ Math.imul(s, 1442695041);
   h = Math.imul(h ^ (h >>> 13), 1274126177);
@@ -387,7 +473,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 121;
+const GAME_V = 122;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -4550,6 +4636,10 @@ const World = {
           g.fill();
         }
       }
+      if (!bare) {
+        const O = edgeSides(nb, v => v === TILE.SAND);
+        if (O) edgeFill(g, X, Y, x, y, O, 2.8, 8, () => gr.sand[0]);
+      }
       // 연한 풀밭 무늬 (칸 안쪽에만)
       g.globalAlpha = 0.45;
       path(g2, oval(9 + r(1) * 14, 9 + r(2) * 14, 5 + r(3) * 3, 3 + r(4) * 2), null);
@@ -4574,8 +4664,16 @@ const World = {
     const WET = new Set([TILE.WATER, TILE.SEA, TILE.BRIDGE, TILE.CHASM]);
     const water = (c0, c1, foam = true) => {
       if (bare) return;
-      g.fillStyle = lin(0, T, c1, c0);
+      // 칸마다 같은 줄무늬가 생기지 않게 한 색 + 월드 위치로 이어지는 큰 얼룩
+      g.fillStyle = c0;
       g.fillRect(X, Y, T, T);
+      g.save(); g.beginPath(); g.rect(X, Y, T, T); g.clip();
+      g.globalAlpha = 0.22; g.fillStyle = c1;
+      for (const [ox, oy] of [[0, 0], [T, 0], [0, T], [T, T]]) {
+        const bx = Math.floor((X + ox) / T), by = Math.floor((Y + oy) / T);
+        g.beginPath(); g.ellipse(bx * T + hash(bx, by, 7) * 10, by * T + hash(bx, by, 8) * 10, 12 + hash(bx, by, 9) * 8, 7 + hash(bx, by, 10) * 5, 0, 0, Math.PI * 2); g.fill();
+      }
+      g.restore();
       // 물결 (⌒⌒)
       g.strokeStyle = 'rgba(255,255,255,.7)';
       g.lineWidth = 0.75;
@@ -4584,21 +4682,19 @@ const World = {
         g.beginPath(); g.arc(wx, wy + 2, 2.2, Math.PI * 1.15, Math.PI * 1.85); g.arc(wx + 4, wy + 2, 2.2, Math.PI * 1.15, Math.PI * 1.85); g.stroke();
       }
       if (r(170) < 0.4) { g.fillStyle = 'rgba(255,255,255,.85)'; g.beginPath(); g.arc(X + 4 + r(171) * 24, Y + 4 + r(172) * 24, 0.8, 0, 7); g.fill(); }
-      if (!foam) return;
-      // 물가: 땅 쪽 가장자리에 하얀 거품 줄
-      g.strokeStyle = 'rgba(255,255,255,.85)';
-      g.lineWidth = 0.95;
-      const side = (dx, dy, x0, y0, x1, y1) => {
-        const v = nb(dx, dy);
-        if (v == null || WET.has(v)) return;
-        g.fillStyle = 'rgba(255,255,255,.18)';
-        g.fillRect(Math.min(X + x0, X + x1) - (dx ? 0 : 0), Math.min(Y + y0, Y + y1), dx ? 3 : T, dy ? 3 : T);
-        g.beginPath(); g.moveTo(X + x0, Y + y0); g.lineTo(X + x1, Y + y1); g.stroke();
-      };
-      side(0, -1, 0, 1.2, T, 1.2);
-      side(0, 1, 0, T - 1.2, T, T - 1.2);
-      side(-1, 0, 1.2, 0, 1.2, T);
-      side(1, 0, T - 1.2, 0, T - 1.2, T);
+      shore(c0);
+    };
+    // 물가: 줄 없이 땅이 구불구불 물 쪽으로 조금 들어오고, 그 앞은 점점 밝아지는 얕은 물 (모서리는 둥글게).
+    // 찰랑이는 거품은 Render.drawShore 가 매 장면 그린다
+    const landColor = v => (v === TILE.SAND ? gr.sand[0] : v === TILE.PATH ? '#d9b483' : gr.grass[0]);
+    const notWet = v => v != null && !WET.has(v) && v !== TILE.HOUSE && v !== TILE.DOOR;
+    const shore = c0 => {
+      const O = edgeSides(nb, notWet);
+      if (!O) return;
+      const sh = shade(c0, 1.45), mix = (a) => mixHex(c0, sh, a);
+      for (const [d, col] of [[11, mix(0.22)], [7.6, mix(0.45)], [4.9, mix(0.72)]]) edgeFill(g, X, Y, x, y, O, d, 13, () => col);
+      edgeFill(g, X, Y, x, y, O, 3.5, 13, v => shade(landColor(v), 0.86));
+      edgeFill(g, X, Y, x, y, O, 2.4, 13, v => landColor(v));
     };
     const chasm = () => {
       g.fillStyle = lin(0, T, '#3a2417', '#140b06');
@@ -6736,6 +6832,7 @@ const Render = {
         main.drawImage(World.chunkHD(cx, cy, R), cx * span, cy * span, span, span);
       }
     }
+    this.drawShore(main, time, viewW, viewH);
     // 그 위의 도트 것들 (아이템, 그림자, 효과): 투명한 작은 캔버스에
     lctx.setTransform(1, 0, 0, 1, 0, 0);
     lctx.clearRect(0, 0, lw, lh);
@@ -6945,6 +7042,33 @@ const Render = {
       c.strokeStyle = color; c.lineWidth = 1.6;
       c.beginPath(); c.roundRect(t.x * T + 1.5, t.y * T + 1.5, T - 3, T - 3, 5); c.stroke();
     });
+  },
+
+  // 🌊 물가 찰랑찰랑: 땅에 닿은 물 칸마다 하얀 물결 줄이 밀려왔다 물러간다 (줄은 물결 모양, 모서리는 둥글게)
+  drawShore(c, time, viewW, viewH) {
+    const x0 = Math.max(0, Math.floor(this.camX / T) - 1), y0 = Math.max(0, Math.floor(this.camY / T) - 1);
+    const x1 = Math.min(World.w - 1, Math.ceil((this.camX + viewW) / T) + 1), y1 = Math.min(World.h - 1, Math.ceil((this.camY + viewH) / T) + 1);
+    const land = v => v != null && v !== TILE.WATER && v !== TILE.SEA && v !== TILE.BRIDGE && v !== TILE.CHASM && v !== TILE.HOUSE && v !== TILE.DOOR;
+    c.save();
+    c.lineCap = 'round'; c.lineJoin = 'round'; c.strokeStyle = '#ffffff';
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+      const v = World.tile(x, y);
+      if (v !== TILE.WATER && v !== TILE.SEA) continue;
+      const O = edgeSides((dx, dy) => (x + dx < 0 || y + dy < 0 || x + dx >= World.w || y + dy >= World.h ? null : World.tile(x + dx, y + dy)), land);
+      if (!O) continue;
+      const X = x * T, Y = y * T;
+      // 거품 줄 두 개가 번갈아 밀려왔다(땅 가까이, 진하게) 물러간다(멀리, 옅게)
+      for (const [lag, wid, base] of [[0, 1.05, 0.8], [Math.PI, 0.7, 0.5]]) {
+        const out = (Math.sin(time * 1.4 + lag) + 1) / 2;
+        const d = 3 + out * 5.5;
+        c.globalAlpha = base * (0.35 + (1 - out) * 0.65);
+        c.lineWidth = wid;
+        c.beginPath();
+        edgeLine(c, X, Y, x, y, O, d, 13, time * 1.7 + lag);
+        c.stroke();
+      }
+    }
+    c.restore();
   },
 
   // 오른쪽 위 작은 지도: 내가 있는 탄 + 지금 보이는 곳(흰 네모) + 나(파랑)/다른 사람(빨강)/보스.
@@ -9561,7 +9685,12 @@ const Buddy = {
   toggle(who) {
     this.on = !this.on;
     this.target = this.on ? who || null : null;
-    $('#btn-buddy span').textContent = this.on && this.target ? this.target : tr('놀아주기', 'Play buddy');
+    // 이름은 단추 아래에 잠깐만 (단추는 그림만)
+    const tag = $('#btn-buddy span');
+    tag.textContent = this.on ? `🤝 ${this.target || tr('놀아주기', 'Play buddy')}` : '🤝 OFF';
+    tag.classList.add('show');
+    clearTimeout(this.tagT);
+    this.tagT = setTimeout(() => tag.classList.remove('show'), 2500);
     this.task = null;
     this.path = [];
     this.home = { x: Player.x, y: Player.y };
@@ -9571,7 +9700,7 @@ const Buddy = {
     this.said = {};
     this.reactAt = {};
     $('#btn-buddy').classList.toggle('on', this.on);
-    toast(this.on ? `🤝 ${this.target || 'ON'}` : '🤝 OFF');
+    // (켰는지/누구와인지는 단추 아래 이름표로 보여 준다)
     if (this.on) this.emote('👋');
     else Game.picked = Game.lastWeapon;
     Game.renderInventory();

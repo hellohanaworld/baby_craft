@@ -1003,3 +1003,15 @@ body:not(.touch) #btn-weapon::after { content: '1'; }
   #hud { padding-top: calc(max(10px, env(safe-area-inset-top)) + 88px); }
   .chat-bar { top: calc(max(10px, env(safe-area-inset-top)) + 136px); }
 }
+
+/* v122: 🤝 놀아주기 단추는 그림만. 켤 때 누구와 노는지 이름이 단추 아래에 잠깐 */
+.top-left .buddy-btn { position: relative; width: 46px; padding: 0; justify-content: center; }
+.top-left .buddy-btn span {
+  display: block; position: absolute; top: calc(100% + 6px); left: 50%; transform: translateX(-50%);
+  white-space: nowrap; padding: 4px 9px; border-radius: 10px; border: 2px solid #5d4037;
+  background: rgba(255, 255, 255, .96); box-shadow: 0 2px 0 rgba(0, 0, 0, .2);
+  font: 900 14px/1 var(--font-ui); color: var(--ink);
+  opacity: 0; pointer-events: none; transition: opacity .25s;
+}
+.top-left .buddy-btn span.show { opacity: 1; }
+@media (max-width: 900px), (max-height: 500px) { .top-left .buddy-btn { width: 38px; } }
