@@ -475,7 +475,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 133;
+const GAME_V = 134;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -3849,6 +3849,35 @@ const PixelSprite = {
 };
 PixelSprite.init();
 
+// 🧱 3D 장난감 그림 칸 (sprites/tiles/이름.png 한 장 = 칸 그림 하나). 다 받으면 칸 조각을 새로 그린다 (그 전에는 예전 그림)
+const TileArt = {
+  NAMES: ['tree0', 'tree1', 'tree2', 'sapling', 'gold_tree', 'lock_tree', 'rock0', 'rock1', 'rock2',
+    'flower_red', 'flower_yellow', 'flower_pink', 'brick', 'gate', 'torch', 'thorn', 'chest'],
+  img: {},
+  started: false,
+  start() {
+    if (this.started) return;
+    this.started = true;
+    let left = this.NAMES.length;
+    const done = () => { if (--left === 0 && World.hdChunks) World.hdChunks.clear(); };
+    for (const n of this.NAMES) {
+      const i = new Image();
+      i.onload = () => { this.img[n] = i; done(); };
+      i.onerror = done;
+      i.src = `sprites/tiles/${n}.png?v=${GAME_V}`;
+    }
+  },
+  // 칸(32) 안에 가운데 맞춰 그린다: 폭 w, 높이 h 안에 들게, 바닥은 칸 위에서 bottom px
+  draw(g, X, Y, n, w = 30, h = 31, bottom = 31) {
+    this.start();
+    const im = this.img[n];
+    if (!im) return false;
+    const k = Math.min(w / im.width, h / im.height), dw = im.width * k, dh = im.height * k;
+    g.drawImage(im, X + 16 - dw / 2, Y + bottom - dh, dw, dh);
+    return true;
+  },
+};
+
 const World = {
   recent: [], // 최근에 바뀐 칸 { i, from, to, at, mine } (🤝 놀아주기가 본다)
   mine: new Map(), // 내가 바꾸려고 한 칸 → 시각
@@ -4981,6 +5010,7 @@ const World = {
       case TILE.CHASM: chasm(); break;
       case TILE.FLOWER: {
         grass();
+        if (TileArt.draw(g, X, Y, ['flower_red', 'flower_yellow', 'flower_pink'][Math.floor(r(9) * 3) % 3], 21, 23, 29)) break;
         const fx = 10 + r(7) * 12, fy = 9 + r(8) * 9, color = r(9) > 0.5 ? '#ef5350' : '#ffca28';
         g.strokeStyle = '#2e7d32'; g.lineWidth = 0.95;
         g.beginPath(); g.moveTo(X + fx, Y + fy + 3); g.quadraticCurveTo(X + fx + 1, Y + fy + 9, X + fx, Y + fy + 13); g.stroke();
@@ -4998,6 +5028,7 @@ const World = {
         const gold = type === TILE.GOLD_TREE;
         const leaf = gold ? ['#f9a825', '#ffd54f', '#fff59d'] : gr.leaf;
         path('rgba(0,0,0,.18)', oval(16, 29, 10, 2.6), null);
+        if (TileArt.draw(g, X, Y, gold ? 'gold_tree' : type === TILE.LOCK_TREE ? 'lock_tree' : `tree${Math.floor(r(5) * 3) % 3}`, 32, 32, 31.5)) break;
         path(lin(18, 30, '#9c6a40', '#6d4321'), rrect(12.5, 17, 7, 12.5, 2.5));
         // 잎: 동그라미 네 개를 합친 뭉게구름 (바깥 테두리 한 줄)
         const balls = [[16, 11, 10], [8.5, 15, 7], [23.5, 15, 7], [16, 5.5, 7]];
@@ -5022,6 +5053,7 @@ const World = {
       case TILE.ROCK: {
         grass();
         path('rgba(0,0,0,.18)', oval(16, 28.5, 12, 2.5), null);
+        if (TileArt.draw(g, X, Y, `rock${Math.floor(r(5) * 3) % 3}`, 30, 27, 30.5)) break;
         g.beginPath();
         g.moveTo(X + 4, Y + 26); g.bezierCurveTo(X + 1, Y + 16, X + 6, Y + 7, X + 14, Y + 7);
         g.bezierCurveTo(X + 22, Y + 5, X + 30, Y + 12, X + 29, Y + 22); g.quadraticCurveTo(X + 29, Y + 28, X + 22, Y + 28); g.lineTo(X + 9, Y + 28); g.quadraticCurveTo(X + 4, Y + 28, X + 4, Y + 26);
@@ -5118,6 +5150,7 @@ const World = {
       }
       case TILE.BRICK: {
         if (!bare) grass();
+        if (TileArt.draw(g, X, Y, 'brick', 32, 32, 32)) break;
         path('#e8d8b8', rrect(1, 1, 30, 30, 3), 'auto', 0.75);
         for (let row = 0; row < 4; row++) {
           const by = 2 + row * 7, off = row % 2 ? 0 : 7;
@@ -5133,6 +5166,7 @@ const World = {
       }
       case TILE.GATE: {
         if (!bare) grass();
+        if (TileArt.draw(g, X, Y, 'gate', 32, 32, 32)) break;
         for (const [gx, w] of [[5, 7.5], [12.8, 7.5], [20.6, 7]]) path(lin(1, 31, '#c08a50', '#8d5a2b'), rrect(gx, 1, w, 30, [3, 3, 1, 1]), 'auto', 0.68);
         for (const by of [6, 22]) { path('#5d4037', rrect(4.5, by, 23.5, 3.4, 1.2), 'auto', 0.61); g.fillStyle = '#e0e0e0'; for (const rx of [7, 25]) { g.beginPath(); g.arc(X + rx, Y + by + 1.7, 0.8, 0, 7); g.fill(); } }
         path('#ffca28', circle(23, 15.5, 1.6), '#8d6e00', 0.48);
@@ -5152,6 +5186,7 @@ const World = {
       }
       case TILE.TORCH: {
         if (!bare) grass();
+        if (TileArt.draw(g, X, Y, 'torch', 26, 31, 31)) break;
         g.fillStyle = 'rgba(255,190,80,.25)'; g.beginPath(); g.arc(X + 16, Y + 8, 9, 0, 7); g.fill();
         path('rgba(0,0,0,.18)', oval(16, 29.5, 4.5, 1.4), null);
         path(lin(14, 30, '#a1887f', '#6d4c41'), rrect(14, 14, 4, 16, 1.5), 'auto', 0.68);
@@ -5164,6 +5199,7 @@ const World = {
       }
       case TILE.THORN: {
         if (!bare) grass();
+        if (TileArt.draw(g, X, Y, 'thorn', 32, 31, 31.5)) break;
         path('rgba(0,0,0,.18)', oval(16, 29.5, 14, 1.8), null);
         for (const [cx, top, hw] of [[6, 11, 4.2], [12.5, 4, 4.6], [19.5, 7, 4.6], [26, 12, 4.2]]) {
           g.beginPath(); g.moveTo(X + cx - hw, Y + 25); g.quadraticCurveTo(X + cx - hw * 0.3, Y + top + 6, X + cx, Y + top); g.quadraticCurveTo(X + cx + hw * 0.3, Y + top + 6, X + cx + hw, Y + 25); g.closePath();
@@ -5175,6 +5211,7 @@ const World = {
       }
       case TILE.SAPLING: {
         if (!bare) grass();
+        if (TileArt.draw(g, X, Y, 'sapling', 22, 24, 30)) break;
         path(lin(23, 30, '#a1887f', '#6d4c41'), oval(16, 27, 8.5, 3.6), 'auto', 0.68);
         g.strokeStyle = '#558b2f'; g.lineWidth = 1.22; g.beginPath(); g.moveTo(X + 16, Y + 25); g.quadraticCurveTo(X + 15, Y + 17, X + 16.5, Y + 9); g.stroke();
         path(lin(8, 15, '#a5d6a7', '#43a047'), oval(11, 12, 5.2, 2.8, 0.35), '#1b5e20', 0.61);
@@ -5184,6 +5221,7 @@ const World = {
       case TILE.CHEST: {
         grass();
         path('rgba(0,0,0,.22)', oval(16, 28.5, 13, 2.4), null);
+        if (TileArt.draw(g, X, Y, 'chest', 29, 27, 30)) break;
         path(lin(14, 28, '#b5763c', '#8a5328'), rrect(4, 13, 24, 15, [1, 1, 3, 3]), 'auto', 0.75);
         path(lin(5, 14, '#c98a4c', '#a0612e'), () => { g.moveTo(X + 4, Y + 14); g.lineTo(X + 4, Y + 10); g.quadraticCurveTo(X + 16, Y + 2, X + 28, Y + 10); g.lineTo(X + 28, Y + 14); g.closePath(); }, 'auto', 0.75);
         g.fillStyle = '#ffca28';
