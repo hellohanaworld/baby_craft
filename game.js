@@ -475,7 +475,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 128;
+const GAME_V = 129;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -5481,10 +5481,17 @@ const Monsters = {
   },
 
   // 그 동물이 사는 구역에 한 마리
-  spawnType(type) {
+  spawnType(type, extra) {
     const def = MONSTERS[type];
     const spots = this.spots(CONFIG.SAFE_RADIUS + 3, def.region, def.swim);
-    if (spots.length) this.spawn(type, spots[Math.floor(Math.random() * spots.length)]);
+    if (spots.length) this.spawn(type, spots[Math.floor(Math.random() * spots.length)], extra);
+  },
+
+  // 🌙 밤에는 사나운 동물이 두 배 (노을이 반쯤 지나면 나오기 시작). 아침이 되면 밤에 나온 것들은
+  // 사람 눈에 안 띄는 곳(7칸 밖)부터 하나씩 사라진다 (보는 앞에서는 안 사라진다)
+  nightExtra(type, def) {
+    if (def.calm || def.boss || !def.count) return 0;
+    return DayNight.state().dark > 0.5 ? def.count : 0;
   },
 
   fill() {
@@ -5557,7 +5564,20 @@ const Monsters = {
       this.topUpT = 5;
       for (const [type, def] of Object.entries(MONSTERS)) {
         const have = this.list.filter(m => m.type === type).length + this.respawnQueue.filter(q => q.type === type).length;
+        const extra = this.nightExtra(type, def);
         for (let i = have; i < def.count; i++) this.spawnType(type);
+        // 밤 몫은 한 번에 한 마리씩 (갑자기 우르르 나오지 않게)
+        if (extra && have >= def.count && have < def.count + extra) this.spawnType(type, { night: true });
+      }
+      // 낮: 원래 수보다 많은 사나운 동물은 사람 눈에 안 띄는 것(7칸 밖)부터 한 마리씩 (밤에 나온 것 먼저)
+      if (DayNight.state().dark <= 0.5) {
+        for (const [type, def] of Object.entries(MONSTERS)) {
+          if (def.calm || def.boss) continue;
+          const wild = this.list.filter(m => m.type === type && !m.owner && !Multi.nearPlayer(m.x, m.y, 7 * T));
+          if (this.list.filter(m => m.type === type && !m.owner).length <= def.count || !wild.length) continue;
+          const gone = wild.find(m => m.night) || wild[0];
+          this.list.splice(this.list.indexOf(gone), 1);
+        }
       }
     }
     this.regrowT -= dt;
@@ -6432,6 +6452,24 @@ const Hero = {
     return true;
   },
 };
+// 🌞🌙 밤낮: 시계(Date.now) 로 정해서 모든 기기가 같은 시간이다 (서버 없이도 맞는다)
+// 마인크래프트처럼 20분 한 바퀴: 낮 10분 → 노을 1분 30초 → 밤 7분 → 새벽 1분 30초
+const DayNight = {
+  CYCLE: 20 * 60 * 1000,
+  DAY: 0.5, DUSK: 0.075, NIGHT: 0.35, // 나머지 0.075 는 새벽
+  phase() { return (Date.now() % this.CYCLE) / this.CYCLE; },
+  // { dark: 0 낮 ~ 1 한밤, glow: 노을/새벽 붉은 빛 0~1, moon: 밤 쪽이면 true }
+  state() {
+    const p = this.phase(), smooth = t => t * t * (3 - 2 * t);
+    const a = this.DAY, b = a + this.DUSK, c = b + this.NIGHT;
+    if (p < a) return { dark: 0, glow: 0, moon: false };
+    if (p < b) { const t = (p - a) / this.DUSK; return { dark: smooth(t), glow: Math.sin(Math.PI * t), moon: t > 0.5 }; }
+    if (p < c) return { dark: 1, glow: 0, moon: true };
+    const t = (p - c) / (1 - c);
+    return { dark: 1 - smooth(t), glow: Math.sin(Math.PI * t), moon: t < 0.5 };
+  },
+};
+
 // 가방에서 끌어서 땅에 놓은 것: 내 캐릭터에서 그 곳으로 포물선을 그리며 날아가 떨어진다.
 // 떨어지면 누구나 줍는 아이템 (손님은 방장에게 drop 으로 알린다). 4.5 칸보다 멀면 그만큼만
 const Toss = {
@@ -7316,6 +7354,13 @@ const Render = {
     g.fillRect(0, 0, w, h);
     g.fillStyle = `rgba(${cur[0] | 0},${cur[1] | 0},${cur[2] | 0},${cur[3].toFixed(3)})`;
     g.fillRect(0, 0, w, h);
+    // 🌅 노을/새벽: 붉은 주황빛, 🌙 밤: 푸른빛
+    if (Game.state !== 'title') {
+      const dn = DayNight.state();
+      g.globalCompositeOperation = 'multiply';
+      if (dn.glow > 0.01) { g.fillStyle = `rgba(255,150,90,${(0.45 * dn.glow).toFixed(3)})`; g.fillRect(0, 0, w, h); }
+      if (dn.dark > 0.01) { g.fillStyle = `rgba(70,90,190,${(0.6 * dn.dark).toFixed(3)})`; g.fillRect(0, 0, w, h); }
+    }
     g.restore();
   },
 
@@ -7396,7 +7441,10 @@ const Render = {
   // 🍄 늪 / 🧭 미로에 들어가면 화면이 어두워지고 내 둘레와 🔥 횃불 둘레만 밝다 (천천히 바뀐다)
   drawSwampDark() {
     const home = Math.hypot(Player.x - (World.door.x * T + T / 2), Player.y - (World.door.y * T + T / 2)) < CONFIG.SAFE_RADIUS * T;
-    const want = Game.state !== 'title' && DARK_REGIONS.has(World.regionAtPx(Player.x, Player.y)) && !home && Game.buffLeft('light') <= 0 ? 1 : 0; // 집 앞, 💡 노란 물약은 밝게
+    const play = Game.state !== 'title', lightBuff = Game.buffLeft('light') > 0;
+    let want = play && DARK_REGIONS.has(World.regionAtPx(Player.x, Player.y)) && !home && !lightBuff ? 1 : 0; // 집 앞, 💡 노란 물약은 밝게
+    // 🌙 밤에는 어디나 어두워진다 (늪보다는 덜). 💡 물약은 밤에도 밝게
+    if (play && !lightBuff) want = Math.max(want, DayNight.state().dark * 0.8);
     this.dark = (this.dark || 0) + (want - (this.dark || 0)) * 0.04;
     if (this.dark < 0.01) return;
     // 어둠은 따로 그린 다음 횃불 자리를 지워서 (destination-out) 화면에 얹는다
@@ -7556,6 +7604,12 @@ const Render = {
     const bench = World.stationIn(st);
     if (bench) mark(bench.x, bench.y, STATION_EMOJI[bench.kind]);
     g.globalAlpha = 1;
+    // 지금 낮인지 밤인지 (왼쪽 위)
+    {
+      const dn = DayNight.state(), m = 9 * z * this.dpr;
+      g.font = `${Math.round(13 * z * this.dpr)}px ${FONT_EMOJI}`;
+      g.fillText(dn.moon ? '🌙' : dn.glow > 0.3 ? '🌅' : '☀️', m + 2, m + 2);
+    }
     // 내 동물 (분홍 점)
     for (const m of Monsters.list) if (m.owner === Multi.sid) dot(m.x, m.y, '#ec407a', 2);
     if (boss) dot(boss.x, boss.y, '#6a1b9a', 3.5);
