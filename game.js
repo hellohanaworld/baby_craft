@@ -475,7 +475,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 127;
+const GAME_V = 128;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -1261,15 +1261,25 @@ const Speech = {
 
   // 계속 듣기 (말할 때마다 결과가 온다). stop() 하면 이후 이벤트는 모두 무시된다
   // 한 번 듣고 끝나는 방식은 다시 켜지는 사이에 한 말을 놓치기 쉬워서 continuous 로 둔다
+  // 앞의 인식이 아직 다 안 꺼졌으면 꺼질 때까지(최대 1초) 기다렸다가 켠다: 바로 켜면 기기에 따라 아무 소식 없이 멈춘다
+  prevEnded: Promise.resolve(),
   listen(lang, h) {
+    let live = true, rec = null;
+    const handle = { stop() { live = false; try { rec && rec.abort(); } catch { /* 이미 끝남 */ } } };
+    Promise.race([this.prevEnded, delay(1000)]).then(() => { if (live) rec = this.startRec(lang, h, () => live, () => { live = false; }); });
+    return handle;
+  },
+
+  startRec(lang, h, isLive, kill) {
     const rec = new this.SR();
+    let markEnded;
+    this.prevEnded = new Promise(r => { markEnded = r; });
     rec.lang = LANG_CODE[lang];
     rec.continuous = true;
     rec.interimResults = true; // 말하는 도중 글자를 보여주고, 맞으면 바로 통과
     rec.maxAlternatives = CONFIG.MAX_ALTERNATIVES;
-    let live = true;
-    const guard = fn => (...args) => { if (live) fn(...args); };
-    rec.onstart = guard(() => console.log(`[Speech] 듣기 시작 (${rec.lang})`));
+    const guard = fn => (...args) => { if (isLive()) fn(...args); };
+    rec.onstart = guard(() => { console.log(`[Speech] 듣기 시작 (${rec.lang})`); h.onStart?.(); });
     rec.onsoundstart = guard(() => h.onSound());
     rec.onspeechstart = guard(() => h.onSound());
     rec.onresult = guard(e => {
@@ -1283,13 +1293,14 @@ const Speech = {
       h.onResult(alts, final);
     });
     rec.onerror = guard(e => h.onError(e.error));
-    rec.onend = guard(() => { live = false; h.onEnd(); });
+    rec.onend = () => { markEnded(); if (isLive()) { kill(); h.onEnd(); } };
     try {
       rec.start();
     } catch (err) {
-      setTimeout(guard(() => { h.onError('start-failed'); live = false; h.onEnd(); }), 0);
+      markEnded();
+      setTimeout(guard(() => { h.onError('start-failed'); kill(); h.onEnd(); }), 0);
     }
-    return { stop() { live = false; try { rec.abort(); } catch { /* 이미 끝남 */ } } };
+    return rec;
   },
 };
 
@@ -1379,9 +1390,17 @@ const Card = {
 
   show(word) {
     Object.assign(this, {
-      active: true, passed: false, word, tries: 0, heard: false, gotAttempt: false, quickEnds: 0,
+      active: true, passed: false, word, tries: 0, heard: false, gotAttempt: false, quickEnds: 0, stuck: 0,
       mode: Game.tapMode ? 'tap' : 'speech',
     });
+    // 15초 동안 아무 말도 못 알아들으면 (마이크 문제 등) 따라 읽기로: 낱말을 읽어 주고 넘어가기 단추가 보인다
+    clearTimeout(this.noHearTimer);
+    this.noHearTimer = setTimeout(() => {
+      if (this.active && !this.passed && this.word === word && this.mode === 'speech' && !this.gotAttempt) {
+        console.warn('[Card] 15초 동안 못 들음: 따라 읽기로');
+        this.enterFollow();
+      }
+    }, 15000);
     const e = this.el;
     e.card.className = `card lang-${word.lang}`;
     e.word.textContent = word.word;
@@ -1440,7 +1459,11 @@ const Card = {
     if (!this.canListen()) return;
     this.startedAt = performance.now();
     this.heard = false;
-    this.listener = Speech.listen(this.word.listen || this.word.lang, {
+    let started = false;
+    // 지킴이: 켰는데 3.5초 안에 "듣기 시작" 소식이 없으면 멈춘 것 → 끄고 다시 켠다
+    clearTimeout(this.watchTimer);
+    const listener = this.listener = Speech.listen(this.word.listen || this.word.lang, {
+      onStart: () => { started = true; },
       onSound: () => {
         this.heard = true;
         if (!this.el.heard.textContent) this.el.heard.textContent = '🗣️ …';
@@ -1449,11 +1472,20 @@ const Card = {
       onError: err => this.onError(err),
       onEnd: () => this.onEnd(),
     });
+    this.watchTimer = setTimeout(() => {
+      if (started || this.listener !== listener || !this.active || this.passed) return;
+      console.warn('[Card] 마이크가 켜지지 않음: 다시 켠다');
+      this.stuck = (this.stuck || 0) + 1;
+      this.stopListening();
+      if (this.stuck >= 3) this.enterFollow(); // 계속 안 되면 따라 읽기 (넘어가기 단추가 보인다)
+      else this.scheduleListen(300);
+    }, 3500);
     this.setMic('listening');
   },
 
   stopListening() {
     clearTimeout(this.restartTimer);
+    clearTimeout(this.watchTimer);
     if (this.listener) {
       this.listener.stop();
       this.listener = null;
@@ -1608,6 +1640,8 @@ const Card = {
   close(result) {
     this.el.overlay.classList.add('hidden');
     this.active = false;
+    clearTimeout(this.noHearTimer);
+    clearTimeout(this.watchTimer);
     Meter.stop();
     const resolve = this.resolve;
     this.resolve = null;
