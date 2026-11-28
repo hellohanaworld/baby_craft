@@ -55,6 +55,9 @@ const CONFIG = {
   BOSS_AGGRO_RANGE: 7,    // 용은 더 멀리서 알아챈다
   SAFE_RADIUS: 4,         // 타일. 집 주변은 몬스터가 못 들어오는 안전지대
   ATTACK_RANGE: 0.9,      // 타일. 근접 무기 사거리
+  CRIT_CHANCE: 0.12,      // ⚔️ 치명타 확률 (피해 두 배, 노란 큰 숫자)
+  LOOT_CHANCE: 0.35,      // 💎 동물을 잡으면 장비가 떨어질 확률 (보스는 꼭)
+  HP_SHOW: 10,            // 피해 숫자는 체력의 10배로 보인다 (체력 4 = 40)
   ARROW_SPEED: 10,        // 타일/초
   ARROW_RANGE: 6,         // 타일
   BOSS_AFTER_KILLS: 3,    // 몬스터를 이만큼 잡으면 보스 등장
@@ -132,11 +135,13 @@ const ITEMS = {
   redpot:  { emoji: '⚗️', ko: '빨간 물약', en: 'red potion',    kind: 'potion', weight: 0, heal: 3, icon: 'POTION_R' },
   bluepot: { emoji: '⚗️', ko: '파란 물약', en: 'blue potion',   kind: 'potion', weight: 0, speed: 30, icon: 'POTION_B' }, // 30초 빨리 달리기
   yellowpot: { emoji: '⚗️', ko: '노란 물약', en: 'yellow potion', kind: 'potion', weight: 0, light: 60, icon: 'POTION_Y' }, // 60초 어두운 곳이 밝다
-  // 👕 옷 (꾸미기) / 🛡️ 방패
-  hat:     { emoji: '🤠', ko: '가죽 모자', en: 'leather hat',    kind: 'wear', slot: 'head', weight: 0, icon: 'HAT' },
-  crown:   { emoji: '👑', ko: '왕관',      en: 'crown',          kind: 'wear', slot: 'head', weight: 0, icon: 'CROWN' },
-  vest:    { emoji: '🦺', ko: '가죽 갑옷', en: 'leather armor',  kind: 'wear', slot: 'body', weight: 0, icon: 'VEST' },
-  boots:   { emoji: '👢', ko: '장화',      en: 'boots',          kind: 'wear', slot: 'feet', weight: 0, icon: 'BOOTS' },
+  // 👕 옷 / 🛡️ 방패 / 💍 장신구. stats: 입으면 붙는 능력치 (STATS 참고)
+  hat:     { emoji: '🤠', ko: '가죽 모자', en: 'leather hat',    kind: 'wear', slot: 'head', weight: 0, icon: 'HAT', stats: { block: 8 } },
+  crown:   { emoji: '👑', ko: '왕관',      en: 'crown',          kind: 'wear', slot: 'head', weight: 0, icon: 'CROWN', stats: { atk: 20, crit: 5 } },
+  vest:    { emoji: '🦺', ko: '가죽 갑옷', en: 'leather armor',  kind: 'wear', slot: 'body', weight: 0, icon: 'VEST', stats: { block: 15 } },
+  boots:   { emoji: '👢', ko: '장화',      en: 'boots',          kind: 'wear', slot: 'feet', weight: 0, icon: 'BOOTS', stats: { spd: 12 } },
+  ring:    { emoji: '💍', ko: '행운 반지', en: 'lucky ring',     kind: 'wear', slot: 'acc', weight: 0, icon: 'RING', stats: { crit: 10 } },
+  amulet:  { emoji: '📿', ko: '힘 목걸이', en: 'power necklace', kind: 'wear', slot: 'acc', weight: 0, icon: 'AMULET', stats: { atk: 15 } },
   shield:  { emoji: '🛡️', ko: '방패',      en: 'shield',         kind: 'gear', slot: 'arm', weight: 0, icon: 'SHIELD' }, // 방패 칸에 끼우면 맞을 때 막는다 (SHIELD_HITS 번 막으면 부서짐)
   // 🧱 블록: 꽃은 캐서, 묘목은 나무를 캐면 같이 나온다 (심으면 자라서 나무), 나머지는 제작대에서
   flower:  { emoji: '🌷', ko: '꽃',     en: 'flower',  kind: 'block', tile: 'FLOWER',  weight: 0 },
@@ -172,6 +177,8 @@ const RECIPES = [
   { result: 'vest',   needs: { leather: 3, string: 1 },        unlock: 0 },
   { result: 'boots',  needs: { leather: 2, string: 1 },        unlock: 0 },
   { result: 'crown',  needs: { gem: 3 },                       unlock: 0 },
+  { result: 'ring',   needs: { gem: 1, clover: 2 },            unlock: 0 },
+  { result: 'amulet', needs: { string: 2, gem: 1, stone: 1 },  unlock: 0 },
   { result: 'brick',  needs: { stone: 2 },                     unlock: 0, count: 2 },
   { result: 'gate',   needs: { wood: 2 },                      unlock: 0, count: 1 },
   { result: 'bridge', needs: { wood: 1 },                      unlock: 0, count: 2 },
@@ -475,7 +482,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 138;
+const GAME_V = 139;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -1119,6 +1126,7 @@ const Sfx = {
   jump() { this.tone(330, 0.16, { type: 'triangle', to: 660, vol: 0.07 }); },
   door() { this.tone(392, 0.12, { type: 'triangle' }); this.tone(523, 0.18, { type: 'triangle', delay: 0.1 }); },
   hit() { this.tone(180, 0.1, { type: 'square', to: 90, vol: 0.08 }); },
+  crit() { this.tone(900, 0.08, { type: 'triangle', to: 1400, vol: 0.07 }); this.tone(420, 0.14, { type: 'square', to: 120, vol: 0.06 }); },
   hurt() { this.tone(440, 0.2, { type: 'triangle', to: 220, vol: 0.1 }); },
   defeat() { [392, 523, 659].forEach((f, i) => this.tone(f, 0.12, { type: 'square', vol: 0.06, delay: i * 0.06 })); },
   // 사사사사: 작고 짧은 화이트 노이즈 발소리. 높은 쪽을 깎아 낮게, 다른 소리보다 훨씬 작게, 자주
@@ -1910,7 +1918,7 @@ function itemDesc(id) {
     if (d.speed) return tr(`마시면 ${d.speed}초 동안 빨리 달려요 🏃`, `Drink: run fast for ${d.speed}s 🏃`);
     return tr(`마시면 ${d.light}초 동안 어두운 곳이 밝아요 💡`, `Drink: bright for ${d.light}s 💡`);
   }
-  if (d.kind === 'wear') return tr('입으면 캐릭터에 보여요', 'Wear it to show on your character');
+  if (d.kind === 'wear') return d.stats ? statText(d.stats) : tr('입으면 캐릭터에 보여요', 'Wear it to show on your character');
   if (d.kind === 'gear') return tr('끼우면 두 번에 한 번 막아 줘요', 'Put it on: blocks every other hit');
   return tr('제작대에서 만들 때 써요', 'Used at the crafting table');
 }
@@ -1922,9 +1930,67 @@ const WEAR_SLOTS = [
   { slot: 'body', ko: '몸통', en: 'Body' },
   { slot: 'feet', ko: '다리', en: 'Legs' },
   { slot: 'arm', ko: '방패', en: 'Shield' },
+  { slot: 'acc', ko: '장신구', en: 'Charm' },
 ];
+// ⚔️ 장비 능력치 (%): 공격 힘 / 막기(맞아도 안 다칠 확률) / 빠르기 / 치명타 (기본 CRIT_CHANCE 에 더한다)
+const STATS = [
+  { key: 'atk',   icon: '⚔️', ko: '공격', en: 'Attack' },
+  { key: 'block', icon: '🛡️', ko: '막기', en: 'Block' },
+  { key: 'spd',   icon: '👟', ko: '빠르기', en: 'Speed' },
+  { key: 'crit',  icon: '💥', ko: '치명타', en: 'Crit' },
+  { key: 'vamp',  icon: '💖', ko: '회복', en: 'Life' }, // 잡으면 하트 하나 찰 확률
+];
+const BLOCK_MAX = 60; // 막기는 이만큼까지만
+// 입은 것들의 능력치 합
+function gearStats(equip) {
+  const st = { atk: 0, block: 0, spd: 0, crit: 0, vamp: 0 };
+  for (const id of Object.values(equip || {})) for (const [k, v] of Object.entries((itemDef(id) || {}).stats || {})) st[k] = (st[k] || 0) + v;
+  st.block = Math.min(BLOCK_MAX, st.block);
+  return st;
+}
+// ---------- 💎 전리품 장비 (디아블로처럼): 등급 + 무작위 능력치. 가방에는 'g:번호' 로 적는다 ----------
+const RARITY = [
+  { ko: '보통', en: 'Common',    c: '#eeeeee', extra: 0, mul: 1 },
+  { ko: '마법', en: 'Magic',     c: '#64b5f6', extra: 1, mul: 1.2 },
+  { ko: '희귀', en: 'Rare',      c: '#ffd54f', extra: 2, mul: 1.45 },
+  { ko: '전설', en: 'Legendary', c: '#ff9800', extra: 3, mul: 1.8 },
+];
+const LOOT_BEAM = [null, '#1e88e5', '#ffb300', '#ff6d00']; // 바닥 빛기둥 색 (진하게)
+const LOOT_BASES = ['hat', 'vest', 'boots', 'ring', 'amulet', 'crown'];
+const AFFIX = { atk: [5, 12], block: [4, 9], spd: [4, 9], crit: [3, 7], vamp: [5, 12] }; // 덧붙는 능력치 [최소, 최대] × 등급 배수
+const AFFIX_NAME = { atk: ['힘센', 'Mighty'], block: ['튼튼한', 'Sturdy'], spd: ['날쌘', 'Swift'], crit: ['날카로운', 'Keen'], vamp: ['생명의', 'Living'] };
+const GEAR_MAX = 30; // 가방에 든 전리품 장비 최대 (입은 것 포함)
+const SALVAGE = [{ leather: 1 }, { leather: 1, string: 1 }, { gem: 1 }, { gem: 2 }]; // 🔨 분해하면 나오는 재료 (등급별)
+const isGear = id => typeof id === 'string' && id.startsWith('g:');
+const gearOf = id => isGear(id) && typeof Game !== 'undefined' ? (Game.gear || []).find(g => `g:${g.u}` === id) || null : null;
+// 무작위 장비 하나 (rar: 등급 0~3)
+function makeGear(rar, base) {
+  base = base || LOOT_BASES[Math.floor(Math.random() * LOOT_BASES.length)];
+  const R = RARITY[rar], s = {};
+  for (const [k, v] of Object.entries(ITEMS[base].stats)) s[k] = Math.round(v * R.mul);
+  const keys = Object.keys(AFFIX).filter(k => !s[k]), added = [];
+  for (let i = 0; i < R.extra && keys.length; i++) {
+    const k = keys.splice(Math.floor(Math.random() * keys.length), 1)[0], [a, b] = AFFIX[k];
+    s[k] = Math.round((a + Math.random() * (b - a)) * R.mul);
+    added.push(k);
+  }
+  return { u: Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36), b: base, r: rar, s, p: added[0] || null };
+}
+// 장비 이름: "날쌘 장화", 전설은 "전설의 장화"
+function gearName(g) {
+  const base = ITEMS[g.b], pre = g.r === 3 ? ['전설의', 'Legendary'] : g.p ? AFFIX_NAME[g.p] : null;
+  return pre ? { ko: `${pre[0]} ${base.ko}`, en: `${pre[1]} ${base.en}` } : { ko: base.ko, en: base.en };
+}
+// 전리품 장비를 아이템처럼 (그림은 바탕 아이템 것)
+function gearDef(id) {
+  const g = gearOf(id);
+  return g && ITEMS[g.b] ? { ...ITEMS[g.b], ...gearName(g), stats: g.s, rar: g.r, gear: g } : null;
+}
+const itemDef = id => WEAPONS[id] || ITEMS[id] || gearDef(id);
+const gearScore = st => Object.values(st || {}).reduce((a, v) => a + v, 0);
+const statText = stats => STATS.filter(x => stats && stats[x.key]).map(x => `${x.icon} ${tr(x.ko, x.en)} +${stats[x.key]}%`).join(' · ');
 // 입은 옷 id 목록 (그림 / 다른 사람에게 보내기)
-const wornList = equip => WEAR_SLOTS.map(w => equip[w.slot]).filter(id => ITEMS[id] && ['wear', 'gear'].includes(ITEMS[id].kind));
+const wornList = equip => WEAR_SLOTS.map(w => isGear(equip[w.slot]) ? (gearOf(equip[w.slot]) || {}).b : equip[w.slot]).filter(id => ITEMS[id] && ['wear', 'gear'].includes(ITEMS[id].kind));
 const holdEmoji = id => (WEAPONS[id] || ITEMS[id] || WEAPONS.hand).emoji;
 
 // 맞는 이모지가 없는 재료의 픽셀 그림 (8x8 칸, 글자 하나 = 한 칸 색)
@@ -2456,6 +2522,25 @@ const HD_ICONS = {
     P(() => { g.moveTo(6.7, 13.2); g.quadraticCurveTo(12, 14.6, 17.3, 13.2); g.lineTo(17.4, 15.4); g.quadraticCurveTo(12, 17, 6.6, 15.4); g.closePath(); }, '#5d3a1a', { base: null });
     line([[9, 8.4], [8.6, 12]], '#fff', 0.9, 0.35);
   },
+  RING: ({ g, L, P, ell, poly, line, shine }) => {
+    // 금 고리 + 위에 초록 보석
+    g.save(); g.lineCap = 'round';
+    g.strokeStyle = '#8a5a00'; g.lineWidth = 4.2; g.beginPath(); g.ellipse(12, 14.6, 6.4, 5.6, 0, 0, Math.PI * 2); g.stroke();
+    g.strokeStyle = '#fbc02d'; g.lineWidth = 2.8; g.beginPath(); g.ellipse(12, 14.6, 6.4, 5.6, 0, 0, Math.PI * 2); g.stroke();
+    g.strokeStyle = 'rgba(255,255,255,.7)'; g.lineWidth = 0.9; g.beginPath(); g.ellipse(12, 14.6, 6.4, 5.6, 0, Math.PI * 1.1, Math.PI * 1.5); g.stroke();
+    g.restore();
+    P(poly([[8.4, 7.4], [10.2, 4.4], [13.8, 4.4], [15.6, 7.4], [12, 11]]), L(8, 4, 16, 11, '#e8f5e9', '#66bb6a', '#1b5e20'), { base: '#2e7d32' });
+    shine(10.6, 6, 1, 0.5, -0.3, 0.9);
+  },
+  AMULET: ({ g, L, P, B, ell, shine }) => {
+    // 구슬 줄 + 아래 빨간 구슬
+    for (let i = 0; i <= 10; i++) {
+      const a = Math.PI * (-0.08 + i * 0.116), x = 12 + Math.cos(a) * 7.4, y = 5 + Math.sin(a) * 8;
+      P(ell(x, y, 1.3, 1.3), '#bcaaa4', { base: '#5d4037', lw: 0.4 });
+    }
+    P(ell(12, 17.6, 3.4, 3.6), B(11, 16, 4, '#ffcdd2', '#e53935', '#8e0000'), { base: '#c62828' });
+    shine(10.8, 15.8, 1, 0.7, -0.4, 0.85);
+  },
   CROWN: ({ g, L, P, poly, ell, rr, shine }) => {
     P(poly([[4, 8], [8, 12], [12, 5.4], [16, 12], [20, 8], [18.6, 17], [5.4, 17]]), L(0, 5, 0, 17, '#fff59d', '#fbc02d', '#c77800'), { base: '#f9a825' });
     P(rr(5, 16, 14, 3.4, 1.2), L(0, 16, 0, 19.4, '#ffe082', '#f9a825', '#b26a00'), { base: '#f9a825' });
@@ -2668,13 +2753,13 @@ const CRITTERS = {
   bunny:    { plan: 'quad', c: '#cfa77d', belly: '#f3e3cf', ear: 'long', earIn: '#f8bbd0', snout: 'tinynose', tail: 'pom', tailColor: '#ffffff', hop: true, sheet: 'sprites/critters/bunny.png', anim: 'hopb', sh: 32 },
   hedgehog: { plan: 'quad', c: '#f2d6b3', ear: 'tiny', snout: 'tinynose', tail: 'none', spikes: '#7a5a44', low: true, sheet: 'sprites/critters/hedgehog.png', sh: 26 },
   rat:      { plan: 'quad', c: '#a9a9b3', belly: '#e6e6ea', ear: 'big', earIn: '#f8bbd0', snout: 'tinynose', tail: 'long', tailColor: '#f4a7b9', low: true, sheet: 'sprites/critters/rat.png', sh: 27 },
-  monkey:   { plan: 'quad', c: '#8d5a3b', face: '#f2d0a9', ear: 'side', snout: 'none', tail: 'curlLong' },
-  leopard:  { plan: 'quad', c: '#f3c76f', belly: '#fff7e6', ear: 'pointy', snout: 'muzzle', tail: 'thin', spots: '#6d4c2f' },
+  monkey:   { plan: 'quad', c: '#8d5a3b', face: '#f2d0a9', ear: 'side', snout: 'none', tail: 'curlLong', sheet: 'sprites/critters/monkey.png', sh: 28 },
+  leopard:  { plan: 'quad', c: '#f3c76f', belly: '#fff7e6', ear: 'pointy', snout: 'muzzle', tail: 'thin', spots: '#6d4c2f', sheet: 'sprites/critters/leopard.png', sh: 29 },
   goat:     { plan: 'quad', c: '#f3ede3', ear: 'floppy', snout: 'tinynose', tail: 'pom', horns: 'goat', beard: true, slim: true },
   ram:      { plan: 'quad', c: '#f7f1e6', face: '#e9d3bd', ear: 'floppy', snout: 'none', tail: 'pom', wool: true, horns: 'ram', legs: '#6d5a4b' },
   dragon:   { plan: 'quad', c: '#5fc06c', belly: '#f7e7a6', ear: 'none', snout: 'dragon', tail: 'dragon', horns: 'dragon', wings: '#7fd08a', backSpikes: '#f9a825', sheet: 'sprites/critters/dragon.png', sh: 34 },
   chicken:  { plan: 'bird', c: '#ffffff', wing: '#f2f2f2', comb: '#e53935', beak: '#ffa726', feet: '#ffa726', sheet: 'sprites/critters/chicken.png', sh: 28 },
-  parrot:   { plan: 'bird', c: '#4caf50', head: '#e53935', wing: '#1e88e5', crest: '#ffeb3b', beak: '#fff3c4', feet: '#8d6e63', tailLong: '#1e88e5' },
+  parrot:   { plan: 'bird', c: '#4caf50', head: '#e53935', wing: '#1e88e5', crest: '#ffeb3b', beak: '#fff3c4', feet: '#8d6e63', tailLong: '#1e88e5', sheet: 'sprites/critters/parrot.png', anim: 'fly', sh: 27 },
   eagle:    { plan: 'bird', c: '#8a5a33', head: '#ffffff', wing: '#6d4426', beak: '#ffc107', feet: '#ffc107', big: true, sheet: 'sprites/critters/eagle.png', anim: 'fly', sh: 32 },
   bat:      { plan: 'fly', c: '#7a5aa6', wing: '#4a3570', ear: 'pointy', sheet: 'sprites/critters/bat.png', anim: 'fly', sh: 28 },
   cavebat:  { plan: 'fly', c: '#5b4b6e', wing: '#3a2f48', ear: 'pointy' },
@@ -3854,7 +3939,7 @@ PixelSprite.init();
 const TileArt = {
   NAMES: ['tree0', 'tree1', 'tree2', 'sapling', 'gold_tree', 'lock_tree', 'rock0', 'rock1', 'rock2',
     'flower_red', 'flower_yellow', 'flower_pink', 'brick', 'gate', 'torch', 'thorn', 'chest',
-    'clover0', 'clover1', 'lucky0', 'lucky1', 'tent', 'forge', 'bridge', 'house', 'rockfill', 'clifftop'],
+    'clover0', 'clover1', 'lucky0', 'lucky1', 'tent', 'forge', 'bridge', 'house', 'rockfill', 'clifftop', 'hedge'],
   img: {},
   started: false,
   start() {
@@ -5184,6 +5269,21 @@ const World = {
         const rr = 10, ex = 0.4;
         const corner = [!U && !L ? rr : 0, !U && !R ? rr : 0, !D && !R ? rr : 0, !D && !L ? rr : 0];
         const box = (ins) => { const l = L ? -ex : ins, t = U ? -ex : ins, rr2 = R ? -ex : ins, b = D ? -ex : ins; g.beginPath(); g.roundRect(X + l, Y + t, T - l - rr2, T - t - b, corner.map(c => Math.max(0, c - ins))); };
+        // 3D 덤불 무늬 (그림 한 장 = 2 x 2 칸, 옆 칸과 이어진다). 얇은 덤불(벨 수 있는 곳)은 밝게 + 잔가지
+        const hedge = TileArt.img.hedge;
+        TileArt.start();
+        if (hedge) {
+          box(0.4); g.save(); g.clip();
+          g.drawImage(hedge, (x & 1) * hedge.width / 2, (y & 1) * hedge.height / 2, hedge.width / 2, hedge.height / 2, X, Y, T, T);
+          if (thin) { g.fillStyle = 'rgba(230,255,160,.32)'; g.fillRect(X, Y, T, T); }
+          const edge = (on, x0, y0, x1, y1, c) => { if (on) return; const gg = g.createLinearGradient(X + x0, Y + y0, X + x1, Y + y1); gg.addColorStop(0, c); gg.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gg; g.fillRect(X, Y, T, T); };
+          edge(D, 0, T, 0, T - 6, 'rgba(10,40,10,.5)');
+          edge(R, T, 0, T - 4, 0, 'rgba(10,40,10,.3)');
+          edge(U, 0, 0, 0, 4, 'rgba(255,255,220,.3)');
+          g.restore();
+          if (thin) { g.strokeStyle = '#6d4c41'; g.lineWidth = 0.95; for (const [sx, sy, len] of [[6, 22, 9], [16, 10, 8]]) { g.beginPath(); g.moveTo(X + sx, Y + sy); g.lineTo(X + sx + len, Y + sy - len / 2); g.stroke(); } }
+          break;
+        }
         box(0.4); g.fillStyle = shade(leaf[0], 0.5); g.fill();
         box(1.2); g.fillStyle = lin(0, T, leaf[1], leaf[0]); g.fill();
         // 둥근 잎 뭉치 + 반짝
@@ -5803,7 +5903,6 @@ const Monsters = {
       m.thornT = Math.max(0, (m.thornT || 0) - dt);
       if ((m.def.hunts || m.def.boss) && !m.owner && !m.thornT && this.nearThorn(m)) {
         m.thornT = 1.5;
-        Floaters.add(m.x, m.y - m.def.size * 0.6, '🌵', 14);
         if (this.hit(m, 1, m.x - v.x, m.y - v.y, { name: '🌵' })) continue;
       }
       if (m.def.hunts) this.bite(m, prey);
@@ -5978,7 +6077,7 @@ const Monsters = {
 
   // 내 공격: 활은 화살을 쏘고, 나머지는 앞쪽을 휘두른다. 다른 사람 캐릭터도 맞는다
   attack() {
-    const w = Game.weapon, power = WEAPONS[w].power;
+    const w = Game.weapon, power = WEAPONS[w].power * (1 + Game.stats().atk / 100);
     const [fx, fy] = FACING[Player.dir];
     if (w === 'bow') {
       this.arrows.push({
@@ -6074,25 +6173,43 @@ const Monsters = {
     else Items.add(a.food, x, y, { dropped: true });
   },
 
+  // ⚔️ 타격감: 피해는 무기 힘 ± 15%, 가끔(12%) 치명타 두 배. 화면에는 10배 숫자로 보인다 (체력 4 = 40)
+  roll(power) {
+    const crit = Math.random() < CONFIG.CRIT_CHANCE + Game.stats().crit / 100;
+    return { dmg: power * randFloat(0.85, 1.15) * (crit ? 2 : 1), crit };
+  },
+  // 머리 위로 튀어 오르는 피해 숫자 (치명타는 노랗고 크게)
+  dmgText(m, dmg, crit, mine = true) {
+    const n = Math.max(1, Math.round(dmg * CONFIG.HP_SHOW));
+    Floaters.add(m.x + randFloat(-6, 6), m.y - m.def.size * 0.75, crit ? `${n}!` : `${n}`, crit ? 22 : mine ? 16 : 13,
+      { num: true, color: crit ? '#ffd54f' : mine ? '#ffffff' : '#e0e0e0', life: crit ? 1.0 : 0.8, vx: randFloat(-14, 14) });
+  },
+
   // 내가 몬스터를 때림. 손님 기기는 방장에게 알리고, 맞는 모습만 먼저 보여준다
   damage(m, power) {
-    if (!Multi.isGuest) { this.hit(m, power, Player.x, Player.y); return; }
-    Multi.send('hitM', 'H', m.id, power, Math.round(Player.x), Math.round(Player.y));
+    const { dmg, crit } = this.roll(power);
+    this.dmgText(m, dmg, crit);
+    // 멈칫 (치명타는 조금 더) + 화면 살짝 흔들림
+    Game.hitStop(crit ? 0.09 : 0.05);
+    Render.shake(crit ? 0.16 : 0.08, crit ? 3 : 1.2);
+    if (crit) Sfx.crit();
+    if (!Multi.isGuest) { this.hit(m, dmg, Player.x, Player.y, null, true); return; }
+    Multi.send('hitM', 'H', m.id, dmg, Math.round(Player.x), Math.round(Player.y));
     m.hitT = 0.25;
     Sfx.hit();
-    Floaters.add(m.x, m.y - m.def.size * 0.6, '💥', 16);
-    Particles.hit(m.x, m.y - m.def.size * 0.2, m.def.boss);
+    Particles.hit(m.x, m.y - m.def.size * 0.2, m.def.boss || crit);
   },
 
   // 몬스터 체력을 깎는다 (방장/혼자 기기). byOther: 때린 다른 사람 → 잡았으면 true, 카드는 그 사람 기기에서
-  hit(m, dmg, fromX, fromY, byOther = null) {
+  // mine: 내가 때렸다 (숫자는 damage 에서 이미 띄웠다)
+  hit(m, dmg, fromX, fromY, byOther = null, mine = false) {
     m.hp -= dmg;
     m.hitT = 0.25;
     const dx = m.x - fromX, dy = m.y - fromY, d = Math.hypot(dx, dy) || 1;
     const kb = (m.def.boss ? 3 : 6) * T;
     m.knock = { x: dx / d * kb, y: dy / d * kb, t: 0.15 };
     Sfx.hit();
-    Floaters.add(m.x, m.y - m.def.size * 0.6, '💥', 16);
+    if (!mine) this.dmgText(m, dmg, false, false); // 다른 사람/가시가 때림: 조금 작은 회색 숫자
     Particles.hit(m.x, m.y - m.def.size * 0.2, m.def.boss);
     if (m.hp > 0) return false;
     this.kill(m, byOther);
@@ -6318,6 +6435,55 @@ const Particles = {
   },
 };
 
+// ============================================================
+// 💎 Loot — 내 화면에만 떨어지는 전리품 장비 (여럿이 할 때도 각자 따로). 걸어가면 줍는다
+// ============================================================
+const Loot = {
+  list: [],
+  // 등급 고르기: min 이상, boost 클수록 좋은 등급
+  roll(min = 0, boost = 0) {
+    const w = [55, 30, 12 + boost, 3 + boost * 0.6];
+    for (let i = 0; i < min; i++) w[i] = 0;
+    let r = Math.random() * w.reduce((a, b) => a + b, 0);
+    for (let i = 0; i < 4; i++) if ((r -= w[i]) <= 0) return i;
+    return 3;
+  },
+  drop(x, y, rar) {
+    const g = makeGear(rar), a = Math.random() * Math.PI * 2, d = randFloat(10, 26);
+    let tx = x + Math.cos(a) * d, ty = y + Math.sin(a) * d * 0.7;
+    if (!World.canStand(tx, ty, 6)) { tx = x; ty = y; }
+    this.list.push({ g, x0: x, y0: y, x: tx, y: ty, t: 0, phase: Math.random() * 6 });
+    if (this.list.length > 40) this.list.shift();
+    if (rar >= 2) Floaters.add(tx, ty - 30, rar === 3 ? '🌟' : '✨', 20);
+    if (rar === 3) { Sfx.success(); Render.shake(0.2, 2); }
+  },
+  // 동물/보스를 잡았다 (보스는 꼭 희귀 이상 둘)
+  onKill(m) {
+    const x = m.x ?? Player.x, y = m.y ?? Player.y;
+    if (m.def.boss) { for (let i = 0; i < 2; i++) this.drop(x, y, this.roll(2, 20)); return; }
+    if (Math.random() < CONFIG.LOOT_CHANCE) this.drop(x, y, this.roll(0, Math.min(10, m.def.hp || 1)));
+  },
+  // 🎁 미로 보물 상자: 마법 이상 n개
+  chest(x, y, n) { for (let i = 0; i < n; i++) this.drop(x, y, this.roll(1, 10)); },
+  update(dt) {
+    for (const l of this.list) l.t += dt;
+    if (Game.state !== 'play') return;
+    for (const l of [...this.list]) {
+      if (l.t < 0.6 || Math.hypot(l.x - Player.x, l.y - Player.y) > 18) continue;
+      if (!Game.addGear(l.g)) {
+        if (!this.fullT || performance.now() - this.fullT > 4000) { this.fullT = performance.now(); Sfx.soft(); toast(tr('🎒 장비가 꽉 찼어요! 🔨 분해해 주세요', '🎒 Gear is full! 🔨 Salvage some')); }
+        continue;
+      }
+      this.list.splice(this.list.indexOf(l), 1);
+      const id = `g:${l.g.u}`, def = gearDef(id), R = RARITY[l.g.r], up = Game.better(id);
+      if (l.g.r >= 2) Sfx.gain(); else Sfx.pickup();
+      Floaters.add(l.x, l.y - 24, itemNames(def).main, 13, { num: true, color: R.c, life: 1.3, vx: 0 });
+      toast(`${iconHtml(def)} <b class="rar-name rar${l.g.r}">${itemNames(def).main}</b> ${up ? '⬆️' : ''}`);
+      Game.renderInventory();
+    }
+  },
+};
+
 const Floaters = {
   list: [],
   add(x, y, text, size = 16, opt = {}) { this.list.push({ x, y, text, size, t: 0, life: 0.9, ...opt }); },
@@ -6403,7 +6569,7 @@ const Player = {
     if ((Particles.dustT -= dt) <= 0 && !(this.jumpT > 0)) { Particles.dustT = 0.16; Particles.dust(this.x, this.y + 6); }
     if (Math.abs(v.x) > Math.abs(v.y)) this.dir = v.x < 0 ? 'left' : 'right';
     else this.dir = v.y < 0 ? 'up' : 'down';
-    const speed = CONFIG.PLAYER_SPEED * T * (Game.buffLeft('speed') > 0 ? 1.5 : 1); // 🏃 파란 물약
+    const speed = CONFIG.PLAYER_SPEED * T * (Game.buffLeft('speed') > 0 ? 1.5 : 1) * (1 + Game.stats().spd / 100); // 🏃 파란 물약, 👟 장비
     const nx = this.x + v.x * speed * dt;
     if (this.canStand(nx, this.y)) this.x = nx;
     const ny = this.y + v.y * speed * dt;
@@ -7149,12 +7315,12 @@ const Multi = {
     } else if (kind === 'hitM' && this.isHost) {
       const [id, power, x, y] = args;
       const m = Monsters.list.find(mm => mm.id === id);
-      if (m && Monsters.hit(m, power, x, y, from)) this.send('kill', from.sid, m.type);
+      if (m && Monsters.hit(m, power, x, y, from)) this.send('kill', from.sid, m.type, Math.round(m.x), Math.round(m.y));
     } else if (kind === 'kill') {
       const def = args[0] === 'boss' ? BOSS : MONSTERS[args[0]];
       if (!def) return;
       Sfx.defeat();
-      Game.onMonsterDefeated({ def });
+      Game.onMonsterDefeated({ def, x: args[1], y: args[2] });
     } else if (kind === 'feed' && this.isHost) {
       const m = Monsters.list.find(mm => mm.id === args[0]);
       if (m && m.owner === from.sid) { Monsters.cheer(m); this.send('yum', from.sid, m.type); }
@@ -7523,6 +7689,7 @@ const Render = {
     // y 순서대로 그려서 앞뒤가 자연스럽게
     const drawables = Items.list.filter(it => !Items.pending.has(it.id)).map(it => ({ y: it.y, draw: () => this.drawItem(it, time) }));
     for (const f of Toss.list) drawables.push({ y: Toss.pos(f).y + 40, draw: () => this.drawToss(f) });
+    for (const l of Loot.list) drawables.push({ y: l.y, draw: () => this.drawLoot(l, time) });
     // 화면 안(조금 넉넉히)의 몬스터만 그린다
     const vx0 = this.camX - 80, vx1 = this.camX + viewW + 80, vy0 = this.camY - 80, vy1 = this.camY + viewH + 120;
     for (const m of Monsters.list) if (m.x > vx0 && m.x < vx1 && m.y > vy0 && m.y < vy1) drawables.push({ y: m.y, draw: () => this.drawMonster(m, time) });
@@ -7820,16 +7987,27 @@ const Render = {
       if (spr) c.drawImage(spr, -s * 0.62, -s * 0.62, s * 1.24, s * 1.24);
     });
 
-    // 체력 막대: 처음엔 빨간 칸이 가득, 맞을 때마다 오른쪽 칸부터 비어 회색이 된다
-    const max = m.def.hp, cw = m.def.boss ? 6 : 8, ch = 6, w = max * cw, top = known ? m.y + s * 0.35 - s * 1.12 * (m.def.ghost ? 1.05 : 0.98) - 12 - hop : m.y - s * 0.15 - s * 0.62 - 10;
-    const left = m.x - w / 2, hp = Math.max(0, Math.ceil(m.hp));
-    ctx.fillStyle = '#3e2723';
-    ctx.fillRect(left - 2, top - 2, w + 2, ch + 4);
-    for (let i = 0; i < max; i++) {
-      ctx.fillStyle = i >= hp ? '#e0e0e0' : m.owner ? '#43a047' : '#e53935';
-      ctx.fillRect(left + i * cw, top, cw - 2, ch);
-    }
-    this.later(ctx => this.drawMonsterLabel(m, left, w, top, ch));
+    // 체력 막대: 매끄러운 막대 + 깎인 몫은 흰색으로 잠깐 남았다가 줄어든다 (보스는 길게)
+    const max = m.def.hp, ch = m.def.boss ? 7 : 5, w = m.def.boss ? 70 : clamp(max * 9, 26, 50), top = known ? m.y + s * 0.35 - s * 1.12 * (m.def.ghost ? 1.05 : 0.98) - 12 - hop : m.y - s * 0.15 - s * 0.62 - 10;
+    const left = m.x - w / 2, frac = clamp(m.hp / max, 0, 1);
+    if (m.hpLag == null || m.hpLag < frac) m.hpLag = frac;
+    m.hpLag += (frac - m.hpLag) * Math.min(1, (time - (m.hpLagT || time)) * 4);
+    m.hpLagT = time;
+    const lag = m.hpLag;
+    this.later(ctx => {
+      // 화면 해상도로 또렷하게
+      ctx.fillStyle = 'rgba(40,24,18,.85)';
+      ctx.beginPath(); ctx.roundRect(left - 1.5, top - 1.5, w + 3, ch + 3, 3); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,.85)';
+      ctx.fillRect(left, top, w * lag, ch);
+      const hg = ctx.createLinearGradient(0, top, 0, top + ch);
+      if (m.owner) { hg.addColorStop(0, '#81c784'); hg.addColorStop(1, '#2e7d32'); } else { hg.addColorStop(0, '#ff6f60'); hg.addColorStop(1, '#c62828'); }
+      ctx.fillStyle = hg;
+      ctx.fillRect(left, top, w * frac, ch);
+      ctx.fillStyle = 'rgba(255,255,255,.35)';
+      ctx.fillRect(left, top, w * frac, 1.2);
+      this.drawMonsterLabel(m, left, w, top, ch);
+    });
   },
 
   // 몬스터 머리 위 그림 / 💕 / 이름표 (화면 해상도 글자)
@@ -7929,6 +8107,21 @@ const Render = {
         ctx.textAlign = 'center';
         continue;
       }
+      if (f.num) {
+        // 피해 숫자: 톡 커졌다가 옆으로 튀며 떠오른다 (검은 테두리)
+        const pop = f.t < 0.1 ? 0.6 + f.t / 0.1 * 0.7 : f.t < 0.2 ? 1.3 - (f.t - 0.1) / 0.1 * 0.3 : 1;
+        const ny = f.y - (f.t * 46 - f.t * f.t * 40), nx = f.x + (f.vx || 0) * f.t;
+        ctx.globalAlpha = Math.min(1, Math.max(0, (f.life - f.t) / 0.3));
+        ctx.font = `900 ${Math.round(f.size * pop)}px sans-serif`;
+        ctx.lineJoin = 'round';
+        ctx.lineWidth = 3.5;
+        ctx.strokeStyle = '#3a1d10';
+        ctx.strokeText(f.text, nx, ny);
+        ctx.fillStyle = f.color;
+        ctx.fillText(f.text, nx, ny);
+        ctx.fillStyle = '#000';
+        continue;
+      }
       ctx.font = `${f.size}px ${FONT_EMOJI}`;
       ctx.fillText(f.text, f.x, y);
     }
@@ -7949,6 +8142,39 @@ const Render = {
       if (def.tile || def.icon) c.drawImage(itemIcon(def, 24).canvas, -10, -10, 20, 20);
       else { c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillStyle = '#000'; c.font = `16px ${FONT_EMOJI}`; c.fillText(WEAPONS[f.type] ? holdEmoji(f.type) : def.emoji, 0, 0); }
       c.restore();
+    });
+  },
+
+  // 💎 바닥 전리품: 등급 색 빛기둥 (마법 이상) + 반짝 + 통통 튀는 그림
+  drawLoot(l, time) {
+    const R = RARITY[l.g.r], def = ITEMS[l.g.b], k = Math.min(1, l.t / 0.5);
+    const up = l.t < 0.5 ? Math.sin(k * Math.PI) * 22 : Math.sin(time * 3 + l.phase) * 2;
+    const x = l.x0 + (l.x - l.x0) * k, y = l.y0 + (l.y - l.y0) * k;
+    this.hd(c => {
+      c.save();
+      if (l.g.r > 0) {
+        // 빛기둥: 진한 등급 색 바깥 + 밝은 속 (풀밭 위에서도 색이 보이게)
+        const hgt = 34 + l.g.r * 20, wob = 0.8 + 0.2 * Math.sin(time * 4 + l.phase), col = LOOT_BEAM[l.g.r];
+        const beam = (w0, w1, c0, c1) => {
+          const gr = c.createLinearGradient(0, y - hgt, 0, y + 6);
+          gr.addColorStop(0, c0 + '00'); gr.addColorStop(0.55, c0 + '88'); gr.addColorStop(1, c1 + 'ee');
+          c.fillStyle = gr;
+          c.beginPath(); c.moveTo(x - w0, y - hgt); c.lineTo(x + w0, y - hgt); c.lineTo(x + w1, y + 4); c.lineTo(x - w1, y + 4); c.closePath(); c.fill();
+        };
+        c.globalAlpha = wob;
+        beam(5, 10, col, col);
+        beam(1.5, 3.5, '#ffffff', R.c);
+      }
+      const rg = c.createRadialGradient(x, y + 6, 0, x, y + 6, 14);
+      rg.addColorStop(0, R.c + 'aa'); rg.addColorStop(1, R.c + '00');
+      c.globalAlpha = 1;
+      c.fillStyle = rg;
+      c.beginPath(); c.ellipse(x, y + 6, 14, 5, 0, 0, Math.PI * 2); c.fill();
+      c.restore();
+      c.fillStyle = 'rgba(30,20,10,.22)';
+      c.beginPath(); c.ellipse(x, y + 7, 7, 2.4, 0, 0, Math.PI * 2); c.fill();
+      c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
+      c.drawImage(itemIcon(def).canvas, x - 11, y - 10 - up, 22, 22);
     });
   },
 
@@ -8485,6 +8711,8 @@ const Game = {
   tapReason: '',
   inventory: {},
   equip: {}, // 입은 옷/방패: 입는 곳 → id (가방 inventory 에는 없다)
+  gear: [], // 💎 전리품 장비 (입은 것도 여기 있다, equip 에는 'g:번호')
+  stats() { return gearStats(this.equip); },
   seen: new Set(), // 한 번이라도 얻은 아이템 (제작대에서 모르는 재료는 ??? 로)
   buffs: { speed: 0, light: 0 }, // 물약 힘이 끝나는 시각 (performance.now)
   weapons: new Set(),
@@ -8704,8 +8932,9 @@ const Game = {
     for (const id of bag.weapons || []) if (WEAPONS[id]) this.weapons.add(id);
     this.seen = new Set((bag.seen || []).filter(id => ITEMS[id]));
     for (const id of Object.keys(this.inventory)) this.seen.add(id);
+    this.gear = (Array.isArray(bag.gear) ? bag.gear : []).filter(g => g && g.u && ITEMS[g.b] && RARITY[g.r] && g.s).slice(0, GEAR_MAX);
     this.equip = {};
-    for (const [slot, id] of Object.entries(bag.equip || {})) if (ITEMS[id] && ITEMS[id].slot === slot) this.equip[slot] = id;
+    for (const [slot, id] of Object.entries(bag.equip || {})) { const d = itemDef(id); if (d && d.slot === slot && (d.gear || ITEMS[id])) this.equip[slot] = id; }
     // 예전 가방 (입은 옷을 따로 적기 전): 가방의 옷을 빈 곳에 입힌다
     if (!bag.equip) for (const id of Object.keys(this.inventory)) if (ITEMS[id].kind === 'wear' && !this.equip[ITEMS[id].slot]) this.wear(id, false);
     // 예전 가방 (방패는 가방에 있기만 하면 막았다): 방패 칸이 비었으면 끼운다
@@ -8720,7 +8949,7 @@ const Game = {
   },
 
   bagItems() {
-    return { v: BAG_V, inventory: this.inventory, equip: this.equip, seen: [...this.seen], weapons: [...this.weapons], picked: this.picked, lastWeapon: this.lastWeapon, kills: this.kills, shieldHits: this.shieldHits || 0 };
+    return { v: BAG_V, inventory: this.inventory, equip: this.equip, gear: this.gear || [], seen: [...this.seen], weapons: [...this.weapons], picked: this.picked, lastWeapon: this.lastWeapon, kills: this.kills, shieldHits: this.shieldHits || 0 };
   },
 
   // 가방 + 누구 것인지(owner: 이름) + 마지막으로 바뀐 때(t). 바뀌었을 때만 t 를 새로
@@ -9015,6 +9244,8 @@ const Game = {
     Card.toTap();
   },
 
+  hitStop(sec) { this.stopLeft = Math.max(this.stopLeft || 0, sec); },
+
   loop(ts) {
     this.step(ts);
     Render.draw(ts / 1000);
@@ -9027,6 +9258,14 @@ const Game = {
     let left = Math.min(1, (ts - (this.lastTime || ts)) / 1000);
     this.lastTime = ts;
     Multi.tick(left);
+    // ⚔️ 멈칫 (히트스톱): 때린 순간 아주 잠깐 세상이 멈춘다 (숫자/반짝이는 그대로 움직인다)
+    if (this.stopLeft > 0) {
+      const st = Math.min(this.stopLeft, left);
+      this.stopLeft -= st;
+      Floaters.update(st);
+      Particles.update(st);
+      left -= st;
+    }
     while (left > 0) {
       const dt = Math.min(0.05, left);
       left -= dt;
@@ -9034,6 +9273,7 @@ const Game = {
       Floaters.update(dt);
       Particles.update(dt);
       Toss.update(dt);
+      Loot.update(dt);
     }
   },
 
@@ -9307,6 +9547,7 @@ const Game = {
     if (Store.settings.lang === 'en') Speech.speak(last ? 'You solved every maze! You are amazing!' : 'You found the treasure! The next gate is open!', 'en');
     else Speech.speak(last ? '마지막 바다 미로까지 탈출! 정말 대단해요!' : '보물을 찾았어요! 다음 탄 문이 열렸어요!', 'ko');
     for (let i = 0; i < (last ? 3 : 1); i++) this.addItem('gem');
+    Loot.chest(goal.x * T + T / 2, goal.y * T + T, last ? 3 : 1);
     // 다음 탄이 골짜기/바다면 🌉 다리 5개 (낭떠러지와 바다에 놓아서 건넌다)
     if (mz.stage === 3 || mz.stage === 4) for (let i = 0; i < 5; i++) this.addItem('bridge');
     // 다음 탄 가는 🔒 나무 → ✨ 황금 나무 (모두의 기기에 알림)
@@ -9409,6 +9650,13 @@ const Game = {
 
   onMonsterDefeated(m) {
     Player.happyT = 1.6;
+    Loot.onKill(m);
+    // 💖 회복: 잡으면 확률로 하트 하나
+    if (this.hearts < CONFIG.MAX_HEARTS && Math.random() * 100 < this.stats().vamp) {
+      this.hearts++;
+      this.renderHearts();
+      Floaters.add(Player.x, Player.y - 34, '💖', 18);
+    }
     if (Buddy.on) {
       if (!m.def.boss) this.kills++;
       Buddy.onKill();
@@ -9459,6 +9707,13 @@ const Game = {
         Sfx.click();
         Floaters.add(Player.x, Player.y - 30, `🛡️${left}`, 18);
       }
+      return;
+    }
+    // 🛡️ 막기: 옷이 막아 주면 안 다친다 (잠깐 무적, 파란 "막음!")
+    if (Math.random() * 100 < this.stats().block) {
+      Player.invulnT = CONFIG.INVULN_SEC * 0.6;
+      Sfx.click();
+      Floaters.add(Player.x, Player.y - 34, tr('막음!', 'Block!'), 15, { num: true, color: '#90caf9', life: 0.8, vx: 0 });
       return;
     }
     this.hearts--;
@@ -9861,14 +10116,43 @@ const Game = {
 
   // 옷 입기: 가방에서 꺼내 입는다 (그 곳에 입고 있던 것은 가방으로)
   wear(id, sound = true) {
-    const def = ITEMS[id];
-    if (!def || !def.slot || !['wear', 'gear'].includes(def.kind) || !(this.inventory[id] > 0)) return;
+    const def = itemDef(id);
+    if (!def || !def.slot || !['wear', 'gear'].includes(def.kind) || !(def.gear || this.inventory[id] > 0)) return;
     const old = this.equip[def.slot];
-    if (old) this.inventory[old] = (this.inventory[old] || 0) + 1;
-    this.inventory[id]--;
-    if (!this.inventory[id]) delete this.inventory[id];
+    if (old && !isGear(old)) this.inventory[old] = (this.inventory[old] || 0) + 1;
+    if (!def.gear) {
+      this.inventory[id]--;
+      if (!this.inventory[id]) delete this.inventory[id];
+    }
     this.equip[def.slot] = id;
     if (sound) { Sfx.success(); toast(`${iconHtml(def)} ${itemNames(def).main} 👕`); }
+  },
+
+  // 💎 입지 않은 전리품 장비 (좋은 등급 먼저)
+  looseGear() {
+    const on = new Set(Object.values(this.equip));
+    return (this.gear || []).filter(g => !on.has(`g:${g.u}`)).sort((a, b) => b.r - a.r || gearScore(b.s) - gearScore(a.s));
+  },
+  // 지금 그 곳에 입은 것보다 좋은지 (능력치 합)
+  better(id) {
+    const d = itemDef(id), w = d && this.equip[d.slot], wd = w && itemDef(w);
+    return !!d && w !== id && gearScore(d.stats) > gearScore(wd && wd.stats);
+  },
+  // 💎 주운 장비를 가방에 (꽉 차면 false)
+  addGear(g) {
+    if ((this.gear || []).length >= GEAR_MAX) return false;
+    this.gear.push(g);
+    return true;
+  },
+  // 🔨 분해: 장비가 재료가 된다
+  salvage(id) {
+    const g = gearOf(id);
+    if (!g || Object.values(this.equip).includes(id)) return;
+    this.gear.splice(this.gear.indexOf(g), 1);
+    const got = SALVAGE[g.r];
+    for (const [t, n] of Object.entries(got)) this.inventory[t] = (this.inventory[t] || 0) + n;
+    Sfx.gain();
+    toast(`🔨 ${Object.entries(got).map(([t, n]) => `${iconHtml(ITEMS[t])}+${n}`).join(' ')}`);
   },
 
   // 벗기: 가방으로
@@ -9876,9 +10160,9 @@ const Game = {
     const id = this.equip[slot];
     if (!id) return false;
     delete this.equip[slot];
-    this.inventory[id] = (this.inventory[id] || 0) + 1;
+    if (!isGear(id)) this.inventory[id] = (this.inventory[id] || 0) + 1;
     Sfx.pickup();
-    toast(`${iconHtml(ITEMS[id])} ${itemNames(ITEMS[id]).main} → 🎒`);
+    toast(`${iconHtml(itemDef(id))} ${itemNames(itemDef(id)).main} → 🎒`);
     return true;
   },
 
@@ -9921,7 +10205,7 @@ const Game = {
       // 무기: 자주 바꾸니까 따로, 누르면 바로 든다 (✋ 맨손 포함)
       { icon: '✋', ko: '무기', en: 'Weapons', ids: Object.keys(WEAPONS).filter(id => id === 'hand' || this.weapons.has(id)) },
       // 장비: 입는 것 (옷, 방패). 누르고 👕 입기 → 왼쪽 입는 곳으로
-      { icon: '🛡️', ko: '장비', en: 'Gear', ids: [...of('wear'), ...of('gear')] },
+      { icon: '🛡️', ko: '장비', en: 'Gear', ids: [...this.looseGear().map(g => `g:${g.u}`), ...of('wear'), ...of('gear')] },
       { icon: '🪵', ko: '재료', en: 'Materials', ids: of('material') },
       { icon: '🧱', ko: '블록', en: 'Blocks', ids: Object.keys(ITEMS).filter(t => ITEMS[t].tile && has(t)) },
       { icon: '🍎', ko: '음식', en: 'Food', ids: of('food') },
@@ -9932,15 +10216,18 @@ const Game = {
     const cell = id => {
       const sel = id === this.bagSel ? ' sel' : '';
       if (id.startsWith('slot:')) {
-        const w = WEAR_SLOTS.find(x => x.slot === id.slice(5)), on = this.equip[w.slot];
-        return `<button class="bag-cell wear-cell${on ? ' on' : ' empty'}${sel}" data-cell="${id}">${on ? iconHtml(ITEMS[on]) : ''}<i>${tr(w.ko, w.en)}</i></button>`;
+        const w = WEAR_SLOTS.find(x => x.slot === id.slice(5)), on = this.equip[w.slot], od = on && itemDef(on);
+        return `<button class="bag-cell wear-cell${on ? ' on' : ' empty'}${od && od.rar ? ` rar${od.rar}` : ''}${sel}" data-cell="${id}">${od ? iconHtml(od) : ''}<i>${tr(w.ko, w.en)}</i></button>`;
       }
-      const def = WEAPONS[id] || ITEMS[id], held = WEAPONS[id] && this.held === id ? ' held' : '';
+      const def = itemDef(id), held = WEAPONS[id] && this.held === id ? ' held' : '';
+      if (def.gear) return `<button class="bag-cell rar${def.rar}${sel}" data-cell="${id}">${iconHtml(def)}${this.better(id) ? '<em class="up">⬆</em>' : ''}<i>${itemNames(def).main}</i></button>`;
       return `<button class="bag-cell${sel}${held}" data-cell="${id}">${iconHtml(def)}${ITEMS[id] ? `<b>${this.inventory[id]}</b>` : ''}<i>${itemNames(def).main}</i></button>`;
     };
     panel.innerHTML = `<div class="bag-head"><span>🎒 ${tr('가방', 'Bag')}</span><button class="bag-close" aria-label="close">✖</button></div>
       <div class="bag-body">
-        <div class="bag-me"><canvas class="bag-look"></canvas><div class="bag-wear">${WEAR_SLOTS.map(w => cell(`slot:${w.slot}`)).join('')}</div></div>
+        <div class="bag-me"><canvas class="bag-look"></canvas>
+          <div class="bag-stats">${STATS.map(x => { const v = this.stats()[x.key]; return `<span class="${v ? 'on' : ''}">${x.icon}<b>${v ? `+${v}%` : '·'}</b></span>`; }).join('')}</div>
+          <div class="bag-wear">${WEAR_SLOTS.map(w => cell(`slot:${w.slot}`)).join('')}</div></div>
         <div class="bag-items">${groups.map(g => `<div class="bag-group"><div class="bag-group-label"><span>${g.icon}</span>${tr(g.ko, g.en)}</div>` +
           `<div class="bag-cells">${g.ids.length ? g.ids.map(cell).join('') : '<span class="bag-none">·</span>'}</div></div>`).join('')}</div>
       </div>
@@ -9972,8 +10259,23 @@ const Game = {
       const w = WEAR_SLOTS.find(x => x.slot === sel.slice(5));
       return `<p class="bag-hint">${tr(`${w.ko}: 비어 있어요. 옷을 누르고 👕 입기`, `${w.en}: empty. Tap clothes, then 👕 Put on`)}</p>`;
     }
-    const def = WEAPONS[id] || ITEMS[id], { main, sub } = itemNames(def), acts = [];
+    const def = itemDef(id), { main, sub } = itemNames(def), acts = [];
     if (sel.startsWith('slot:')) acts.push(['off', '👕', '벗기', 'Take off']);
+    if (def.gear) {
+      // 💎 전리품: 등급 + 능력치 + 지금 입은 것과 비교 (⬆ 초록 / ⬇ 빨강)
+      const worn = !sel.startsWith('slot:') && this.equip[def.slot], wd = worn && itemDef(worn), cmp = [];
+      if (!sel.startsWith('slot:')) {
+        for (const x of STATS) {
+          const d = (def.stats[x.key] || 0) - ((wd && wd.stats && wd.stats[x.key]) || 0);
+          if (d) cmp.push(`<span class="${d > 0 ? 'up' : 'down'}">${d > 0 ? '⬆' : '⬇'}${x.icon}${d > 0 ? '+' : ''}${d}</span>`);
+        }
+        acts.push(['wear', '👕', '입기', 'Put on'], ['salvage', '🔨', '분해', 'Salvage']);
+      }
+      const R = RARITY[def.rar];
+      return `<span class="bag-info-icon rar${def.rar}">${iconHtml(def)}</span>
+      <div class="bag-info-text"><b class="rar-name rar${def.rar}">${main}</b> <small>${tr(R.ko, R.en)}</small><p>${statText(def.stats)}</p>${cmp.length ? `<p class="bag-cmp">${tr(wd ? '입은 것보다' : '지금보다', wd ? 'vs worn' : 'vs now')} ${cmp.join(' ')}</p>` : ''}</div>
+      <div class="bag-acts">${acts.map(([act, icon, ko, en]) => `<button class="big-btn bag-act" data-act="${act}">${icon} ${tr(ko, en)}</button>`).join('')}</div>`;
+    }
     else if (def.slot) acts.push(['wear', def.kind === 'gear' ? '🛡️' : '👕', def.kind === 'gear' ? '끼우기' : '입기', 'Put on']);
     if (!sel.startsWith('slot:') && pouchOf(id)) acts.push(['hold', '✋', '들기', 'Hold']);
     if (def.kind === 'food') acts.push(['eat', '😋', '먹기', 'Eat']);
@@ -9987,7 +10289,7 @@ const Game = {
   // 가방 밖이나 멀리(90px) 가서 떼면 그 자리 땅에 놓는다. 제자리 근처에서 떼면 그만둔다
   bagPress(b, e) {
     const cell = b.dataset.cell, id = cell.startsWith('slot:') ? this.equip[cell.slice(5)] : cell;
-    if (!id || id === 'hand' || this.state !== 'play') { this.bagSelect(cell); return; }
+    if (!id || id === 'hand' || isGear(id) || this.state !== 'play') { this.bagSelect(cell); return; }
     const x0 = e.clientX, y0 = e.clientY, panel = $('#bag-panel');
     let ghost = null;
     try { b.setPointerCapture(e.pointerId); } catch { /* 미지원 */ }
@@ -10034,7 +10336,7 @@ const Game = {
     Sfx.click();
     const item = this.bagItem();
     if (item) {
-      const def = WEAPONS[item] || ITEMS[item];
+      const def = itemDef(item);
       if (Store.settings.lang === 'en') Speech.speak(def.en, 'en'); else Speech.speak(def.ko, 'ko');
     }
     this.renderBag();
@@ -10044,7 +10346,8 @@ const Game = {
     const id = this.bagItem();
     if (!id) return;
     if (act === 'off') { this.takeOff(this.bagSel.slice(5)); this.bagSel = id; }
-    else if (act === 'wear') { this.wear(id); this.bagSel = `slot:${ITEMS[id].slot}`; }
+    else if (act === 'wear') { this.wear(id); this.bagSel = `slot:${itemDef(id).slot}`; }
+    else if (act === 'salvage') { this.salvage(id); this.bagSel = null; }
     else if (act === 'hold') { Sfx.click(); this.setWeapon(id); return; }
     else if (act === 'drink') this.drink(id);
     else if (act === 'eat') {

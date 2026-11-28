@@ -888,7 +888,11 @@ body:not(.touch) .pouch-slot i { color: #5d4037; }
 .bag-body { display: flex; gap: 12px; min-height: 0; flex: 1; }
 .bag-me { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px; border-radius: 18px; background: rgba(255, 255, 255, .5); }
 .bag-look { width: 72px; height: 104px; }
-.bag-wear { display: flex; flex-direction: column; gap: 6px; }
+.bag-wear { display: grid; grid-template-columns: repeat(2, auto); gap: 6px; }
+.bag-stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 3px 8px; font: 800 12px/1.2 var(--font-ui); color: #8d7b6b; }
+.bag-stats span { display: flex; align-items: center; gap: 3px; white-space: nowrap; opacity: .55; }
+.bag-stats span.on { opacity: 1; color: #3e2723; }
+.bag-stats b { font-weight: 900; }
 .bag-items { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; min-height: 0; }
 .bag-group { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 16px; background: rgba(93, 64, 55, .1); }
 .bag-group-label { width: 48px; flex: none; display: flex; flex-direction: column; align-items: center; font: 900 12px/1.2 var(--font-ui); }
@@ -1036,3 +1040,13 @@ body:not(.touch) #btn-weapon::after { content: '1'; }
 }
 .bag-ghost .tile-icon { width: 44px; height: 44px; }
 .bag-cell { touch-action: none; }
+
+/* 💎 전리품 장비 등급 (테두리 색 + 빛) */
+.bag-cell.rar1 { border-color: #42a5f5 !important; box-shadow: 0 0 0 2px rgba(66,165,245,.35), inset 0 0 10px rgba(66,165,245,.35); }
+.bag-cell.rar2 { border-color: #fbc02d !important; box-shadow: 0 0 0 2px rgba(251,192,45,.45), inset 0 0 12px rgba(255,213,79,.5); }
+.bag-cell.rar3 { border-color: #fb8c00 !important; box-shadow: 0 0 0 2px rgba(251,140,0,.5), 0 0 12px rgba(255,152,0,.6), inset 0 0 14px rgba(255,152,0,.5); animation: rar-glow 1.6s ease-in-out infinite; }
+@keyframes rar-glow { 50% { box-shadow: 0 0 0 3px rgba(251,140,0,.7), 0 0 18px rgba(255,152,0,.9), inset 0 0 16px rgba(255,152,0,.6); } }
+.bag-cell em.up { position: absolute; left: 3px; top: 1px; font: 900 15px/1 var(--font-ui); font-style: normal; color: #2e7d32; text-shadow: 0 0 2px #fff, 0 0 3px #fff; }
+.rar-name.rar1 { color: #1e88e5; } .rar-name.rar2 { color: #e6a100; } .rar-name.rar3 { color: #ef6c00; }
+.bag-info-icon.rar1 { filter: drop-shadow(0 0 4px #42a5f5); } .bag-info-icon.rar2 { filter: drop-shadow(0 0 5px #fbc02d); } .bag-info-icon.rar3 { filter: drop-shadow(0 0 6px #fb8c00); }
+.bag-cmp { margin-top: 2px !important; font-weight: 800; } .bag-cmp .up { color: #2e7d32; margin-right: 6px; } .bag-cmp .down { color: #c62828; margin-right: 6px; }
