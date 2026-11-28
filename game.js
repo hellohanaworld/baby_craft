@@ -475,7 +475,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 136;
+const GAME_V = 137;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -10136,7 +10136,8 @@ const SAY_WORDS = [
 ];
 const SAY_EMOJI = ['😊', '😆', '👍', '💕', '👋', '🎉', '😮', '😢'];
 const SAY_SEC = 3;
-const BUDDY_DEFAULT = '지율'; // 🤝 놀아주기를 켜면 처음 골라져 있는 사람
+const BUDDY_DEFAULT = '지율';
+const BUDDY_LEASH = 5; // 🤝 놀아주기: 아이에게서 이 칸 수보다 멀어지면 하던 일을 두고 아이에게 간다 // 🤝 놀아주기를 켜면 처음 골라져 있는 사람
 const SAY_MAX = 20; // 글자 수 (직접 쓰는 말도 20글자까지)
 const JUMP_SEC = 0.45;
 const tr = (ko, en) => (Store.settings.lang === 'en' ? en : ko);
@@ -10472,8 +10473,8 @@ const Buddy = {
     const t = this.task;
     // 위험: 아이 둘레 몬스터가 먼저 (아이에게 가까운 순), 그다음 나를 쫓는 몬스터
     // (아이에게 가는 길에는 바로 붙은 것만 상대한다)
-    const near = this.dist(a, me) < 8 * T ? 4 : 1.2; // 아이가 멀면 내 몸에 붙은 것만 상대하고 아이에게 간다
-    const threats = Monsters.list.filter(m => !m.def.calm && !m.owner && (this.dist(m, a) < 6 * T || this.dist(m, me) < near * T));
+    const near = this.dist(a, me) < 5 * T ? 3 : 1.2; // 아이가 멀면 내 몸에 붙은 것만 상대하고 아이에게 간다
+    const threats = Monsters.list.filter(m => !m.def.calm && !m.owner && (this.dist(m, a) < 4 * T || this.dist(m, me) < near * T));
     const threat = threats.sort((x, y) => this.dist(x, a) - this.dist(y, a))[0];
     if (threat) {
       if (!t || t.kind !== 'hunt' || (t.m !== threat && this.dist(threat, a) < this.dist(t.m, a) - T)) {
@@ -10485,7 +10486,7 @@ const Buddy = {
       return;
     }
     // 아이가 멀어지면 하던 일 (캐기/짓기/꼬시기)은 두고 따라간다 (술래잡기/숨바꼭질은 빼고)
-    if (t && !['follow', 'tag', 'hide', 'guide', 'gift'].includes(t.kind) && a !== this.home && this.dist(a, me) > 8 * T) {
+    if (t && !['follow', 'tag', 'hide', 'guide', 'gift'].includes(t.kind) && a !== this.home && this.dist(a, me) > BUDDY_LEASH * T) {
       this.done();
       this.start('follow', {}, 4);
       return;
@@ -10493,7 +10494,7 @@ const Buddy = {
     if (t && t.kind !== 'follow') return;
     // ❤️ 내가 다쳤으면 가까운(7칸 안) 하트를 먹으러 간다 (아이가 다쳐서 가까이 있으면 양보)
     if (Game.hearts < CONFIG.MAX_HEARTS) {
-      const h = Items.list.filter(it => it.type === 'heart' && !Items.pending.has(it.id) && this.dist(it, me) < 7 * T && this.mayTake(it))
+      const h = Items.list.filter(it => it.type === 'heart' && !Items.pending.has(it.id) && this.dist(it, me) < 7 * T && this.dist(it, a) < BUDDY_LEASH * T && this.mayTake(it))
         .sort((x, y) => this.dist(x, me) - this.dist(y, me))[0];
       if (h) { this.start('heart', { it: h }, 10); this.emote('❤️'); return; }
     }
@@ -10506,12 +10507,12 @@ const Buddy = {
       return;
     }
     // 아이 곁에 붙어 있는다 (짓는 중에는 재료를 캐러 조금 더 멀리까지)
-    if (this.dist(a, me) > (this.project ? 7 : 4) * T || this.restT > 0) { if (!t) this.start('follow', {}, 4); return; }
+    if (this.dist(a, me) > (this.project ? 4 : 3) * T || this.restT > 0) { if (!t) this.start('follow', {}, 4); return; }
 
     // 아이가 짓던 곳에서 멀어졌으면 (가운데가 7칸 밖) 그만두고, 나중에 아이 곁에서 새로 짓는다
     if (this.project && a !== this.home) {
       const pr = this.project, cx = (pr.ox + pr.w / 2) * T, cy = (pr.oy + pr.h / 2) * T;
-      if (Math.hypot(a.x - cx, a.y - cy) > 7 * T) { this.project = null; this.projectT = 8; }
+      if (Math.hypot(a.x - cx, a.y - cy) > 5 * T) { this.project = null; this.projectT = 8; }
     }
     // 짓는 중이면 대부분 그걸 이어서 한다
     if (!this.project && this.projectT <= 0) this.startProject(a);
@@ -10521,22 +10522,22 @@ const Buddy = {
     const myPets = Monsters.list.filter(m => m.owner === Multi.sid).length;
     // 좋아하는 음식을 가진 동물만 (없으면 🎂 케이크)
     const liked = m => [m.def.likes, 'cake'].find(id => id && Game.inventory[id] > 0);
-    const wild = Monsters.list.filter(m => Monsters.tameable(m) && !m.owner && this.dist(m, a) < 9 * T && liked(m))
+    const wild = Monsters.list.filter(m => Monsters.tameable(m) && !m.owner && this.dist(m, a) < 5 * T && liked(m))
       .sort((x, y) => this.dist(x, me) - this.dist(y, me))[0];
     const food = wild && liked(wild);
     if (food && wild && myPets < 3) choices.push(['tame', { m: wild, food }, 12]);
-    const dig = (Game.inventory.flower || 0) < 4 && this.findTile(a, [TILE.FLOWER], 6);
+    const dig = (Game.inventory.flower || 0) < 4 && this.findTile(a, [TILE.FLOWER], 4);
     if (dig) choices.push(['gather', { tx: dig.x, ty: dig.y, tile: TILE.FLOWER }, 10]);
     if (Game.inventory.flower > 0 || (Game.inventory.torch > 0 && DARK_REGIONS.has(World.regionAtPx(Player.x, Player.y)))) {
       choices.push(['build', { block: this.pickBlock(), left: randInt(2, 3) }, 14]);
     }
     // 아이 곁에 떨어진 것: 줍지 않고 옆에 가서 👉 (아이가 줍게)
     const f = this.friend();
-    const item = f && Items.list.filter(it => this.dist(it, f) < 6 * T && this.dist(it, f) > 1.5 * T)
+    const item = f && Items.list.filter(it => this.dist(it, f) < 4 * T && this.dist(it, f) > 1.5 * T)
       .sort((x, y) => this.dist(x, f) - this.dist(y, f))[0];
     if (item) choices.push(['show', { it: item }, 6]);
     // 2탄: 아이 곁 네잎클로버를 찾아서 옆에 가서 👉 (뽑는 건 아이가)
-    const lucky = f && Monsters.nearLucky(f.x, f.y, 5);
+    const lucky = f && Monsters.nearLucky(f.x, f.y, 4);
     if (lucky && this.dist(lucky, f) > 1.2 * T) choices.push(['show', { it: { ...lucky, lucky: true } }, 8], ['show', { it: { ...lucky, lucky: true } }, 8]);
     // 선물: 따라오는 동물 (아이 동물이 3마리보다 적으면), 꽃/먹이가 넉넉하면 하나
     if (f) {
@@ -10630,7 +10631,7 @@ const Buddy = {
       }
       // 재료 캐기 (문은 캘 수 없으니 그냥 빈칸으로 둔다, 꽃은 둘레에 없으면 건너뛴다)
       const tiles = ids.map(id => BUDDY_DIG[id]).filter(v => v !== undefined);
-      const spot = tiles.length && this.findTile(a, tiles, 7, true);
+      const spot = tiles.length && this.findTile(a, tiles, 4, true);
       if (!spot && block) { pr.gathering = false; return this.projectStep(a); } // 더 캘 게 없다: 있는 것부터 놓는다
       if (spot) {
         this.start('gather', { tx: spot.x, ty: spot.y, tile: World.tile(spot.x, spot.y), project: true }, 15);
@@ -10790,9 +10791,9 @@ const Buddy = {
   // 사람처럼: 휘두르는 틈을 두고, 맞으면 잠깐 물러서고, 하트가 적으면 도망친다 (아이가 바로 위험하면 그래도 싸운다)
   hunt(t) {
     const m = t.m, a = this.anchor(), kid = a !== this.home ? a : null;
-    const leave = kid && this.dist(kid, Player) > 10 * T && this.dist(m, kid) > 6 * T; // 아이가 멀어졌다: 아이에게
+    const leave = kid && this.dist(kid, Player) > (BUDDY_LEASH + 1) * T && this.dist(m, kid) > 3 * T; // 아이가 멀어졌다: 아이에게
     if (leave) { this.done(); this.start('follow', {}, 4); return; }
-    if (!Monsters.list.includes(m) || (this.dist(m, a) > 7 * T && this.dist(m, Player) > 4 * T)) {
+    if (!Monsters.list.includes(m) || (this.dist(m, a) > 5 * T && this.dist(m, Player) > 3 * T)) {
       if (Monsters.list.includes(m)) { this.done(); return; }
       this.done(kid && this.dist(kid, Player) < 6 * T ? (Math.random() < 0.5 ? '👍' : '😎') : '👍');
       if (kid) this.start('follow', { spot: null }, 3); // 이겼으면 아이 곁으로 돌아가 뽐내기
@@ -10865,6 +10866,8 @@ const Buddy = {
     const m = t.m;
     if (!Monsters.list.includes(m) || !Game.inventory[t.food]) { this.done(); return; }
     if (m.owner) { this.done(m.owner === Multi.sid ? '💕' : ''); return; }
+    const kid = this.friend();
+    if (kid && this.dist(m, kid) > (BUDDY_LEASH + 1) * T) { this.done(); return; } // 아이에게서 멀리 도망갔다: 두고 돌아간다
     // 4칸쯤 떨어져서 던진다 (가까이 가면 도망간다). 던진 먹이는 동물 쪽으로 휘어 날아간다
     if (this.dist(m, Player) < 4.2 * T) {
       this.vec = { x: 0, y: 0 };
