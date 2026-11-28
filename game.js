@@ -482,7 +482,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 141;
+const GAME_V = 142;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -1963,7 +1963,7 @@ const AFFIX = { atk: [5, 12], block: [4, 9], spd: [4, 9], crit: [3, 7], vamp: [5
 const AFFIX_NAME = { atk: ['힘센', 'Mighty'], block: ['튼튼한', 'Sturdy'], spd: ['날쌘', 'Swift'], crit: ['날카로운', 'Keen'], vamp: ['생명의', 'Living'] };
 const GEAR_MAX = 30; // 가방에 든 전리품 장비 최대 (입은 것 포함)
 const SALVAGE = [{ leather: 1 }, { leather: 1, string: 1 }, { gem: 1 }, { gem: 2 }]; // 🔨 분해하면 나오는 재료 (등급별)
-const rarBadge = r => `<s class="rb rb${r}">${tr(RARITY[r].ko[0], RARITY[r].en[0])}</s>`; // 칸 오른쪽 위 등급 글자 (보/마/희/전)
+const rarBadge = r => `<span class="rb rb${r}">${tr(RARITY[r].ko[0], RARITY[r].en[0])}</span>`; // 칸 오른쪽 위 등급 글자 (보/마/희/전)
 const isGear = id => typeof id === 'string' && id.startsWith('g:');
 const gearOf = id => isGear(id) && typeof Game !== 'undefined' ? (Game.gear || []).find(g => `g:${g.u}` === id) || null : null;
 // 무작위 장비 하나 (rar: 등급 0~3)
