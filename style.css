@@ -1026,3 +1026,14 @@ body:not(.touch) #btn-weapon::after { content: '1'; }
 }
 .top-left .buddy-btn span.show { opacity: 1; }
 @media (max-width: 900px), (max-height: 500px) { .top-left .buddy-btn { width: 38px; } }
+
+/* 가방에서 끌어 던지기: 손가락을 따라오는 그림, 끄는 동안 가방은 흐리게 (땅이 보이게) */
+.bag-panel.dragging { opacity: .25; transition: opacity .15s; }
+.bag-ghost {
+  position: fixed; z-index: 60; pointer-events: none; transform: translate(-50%, -60%);
+  width: 64px; height: 64px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-size: 36px; background: rgba(255, 255, 255, .85); border: 3px dashed #8d6e63; box-shadow: 0 6px 12px rgba(0, 0, 0, .25);
+}
+.bag-ghost .tile-icon { width: 40px; height: 40px; }
+.bag-ghost.go { border: 3px solid #43a047; background: #e8f5e9; }
+.bag-cell { touch-action: none; }

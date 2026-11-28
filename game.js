@@ -475,7 +475,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 125;
+const GAME_V = 126;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -6207,6 +6207,8 @@ const Player = {
 
   emote: '',
   emoteT: 0,
+  happyT: 0, // 기쁜 얼굴 남은 시간
+  hurtT: 0,  // 아픈 얼굴 남은 시간
   jumpT: 0,
   sayText: '',
   sayT: 0,
@@ -6216,6 +6218,8 @@ const Player = {
     this.invulnT = Math.max(0, this.invulnT - dt);
     this.hitT = Math.max(0, this.hitT - dt);
     this.emoteT = Math.max(0, this.emoteT - dt);
+    this.happyT = Math.max(0, this.happyT - dt);
+    this.hurtT = Math.max(0, this.hurtT - dt);
     this.jumpT = Math.max(0, this.jumpT - dt);
     this.sayT = Math.max(0, this.sayT - dt);
     // 설 수 없는 곳에 갇혔으면 (다른 사람이 발밑 다리를 캔 경우 등) 가장 가까운 땅으로
@@ -6289,8 +6293,12 @@ const Hero = {
       const dir = `sprites/chars/${id}/`;
       const load = f => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = `${dir}${f}?v=${GAME_V}`; });
       fetch(`${dir}hero.json?v=${GAME_V}`).then(r => r.json()).then(async info => {
-        const jobs = [];
-        for (const v of Object.values(info)) for (const p of Object.values(v)) if (p && p.img) {
+        const jobs = [], parts = [];
+        for (const v of Object.values(info)) {
+          for (const p of Object.values(v)) if (p && p.img) parts.push(p);
+          if (v.faces) parts.push(...Object.values(v.faces)); // 표정 머리 (기쁨/아픔)
+        }
+        for (const p of parts) {
           p.lay = {};
           jobs.push(load(p.img).then(i => { p.im = i; }));
           for (const [k, f] of Object.entries(p.layers)) jobs.push(load(f).then(i => { p.lay[k] = i; }));
@@ -6373,8 +6381,8 @@ const Hero = {
     }
     const B = V.body;
     c.drawImage(this.part(s, B, col, fx), B.x, B.y - bob, B.w, B.h);
-    // 머리: 목을 축으로 살짝 까딱
-    const Hd = V.head, tilt = mv ? w * 0.035 : Math.sin(now * 1.3) * 0.02;
+    // 머리: 목을 축으로 살짝 까딱. 아프면/기쁘면 그 표정 머리로 (뒷모습은 그대로)
+    const face = heroFace(e), Hd = (face && V.faces && V.faces[face]) || V.head, tilt = mv ? w * 0.035 : Math.sin(now * 1.3) * 0.02;
     c.translate(0, V.neck - bob * 1.1); c.rotate(tilt); c.translate(0, -V.neck);
     c.drawImage(this.part(s, Hd, col, fx), Hd.x, Hd.y, Hd.w, Hd.h);
     // 쓴 모자/왕관: 머리 꼭대기에 (예전 캐릭터 모자 그림을 머리 크기에 맞게 키워서)
@@ -6390,6 +6398,55 @@ const Hero = {
     return true;
   },
 };
+// 가방에서 끌어서 땅에 놓은 것: 내 캐릭터에서 그 곳으로 포물선을 그리며 날아가 떨어진다.
+// 떨어지면 누구나 줍는 아이템 (손님은 방장에게 drop 으로 알린다). 4.5 칸보다 멀면 그만큼만
+const Toss = {
+  list: [],
+  MAX: 4.5,
+  throw(id, wx, wy) {
+    let dx = wx - Player.x, dy = wy - Player.y;
+    const d = Math.hypot(dx, dy), max = this.MAX * T, min = 1.3 * T;
+    if (d > max) { dx *= max / d; dy *= max / d; }
+    else if (d < min) { // 너무 가까우면 바로 도로 주우니까 조금 앞으로
+      const ux = d ? dx / d : ({ left: -1, right: 1 }[Player.dir] || 0), uy = d ? dy / d : ({ up: -1, down: 1 }[Player.dir] || 0);
+      dx = ux * min; dy = uy * min;
+    }
+    let x = Player.x + dx, y = Player.y + dy;
+    // 물/벽이면 나 쪽으로 당겨서 설 수 있는 곳에
+    for (let i = 0; i < 12 && !World.canStand(x, y, 6); i++) { x -= dx / 12; y -= dy / 12; }
+    if (!World.canStand(x, y, 6) || !Game.takeOne(id)) return false;
+    const dist = Math.hypot(x - Player.x, y - Player.y);
+    this.list.push({ type: id, x0: Player.x, y0: Player.y - 10, x1: x, y1: y, t: 0, dur: 0.28 + dist / T * 0.06, h: 14 + dist * 0.25 });
+    Social.lastGive = { type: id, x, y, at: performance.now() }; // 내가 도로 줍지 않게
+    if (x < Player.x - 4) Player.dir = 'left'; else if (x > Player.x + 4) Player.dir = 'right';
+    Player.swingT = 0.25;
+    Sfx.swing();
+    return true;
+  },
+  update(dt) {
+    for (const f of [...this.list]) {
+      f.t += dt;
+      if (f.t < f.dur) continue;
+      this.list.splice(this.list.indexOf(f), 1);
+      Particles.dust(f.x1, f.y1);
+      if (Multi.isGuest) Multi.send('drop', 'H', f.type, Math.round(f.x1), Math.round(f.y1));
+      else Items.add(f.type, f.x1, f.y1, { dropped: true });
+      Sfx.pickup();
+    }
+  },
+  pos(f) {
+    const p = Math.min(1, f.t / f.dur);
+    return { x: f.x0 + (f.x1 - f.x0) * p, y: f.y0 + (f.y1 - f.y0) * p, up: Math.sin(Math.PI * p) * f.h, p };
+  },
+};
+
+// 표정: 맞은 뒤 잠깐 아픈 얼굴, 줍기/잡기/신나는 몸짓 때 기쁜 얼굴 (fc: 다른 사람에게 받은 표정 1 기쁨, 2 아픔)
+const HAPPY_EMOTES = ['🎁', '🎉', '👋', '👍', '😆', '😋', '💪', '😊', '🥰'];
+function heroFace(e) {
+  if (e.hurtT > 0 || e.fc === 2) return 'hurt';
+  if (e.happyT > 0 || e.fc === 1 || (e.emoteT > 0 && HAPPY_EMOTES.includes(e.emote))) return 'happy';
+  return null;
+}
 // 옷 색(LOOKS) + 그림 캐릭터 이름. 같은 것은 같은 물건으로 (매번 새로 만들지 않게)
 const lookMemo = new Map();
 function lookWith(i, hero) {
@@ -6704,6 +6761,9 @@ const Multi = {
   // 맵 한 칸 바꾸기 (캐기/놓기). 여럿이 할 때는 방에 먼저 기록하고, 다른 사람이 먼저 바꿨으면 false
   async editTile(i, expect, next) {
     if (World.tiles[i] !== expect) return false;
+    // 받는 쪽(다른 사람, 방 기록)과 똑같이 땅을 고친다. 안 그러면 길 위 블록을 캔 사람만 풀밭으로 보이고
+    // 다른 사람은 길로 보여서 기기마다 땅이 달라진다
+    next = fixLand(i, next);
     World.mine.set(i, performance.now());
     if (!this.online) { World.setTile(i, next); return true; }
     try {
@@ -6794,6 +6854,7 @@ const Multi = {
       hp: Game.hearts,
       w: Game.held,
       em: Player.emoteT > 0 ? Player.emote : 0,
+      fc: Player.hurtT > 0 ? 2 : Player.happyT > 0 ? 1 : 0,
       say: Player.sayT > 0 ? [Player.saySeq, Player.sayText] : 0,
       a: Monsters.arrows.map(a => [r(a.x), r(a.y), a.fx, a.fy, a.food || 0]),
       ev: this.events.map(([seq, , kind, ...args]) => [seq, kind, ...args]),
@@ -6869,6 +6930,7 @@ const Multi = {
     p.held = holdable(d.w) ? d.w : 'hand';
     if (d.em && d.em !== p.emote) { p.emote = String(d.em).slice(0, 4); p.emoteT = 1.6; }
     if (!d.em) p.emote = '';
+    p.fc = d.fc === 1 || d.fc === 2 ? d.fc : 0;
     if (pos[7] && !p.wasJump) p.jumpT = JUMP_SEC;
     p.wasJump = !!pos[7];
     // 말풍선: 새 말이면 띄우고, 가까이 있으면 읽어 준다
@@ -7266,6 +7328,7 @@ const Render = {
 
     // y 순서대로 그려서 앞뒤가 자연스럽게
     const drawables = Items.list.filter(it => !Items.pending.has(it.id)).map(it => ({ y: it.y, draw: () => this.drawItem(it, time) }));
+    for (const f of Toss.list) drawables.push({ y: Toss.pos(f).y + 40, draw: () => this.drawToss(f) });
     // 화면 안(조금 넉넉히)의 몬스터만 그린다
     const vx0 = this.camX - 80, vx1 = this.camX + viewW + 80, vy0 = this.camY - 80, vy1 = this.camY + viewH + 120;
     for (const m of Monsters.list) if (m.x > vx0 && m.x < vx1 && m.y > vy0 && m.y < vy1) drawables.push({ y: m.y, draw: () => this.drawMonster(m, time) });
@@ -7661,6 +7724,23 @@ const Render = {
       ctx.fillText(f.text, f.x, y);
     }
     ctx.globalAlpha = 1;
+  },
+
+  // 날아가는 것 (가방에서 던진 것): 땅에 그림자, 위에 빙글 도는 그림
+  drawToss(f) {
+    const { x, y, up, p } = Toss.pos(f), def = ITEMS[f.type] || WEAPONS[f.type];
+    if (!def) return;
+    this.hd(c => {
+      c.fillStyle = 'rgba(30,20,10,.22)';
+      c.beginPath(); c.ellipse(x, y + 9, 7 - up * 0.08, 2.4 - up * 0.03, 0, 0, Math.PI * 2); c.fill();
+      c.save();
+      c.translate(x, y - 4 - up);
+      c.rotate(p * Math.PI * 2 * (f.x1 < f.x0 ? -1 : 1));
+      c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
+      if (def.tile || def.icon) c.drawImage(itemIcon(def, 24).canvas, -10, -10, 20, 20);
+      else { c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillStyle = '#000'; c.font = `16px ${FONT_EMOJI}`; c.fillText(WEAPONS[f.type] ? holdEmoji(f.type) : def.emoji, 0, 0); }
+      c.restore();
+    });
   },
 
   drawItem(it, time) {
@@ -8744,6 +8824,7 @@ const Game = {
       this.update(dt);
       Floaters.update(dt);
       Particles.update(dt);
+      Toss.update(dt);
     }
   },
 
@@ -9118,6 +9199,7 @@ const Game = {
   unlockShown: new Set(),
 
   onMonsterDefeated(m) {
+    Player.happyT = 1.6;
     if (Buddy.on) {
       if (!m.def.boss) this.kills++;
       Buddy.onKill();
@@ -9173,6 +9255,8 @@ const Game = {
     this.hearts--;
     Player.invulnT = CONFIG.INVULN_SEC;
     Player.hitT = CONFIG.HIT_FLASH_SEC;
+    Player.hurtT = 0.9;
+    Player.happyT = 0;
     Particles.hurt(Player.x, Player.y - 12);
     const dx = Player.x - m.x, dy = Player.y - m.y, d = Math.hypot(dx, dy) || 1;
     Player.knock = { x: dx / d * CONFIG.KNOCKBACK * T, y: dy / d * CONFIG.KNOCKBACK * T, t: 0.15 };
@@ -9652,7 +9736,7 @@ const Game = {
           `<div class="bag-cells">${g.ids.length ? g.ids.map(cell).join('') : '<span class="bag-none">·</span>'}</div></div>`).join('')}</div>
       </div>
       <div class="bag-info">${this.bagInfo()}</div>`;
-    panel.querySelectorAll('[data-cell]').forEach(b => b.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); this.bagSelect(b.dataset.cell); }));
+    panel.querySelectorAll('[data-cell]').forEach(b => b.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); this.bagPress(b, e); }));
     panel.querySelectorAll('[data-act]').forEach(b => b.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); this.bagAct(b.dataset.act); }));
     panel.querySelector('.bag-close').addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); this.closeBag(); });
     // 내 모습 (입은 옷, 손에 든 것까지)
@@ -9688,6 +9772,49 @@ const Game = {
     return `<span class="bag-info-icon">${iconHtml(def)}</span>
       <div class="bag-info-text"><b>${main}</b>${sub ? ` <small>${sub}</small>` : ''}<p>${itemDesc(id)}</p></div>
       <div class="bag-acts">${acts.map(([act, icon, ko, en]) => `<button class="big-btn bag-act" data-act="${act}">${icon} ${tr(ko, en)}</button>`).join('')}</div>`;
+  },
+
+  // 가방 칸을 눌렀다: 그대로 떼면 고르기, 끌면 그림이 손가락을 따라오고 (가방은 흐려진다)
+  // 가방 밖이나 멀리(90px) 가서 떼면 그 곳으로 던진다. 제자리 근처에서 떼면 그만둔다
+  bagPress(b, e) {
+    const cell = b.dataset.cell, id = cell.startsWith('slot:') ? this.equip[cell.slice(5)] : cell;
+    if (!id || id === 'hand' || this.state !== 'play') { this.bagSelect(cell); return; }
+    const x0 = e.clientX, y0 = e.clientY, panel = $('#bag-panel');
+    let ghost = null;
+    try { b.setPointerCapture(e.pointerId); } catch { /* 미지원 */ }
+    const inPanel = ev => { const r = panel.getBoundingClientRect(); return ev.clientX >= r.left && ev.clientX <= r.right && ev.clientY >= r.top && ev.clientY <= r.bottom; };
+    const far = ev => Math.hypot(ev.clientX - x0, ev.clientY - y0) > 90;
+    const move = ev => {
+      if (!ghost && Math.hypot(ev.clientX - x0, ev.clientY - y0) < 12) return;
+      if (!ghost) {
+        ghost = document.createElement('div');
+        ghost.className = 'bag-ghost';
+        ghost.innerHTML = iconHtml(WEAPONS[id] || ITEMS[id]);
+        document.body.appendChild(ghost);
+        panel.classList.add('dragging');
+      }
+      ghost.style.left = `${ev.clientX}px`;
+      ghost.style.top = `${ev.clientY}px`;
+      ghost.classList.toggle('go', !inPanel(ev) || far(ev));
+    };
+    const end = ev => {
+      b.removeEventListener('pointermove', move);
+      b.removeEventListener('pointerup', end);
+      b.removeEventListener('pointercancel', end);
+      if (!ghost) { if (ev.type === 'pointerup') this.bagSelect(cell); return; }
+      ghost.remove();
+      panel.classList.remove('dragging');
+      if (ev.type !== 'pointerup' || (inPanel(ev) && !far(ev))) return;
+      const rc = Render.canvas.getBoundingClientRect();
+      const wx = Render.camX + (ev.clientX - rc.left) / Render.scale, wy = Render.camY + (ev.clientY - rc.top) / Render.scale;
+      if (Toss.throw(id, wx, wy)) {
+        if (this.bagSel === cell) this.bagSel = null;
+        this.renderBag();
+      } else Sfx.soft();
+    };
+    b.addEventListener('pointermove', move);
+    b.addEventListener('pointerup', end);
+    b.addEventListener('pointercancel', end);
   },
 
   // 가방에서 하나 눌렀다: 고르고 이름을 읽어 준다
@@ -9756,6 +9883,7 @@ const Game = {
   },
 
   addItem(type) {
+    Player.happyT = Math.max(Player.happyT, 1.1); // 주우면 기쁜 얼굴
     if (WEAPONS[type]) {
       // 선물 받은 무기: 무기 칸에 넣는다 (이미 있으면 그대로)
       this.weapons.add(type);
