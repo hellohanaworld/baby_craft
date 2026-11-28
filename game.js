@@ -475,7 +475,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 130;
+const GAME_V = 131;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -5358,7 +5358,6 @@ const Items = {
       if (Buddy.on && Buddy.friend() && !Buddy.mayTake(it)) continue; // 🤝 놀아주기: 아이에게 양보
       const lg = Social.lastGive; // 방금 준 선물은 도로 줍지 않는다
       if (lg && it.type === lg.type && now - lg.at < 8000 && Math.hypot(it.x - lg.x, it.y - lg.y) < T) continue;
-      if (it.type === 'heart' && Game.hearts >= CONFIG.MAX_HEARTS) continue; // ❤️ 는 다쳤을 때만 줍는다
       if (Multi.isGuest) {
         this.pending.set(it.id, now);
         Multi.send('pick', 'H', it.id);
@@ -10394,6 +10393,12 @@ const Buddy = {
       return;
     }
     if (t && t.kind !== 'follow') return;
+    // ❤️ 내가 다쳤으면 가까운(7칸 안) 하트를 먹으러 간다 (아이가 다쳐서 가까이 있으면 양보)
+    if (Game.hearts < CONFIG.MAX_HEARTS) {
+      const h = Items.list.filter(it => it.type === 'heart' && !Items.pending.has(it.id) && this.dist(it, me) < 7 * T && this.mayTake(it))
+        .sort((x, y) => this.dist(x, me) - this.dist(y, me))[0];
+      if (h) { this.start('heart', { it: h }, 10); this.emote('❤️'); return; }
+    }
     // 3탄 🧭 미로: 아이가 미로 안에 있으면 "따라와!" 하고 앞장서서 보물 상자까지 길을 알려 준다
     const kid = this.friend();
     if (kid && this.inMaze(kid) && (this.reactAt.guide || 0) < performance.now()) {
@@ -11099,6 +11104,12 @@ const Buddy = {
   },
 
   // 떨어진 것 옆에 가서 아이를 보며 👉 (아이가 주우면 😄)
+  // 떨어진 하트 먹으러 가기 (밟으면 Items.pickup 이 줍는다)
+  heart(t) {
+    if (!Items.list.includes(t.it) || Game.hearts >= CONFIG.MAX_HEARTS || !this.mayTake(t.it)) { this.done(Items.list.includes(t.it) ? '' : '😋'); return; }
+    this.goTo(t.it.x, t.it.y, 2);
+  },
+
   show(t) {
     const it = t.it, f = this.friend();
     const gone = it.lucky ? World.tiles[it.i] !== TILE.LUCKY : !Items.list.includes(it);
