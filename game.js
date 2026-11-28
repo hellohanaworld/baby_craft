@@ -475,7 +475,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 132;
+const GAME_V = 133;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -2655,16 +2655,16 @@ function scale3x(rows) {
 // ============================================================
 const CRITTERS = {
   // plan: quad 네발 / bird 새 / fly 나는 것 / fish 물고기 / bug 벌레 / snake 뱀 / snail 달팽이 / turtle 거북 / octo 문어 / ghost 유령
-  wolf:     { plan: 'quad', c: '#9aa6b2', belly: '#eef2f5', ear: 'pointy', snout: 'muzzle', tail: 'fluffy' },
-  fox:      { plan: 'quad', c: '#f28c3a', belly: '#fff4e8', ear: 'pointy', earTip: '#5d4037', snout: 'muzzle', tail: 'fluffy', tailTip: '#ffffff' },
-  bear:     { plan: 'quad', c: '#a8784f', belly: '#ecd0ae', ear: 'round', snout: 'muzzle', tail: 'pom' },
-  tiger:    { plan: 'quad', c: '#f7a62a', belly: '#fff6e5', ear: 'pointy', snout: 'muzzle', tail: 'thin', stripes: '#4a2c14' },
-  hippo:    { plan: 'quad', c: '#b3a6cf', belly: '#ddd3ec', ear: 'tiny', snout: 'hippo', tail: 'pom', chunky: true },
-  sheep:    { plan: 'quad', c: '#fbf6ee', face: '#f2d7c2', ear: 'floppy', snout: 'none', tail: 'pom', wool: true, legs: '#6d5a4b' },
-  cow:      { plan: 'quad', c: '#ffffff', ear: 'floppy', snout: 'cow', tail: 'thin', patches: '#3e302b', horns: 'nub' },
-  pig:      { plan: 'quad', c: '#ffb9c6', ear: 'floppy', snout: 'pig', tail: 'curl' },
-  deer:     { plan: 'quad', c: '#c98b55', belly: '#f6e3cb', ear: 'leaf', snout: 'tinynose', tail: 'pom', tailColor: '#ffffff', dots: '#fff8ec', slim: true },
-  rabbit:   { plan: 'bun', c: '#f7f3ee', earIn: '#f6b8cc', sheet: 'sprites/rabbit.png' },
+  wolf:     { plan: 'quad', c: '#9aa6b2', belly: '#eef2f5', ear: 'pointy', snout: 'muzzle', tail: 'fluffy', sheet: 'sprites/critters/wolf.png', sh: 30 },
+  fox:      { plan: 'quad', c: '#f28c3a', belly: '#fff4e8', ear: 'pointy', earTip: '#5d4037', snout: 'muzzle', tail: 'fluffy', tailTip: '#ffffff', sheet: 'sprites/critters/fox.png', sh: 30 },
+  bear:     { plan: 'quad', c: '#a8784f', belly: '#ecd0ae', ear: 'round', snout: 'muzzle', tail: 'pom', sheet: 'sprites/critters/bear.png', sh: 31 },
+  tiger:    { plan: 'quad', c: '#f7a62a', belly: '#fff6e5', ear: 'pointy', snout: 'muzzle', tail: 'thin', stripes: '#4a2c14', sheet: 'sprites/critters/tiger.png', sh: 30 },
+  hippo:    { plan: 'quad', c: '#b3a6cf', belly: '#ddd3ec', ear: 'tiny', snout: 'hippo', tail: 'pom', chunky: true, sheet: 'sprites/critters/hippo.png', sh: 30 },
+  sheep:    { plan: 'quad', c: '#fbf6ee', face: '#f2d7c2', ear: 'floppy', snout: 'none', tail: 'pom', wool: true, legs: '#6d5a4b', sheet: 'sprites/critters/sheep.png', sh: 29 },
+  cow:      { plan: 'quad', c: '#ffffff', ear: 'floppy', snout: 'cow', tail: 'thin', patches: '#3e302b', horns: 'nub', sheet: 'sprites/critters/cow.png', sh: 31 },
+  pig:      { plan: 'quad', c: '#ffb9c6', ear: 'floppy', snout: 'pig', tail: 'curl', sheet: 'sprites/critters/pig.png', sh: 28 },
+  deer:     { plan: 'quad', c: '#c98b55', belly: '#f6e3cb', ear: 'leaf', snout: 'tinynose', tail: 'pom', tailColor: '#ffffff', dots: '#fff8ec', slim: true, sheet: 'sprites/critters/deer.png', sh: 33 },
+  rabbit:   { plan: 'bun', c: '#f7f3ee', earIn: '#f6b8cc', sheet: 'sprites/rabbit.png', anim: 'hop', sh: 33, pad: 5 },
   bunny:    { plan: 'quad', c: '#cfa77d', belly: '#f3e3cf', ear: 'long', earIn: '#f8bbd0', snout: 'tinynose', tail: 'pom', tailColor: '#ffffff', hop: true },
   hedgehog: { plan: 'quad', c: '#f2d6b3', ear: 'tiny', snout: 'tinynose', tail: 'none', spikes: '#7a5a44', low: true },
   rat:      { plan: 'quad', c: '#a9a9b3', belly: '#e6e6ea', ear: 'big', earIn: '#f8bbd0', snout: 'tinynose', tail: 'long', tailColor: '#f4a7b9', low: true },
@@ -2672,20 +2672,20 @@ const CRITTERS = {
   leopard:  { plan: 'quad', c: '#f3c76f', belly: '#fff7e6', ear: 'pointy', snout: 'muzzle', tail: 'thin', spots: '#6d4c2f' },
   goat:     { plan: 'quad', c: '#f3ede3', ear: 'floppy', snout: 'tinynose', tail: 'pom', horns: 'goat', beard: true, slim: true },
   ram:      { plan: 'quad', c: '#f7f1e6', face: '#e9d3bd', ear: 'floppy', snout: 'none', tail: 'pom', wool: true, horns: 'ram', legs: '#6d5a4b' },
-  dragon:   { plan: 'quad', c: '#5fc06c', belly: '#f7e7a6', ear: 'none', snout: 'dragon', tail: 'dragon', horns: 'dragon', wings: '#7fd08a', backSpikes: '#f9a825' },
-  chicken:  { plan: 'bird', c: '#ffffff', wing: '#f2f2f2', comb: '#e53935', beak: '#ffa726', feet: '#ffa726' },
+  dragon:   { plan: 'quad', c: '#5fc06c', belly: '#f7e7a6', ear: 'none', snout: 'dragon', tail: 'dragon', horns: 'dragon', wings: '#7fd08a', backSpikes: '#f9a825', sheet: 'sprites/critters/dragon.png', sh: 34 },
+  chicken:  { plan: 'bird', c: '#ffffff', wing: '#f2f2f2', comb: '#e53935', beak: '#ffa726', feet: '#ffa726', sheet: 'sprites/critters/chicken.png', sh: 28 },
   parrot:   { plan: 'bird', c: '#4caf50', head: '#e53935', wing: '#1e88e5', crest: '#ffeb3b', beak: '#fff3c4', feet: '#8d6e63', tailLong: '#1e88e5' },
   eagle:    { plan: 'bird', c: '#8a5a33', head: '#ffffff', wing: '#6d4426', beak: '#ffc107', feet: '#ffc107', big: true },
-  bat:      { plan: 'fly', c: '#7a5aa6', wing: '#4a3570', ear: 'pointy' },
+  bat:      { plan: 'fly', c: '#7a5aa6', wing: '#4a3570', ear: 'pointy', sheet: 'sprites/critters/bat.png', anim: 'fly', sh: 28 },
   cavebat:  { plan: 'fly', c: '#5b4b6e', wing: '#3a2f48', ear: 'pointy' },
   bee:      { plan: 'fly', c: '#ffd54f', wing: 'rgba(255,255,255,.75)', stripes: '#3e2723', antenna: true, stinger: true },
-  fish:     { plan: 'fish', c: '#4fc3f7', fin: '#0288d1' },
-  blowfish: { plan: 'fish', c: '#ffd180', fin: '#ffb74d', puff: true },
+  fish:     { plan: 'fish', c: '#4fc3f7', fin: '#0288d1', sheet: 'sprites/critters/fish.png', anim: 'swim', sh: 22 },
+  blowfish: { plan: 'fish', c: '#ffd180', fin: '#ffb74d', puff: true, sheet: 'sprites/critters/blowfish.png', anim: 'swim', sh: 24 },
   shark:    { plan: 'fish', c: '#9fb3bf', belly: '#ffffff', fin: '#78909c', shark: true },
-  spider:   { plan: 'bug', c: '#6c5a96', legs: 8, kind: 'spider' },
-  scorpion: { plan: 'bug', c: '#d9a64e', legs: 6, kind: 'scorpion' },
-  ant:      { plan: 'bug', c: '#a1453a', legs: 6, kind: 'ant' },
-  crab:     { plan: 'bug', c: '#ef6a5a', legs: 6, kind: 'crab' },
+  spider:   { plan: 'bug', c: '#6c5a96', legs: 8, kind: 'spider', sheet: 'sprites/critters/spider.png', sh: 26 },
+  scorpion: { plan: 'bug', c: '#d9a64e', legs: 6, kind: 'scorpion', sheet: 'sprites/critters/scorpion.png', sh: 30 },
+  ant:      { plan: 'bug', c: '#a1453a', legs: 6, kind: 'ant', sheet: 'sprites/critters/ant.png', sh: 28 },
+  crab:     { plan: 'bug', c: '#ef6a5a', legs: 6, kind: 'crab', sheet: 'sprites/critters/crab.png', sh: 26 },
   snake:    { plan: 'snake', c: '#86c25a', belly: '#e4f2d0' },
   lizard:   { plan: 'snake', c: '#4fb8ac', belly: '#d6f2ee', legs: true },
   snail:    { plan: 'snail', c: '#f2dfc4', shell: '#d79a5b' },
@@ -2703,7 +2703,7 @@ const Critter = {
   cache: new Map(),
   drawCached(c, type, s, m, time) {
     // 그림 시트가 아직 안 왔으면 담아 두지 않고 바로 그린다 (오면 그림으로 바뀐다)
-    const sp = CRITTERS[type];
+    const sp = CRITTERS[type] || CRITTERS[CRITTER_BY_EMOJI[m.def && m.def.emoji]];
     if (sp && sp.sheet && !this.sheetImg(sp)) return this.draw(c, type, s, m, time);
     const tf = c.getTransform(), k = Math.round(Math.hypot(tf.a, tf.b) * 4) / 4;
     const S = s, mv = (m.animMv || 0) > 0.35, hurt = m.hitT > 0;
@@ -2754,26 +2754,41 @@ const Critter = {
     if (!e) {
       e = this.sheets[spec.sheet] = { img: new Image(), ok: false };
       e.img.onload = () => { e.ok = true; };
-      e.img.src = spec.sheet;
+      e.img.src = `${spec.sheet}?v=${GAME_V}`;
     }
     return e.ok ? e.img : null;
   },
+  // anim: hop 깡총 (토끼: 0 앉기, 1 귀 까딱, 2 웅크림, 3 공중, 4 착지, 5 맞음)
+  //       walk 걷기 / fly 날기 / swim 헤엄 (0 가만히, 1 눈 깜빡, 2~4 걸음/날갯짓/꼬리 한 바퀴, 5 맞음)
+  // sh: 그림 높이 (24 = 몸 크기), pad: 시트 아래 여백(px, 발바닥 맞추기)
   sprite(c, st) {
-    const img = this.sheetImg(st.spec), FW = img.width / 6, FH = img.height;
+    const sp = st.spec, img = this.sheetImg(sp), FW = img.width / 6, FH = img.height, anim = sp.anim || 'walk';
     let f, lift = 0, sx = 1, sy = 1;
     if (st.hurt) f = 5;
-    else if (!st.mv) { f = st.blink ? 0 : Math.floor(st.time / 0.9) % 2; sy = 1 + Math.sin(st.time * 2.4) * 0.015; }
-    else {
-      const p = (((st.ph / (Math.PI * 2)) % 1) + 1) % 1;   // 깡총 한 번
-      if (p < 0.22) { f = 2; sy = 0.96; sx = 1.03; }
-      else if (p < 0.72) { f = 3; lift = Math.sin((p - 0.22) / 0.5 * Math.PI) * 2.5; }
-      else { f = 4; sy = 0.97; sx = 1.02; }
+    else if (anim === 'hop') {
+      if (!st.mv) { f = st.blink ? 0 : Math.floor(st.time / 0.9) % 2; sy = 1 + Math.sin(st.time * 2.4) * 0.015; }
+      else {
+        const p = (((st.ph / (Math.PI * 2)) % 1) + 1) % 1;   // 깡총 한 번
+        if (p < 0.22) { f = 2; sy = 0.96; sx = 1.03; }
+        else if (p < 0.72) { f = 3; lift = Math.sin((p - 0.22) / 0.5 * Math.PI) * 2.5; }
+        else { f = 4; sy = 0.97; sx = 1.02; }
+      }
+    } else {
+      // 걷는 것은 가만히 있으면 숨쉬기 + 깜빡, 나는 것/헤엄치는 것은 가만히 있어도 계속 날갯짓/꼬리질 (조금 느리게)
+      const still = !st.mv && anim === 'walk';
+      if (still) { f = st.blink ? 1 : 0; sy = 1 + Math.sin(st.time * 2.4) * 0.02; }
+      else {
+        const p = st.mv ? (((st.ph / (Math.PI * 2)) % 1) + 1) % 1 : (st.time * 1.5) % 1;
+        f = st.blink && !st.mv ? 1 : [2, 3, 4, 3][Math.floor(p * 4) % 4];
+        if (anim === 'walk') lift = Math.abs(Math.sin(p * Math.PI * 2)) * 0.8;
+        else lift = Math.sin(p * Math.PI * 2) * (anim === 'fly' ? 1.5 : 0.8);
+      }
     }
-    const h = 33, w = h * FW / FH;   // 24 칸 기준 (원점 = 발바닥)
+    const h = sp.sh || 30, w = h * FW / FH, pad = sp.pad == null ? 4 : sp.pad;   // 24 칸 기준 (원점 = 발바닥)
     c.save();
     c.translate(0, -lift); c.scale(sx, sy);
     c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
-    c.drawImage(img, f * FW, 0, FW, FH, -w / 2, -h + h * 5 / FH, w, h);
+    c.drawImage(img, f * FW, 0, FW, FH, -w / 2, -h + h * pad / FH, w, h);
     c.restore();
   },
 
