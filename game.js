@@ -475,7 +475,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 124;
+const GAME_V = 125;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -520,7 +520,7 @@ const TabStore = {
 };
 
 // room: 지난번 방 번호 { host: 내가 만든 방, join: 들어간 방 } (새로고침해도 같은 번호로)
-const KEYS = { quiz: 'bc.quiz', room: 'bc.room', settings: 'bc.settings', stats: 'bc.stats', log: 'bc.log', csv: 'bc.wordsCsv', look: 'bc.look', name: 'bc.name', world: 'bc.world' };
+const KEYS = { quiz: 'bc.quiz', room: 'bc.room', settings: 'bc.settings', stats: 'bc.stats', log: 'bc.log', csv: 'bc.wordsCsv', look: 'bc.look', name: 'bc.name', gender: 'bc.gender', world: 'bc.world' };
 
 const Store = {
   settings: null,
@@ -3671,7 +3671,7 @@ const TitleScene = {
     // 내 캐릭터 (게임 그림 그대로)
     const saved = Render.ctx;
     Render.ctx = c;
-    try { Render.drawCharacter({ ...this.hero, y: -6 }, LOOKS[Game.lookIndex ?? 0] || LOOKS[0], 'sword', '', true, null, ['shield']); }
+    try { Render.drawCharacter({ ...this.hero, y: -6 }, Multi.myLook(), 'sword', '', true, null, ['shield']); }
     finally { Render.ctx = saved; }
     // 효과: 별, 연기, 반짝
     for (const p of this.parts) {
@@ -6269,6 +6269,135 @@ const LOOKS = [
   { shirt: '#26a69a', hair: '#212121', pants: '#6d4c41', hat: { type: 'wreath' }, style: 'bob' },
   { shirt: '#ffb74d', hair: '#8d6e63', pants: '#3949ab', hat: { type: 'band', color: '#f06292' }, style: 'long' },
 ];
+// 그림 캐릭터 (이미지 생성으로 만든 머리/몸/다리 부품, sprites/chars/<id>). h: 게임 속 키 (월드 px)
+// hair: 머리색 고정 (지율), fixed: 색 안 바꿈 (공주 드레스)
+// 되돌리기: heroSetFor 가 null 을 돌려주면 예전 코드 캐릭터(drawChibi)로 그린다
+const HERO_SETS = { jiyul: { h: 34, hair: '#212121' }, princess: { h: 32, fixed: true }, boy: { h: 38 }, girl: { h: 38 } };
+function heroSetFor(name, gender) {
+  const n = String(name || '').trim();
+  if (gender === 'm') return n === '지율' ? 'jiyul' : 'boy';
+  if (gender === 'f') return n === '해인' ? 'princess' : 'girl';
+  return null;
+}
+const Hero = {
+  sets: {},
+  // 다 받았으면 그 세트, 아니면 null (처음 부르면 받기 시작)
+  get(id) {
+    let s = this.sets[id];
+    if (!s) {
+      s = this.sets[id] = { ok: false, info: null, cache: new Map() };
+      const dir = `sprites/chars/${id}/`;
+      const load = f => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = `${dir}${f}?v=${GAME_V}`; });
+      fetch(`${dir}hero.json?v=${GAME_V}`).then(r => r.json()).then(async info => {
+        const jobs = [];
+        for (const v of Object.values(info)) for (const p of Object.values(v)) if (p && p.img) {
+          p.lay = {};
+          jobs.push(load(p.img).then(i => { p.im = i; }));
+          for (const [k, f] of Object.entries(p.layers)) jobs.push(load(f).then(i => { p.lay[k] = i; }));
+        }
+        await Promise.all(jobs);
+        s.info = info;
+        s.ok = true;
+        if (Game.state === 'title') Render.drawLookPreview();
+      }).catch(err => console.warn('[Hero] 그림을 못 받음', id, err));
+    }
+    return s.ok ? s : null;
+  },
+  // 부품 하나를 옷 색으로 칠해서 담아 둔다. fx: '' | 'dark' (옆모습 뒤쪽 다리) | 'red' (맞음)
+  part(s, p, col, fx) {
+    const key = p.img + (col ? col.shirt + col.pants + col.hair : '') + fx;
+    let cv = s.cache.get(key);
+    if (cv) return cv;
+    const W = p.im.width, H = p.im.height;
+    cv = document.createElement('canvas');
+    cv.width = W; cv.height = H;
+    const c = cv.getContext('2d');
+    if (col) for (const [k, im] of Object.entries(p.lay)) {
+      const t = document.createElement('canvas');
+      t.width = W; t.height = H;
+      const g = t.getContext('2d');
+      g.drawImage(im, 0, 0);
+      g.globalCompositeOperation = 'multiply'; g.fillStyle = col[k]; g.fillRect(0, 0, W, H);
+      g.globalCompositeOperation = 'destination-in'; g.drawImage(im, 0, 0);
+      c.drawImage(t, 0, 0);
+    }
+    else for (const im of Object.values(p.lay)) c.drawImage(im, 0, 0);
+    c.drawImage(p.im, 0, 0);
+    if (fx) {
+      c.globalCompositeOperation = 'source-atop';
+      c.fillStyle = fx === 'red' ? 'rgba(255,60,60,.55)' : 'rgba(40,20,10,.16)';
+      c.fillRect(0, 0, W, H);
+    }
+    s.cache.set(key, cv);
+    return cv;
+  },
+  // 월드 좌표 (gy = 발바닥). 그림이 아직 없으면 false (예전 캐릭터로)
+  draw(c, x, gy, dir, e, look, wear, hat, flash, id) {
+    const s = id && HERO_SETS[id] && this.get(id);
+    if (!s) return false;
+    const cfg = HERO_SETS[id], view = dir === 'up' ? 'back' : dir === 'down' ? 'front' : 'side';
+    const V = s.info[view], k = cfg.h / -s.info.front.head.y;
+    const vest = wear.includes('vest');
+    const col = cfg.fixed ? null : { shirt: vest ? '#a8723f' : look.shirt, pants: look.pants, hair: cfg.hair || look.hair };
+    const fx = flash ? 'red' : '';
+    const mv = e.moving, w = mv ? Math.sin((e.walkT || 0) * 12) : 0;
+    const now = performance.now() / 1000;
+    const bob = mv ? Math.abs(w) * 4 : Math.sin(now * 1.7) * 1.2;
+    c.save();
+    c.translate(x, gy);
+    if (dir === 'right') c.scale(-1, 1); // 옆모습은 왼쪽 보기 그림, 오른쪽은 거울로
+    c.scale(k, k);
+    c.imageSmoothingEnabled = true;
+    c.imageSmoothingQuality = 'high';
+    // 다리: 앞/뒤는 왼다리 오른다리를 번갈아 들고, 옆은 엉덩이를 축으로 앞뒤로 흔든다
+    const L = V.legs;
+    if (view === 'side') {
+      const hx = L.x + L.w / 2, hy = L.y + 6, a = w * 0.22;
+      for (const [ang, f] of [[a, 'dark'], [-a, '']]) {
+        c.save();
+        c.translate(hx, hy); c.rotate(ang); c.translate(-hx, -hy);
+        c.drawImage(this.part(s, L, col, fx || f), L.x, L.y, L.w, L.h);
+        c.restore();
+      }
+    } else {
+      const img = this.part(s, L, col, fx);
+      for (const sd of [-1, 1]) {
+        const lift = Math.max(0, w * sd) * 8;
+        c.save();
+        c.beginPath();
+        if (sd < 0) c.rect(L.x - 2, L.y - 15, -L.x + 2, L.h + 18); else c.rect(0, L.y - 15, L.x + L.w + 2, L.h + 18);
+        c.clip();
+        c.drawImage(img, L.x, L.y - lift, L.w, L.h - lift * 0.3);
+        c.restore();
+      }
+    }
+    const B = V.body;
+    c.drawImage(this.part(s, B, col, fx), B.x, B.y - bob, B.w, B.h);
+    // 머리: 목을 축으로 살짝 까딱
+    const Hd = V.head, tilt = mv ? w * 0.035 : Math.sin(now * 1.3) * 0.02;
+    c.translate(0, V.neck - bob * 1.1); c.rotate(tilt); c.translate(0, -V.neck);
+    c.drawImage(this.part(s, Hd, col, fx), Hd.x, Hd.y, Hd.w, Hd.h);
+    // 쓴 모자/왕관: 머리 꼭대기에 (예전 캐릭터 모자 그림을 머리 크기에 맞게 키워서)
+    if (hat) {
+      c.translate(0, Hd.y + Hd.h * 0.12);
+      const hk = (Hd.w / 1.75) / 10.5;
+      c.scale(hk, hk);
+      c.lineJoin = 'round'; c.lineCap = 'round'; c.lineWidth = 0.6;
+      const OL = flash ? '#b71c1c' : '#5a4032';
+      Render.drawChibiHat(c, hat, 8.4, view === 'side', view === 'back', v => (flash ? '#ff6b6b' : v), OL);
+    }
+    c.restore();
+    return true;
+  },
+};
+// 옷 색(LOOKS) + 그림 캐릭터 이름. 같은 것은 같은 물건으로 (매번 새로 만들지 않게)
+const lookMemo = new Map();
+function lookWith(i, hero) {
+  const key = i + '|' + hero;
+  let v = lookMemo.get(key);
+  if (!v) { v = { ...(LOOKS[i] || LOOKS[0]), hero }; lookMemo.set(key, v); }
+  return v;
+}
 const STATUS_ICONS = { card: '📖', craft: '🔨', faint: '💫' };
 const STATION_EMOJI = { tent: '⛺', forge: '⚒️' };
 
@@ -6276,7 +6405,7 @@ const STATION_EMOJI = { tent: '⛺', forge: '⚒️' };
 function makeRemote() {
   return {
     x: 0, y: 0, tx: 0, ty: 0, dir: 'down', moving: false, walkT: 0, swingT: 0, invulnT: 0, hitT: 0, seen: false,
-    name: '', hearts: CONFIG.MAX_HEARTS, st: 'play', held: 'hand', lk: 0, lastSeq: 0, lastSeen: 0,
+    name: '', hearts: CONFIG.MAX_HEARTS, st: 'play', held: 'hand', lk: 0, g: null, lastSeq: 0, lastSeen: 0,
   };
 }
 function followRemote(e, dt) {
@@ -6307,10 +6436,11 @@ const Multi = {
   get online() { return this.mode !== 'solo'; },
 
   // 내 모양 / 다른 사람 모양 (나와 같은 모양이면 다음 모양으로 보여줘서 구분되게)
-  myLook() { return LOOKS[Game.lookIndex]; },
+  // hero: 이름 + 남/여로 고른 그림 캐릭터 (지율/해인/남자/여자, 고르기 전이면 예전 캐릭터)
+  myLook() { return lookWith(Game.lookIndex ?? 0, heroSetFor(Game.playerName, Game.gender)); },
   peerLook(p) {
     const i = p.lk % LOOKS.length;
-    return LOOKS[i === Game.lookIndex ? (i + 1) % LOOKS.length : i];
+    return lookWith(i === Game.lookIndex ? (i + 1) % LOOKS.length : i, heroSetFor(p.name, p.g));
   },
 
   visiblePeers() { return [...this.peers.values()].filter(p => p.seen); },
@@ -6656,6 +6786,7 @@ const Multi = {
       h: this.beat,
       n: Game.playerName,
       lk: Game.lookIndex,
+      g: Game.gender,
       wr: wornList(Game.equip),
       st: Game.state,
       p: [r(Player.x), r(Player.y), DIRS.indexOf(Player.dir), Player.moving ? 1 : 0,
@@ -6724,6 +6855,7 @@ const Multi = {
     if (p.beat !== d.h) { p.beat = d.h; p.lastSeen = performance.now(); }
     p.name = String(d.n || '').slice(0, CONFIG.NAME_MAX);
     p.lk = d.lk || 0;
+    p.g = d.g === 'm' || d.g === 'f' ? d.g : null;
     p.wear = Array.isArray(d.wr) ? d.wr.filter(id => ITEMS[id] && ['wear', 'gear'].includes(ITEMS[id].kind)).slice(0, 5) : [];
     p.st = d.st;
     p.tx = pos[0];
@@ -7618,20 +7750,21 @@ const Render = {
     const hitT = e.hitT || 0;
     const x = e.x + (hitT > 0 ? Math.sin(hitT * 80) * 2.5 : 0);
     const flash = hitT > 0 && Math.floor(hitT * 20) % 2 === 0;
-    const top = y + 6 - 32;
+    const heroH = look.hero && Hero.get(look.hero) ? HERO_SETS[look.hero].h : 0;
+    const top = y + 6 - (heroH ? heroH + 1 : 32);
     const blink = hitT <= 0 && e.invulnT > 0 && Math.floor(e.invulnT * 10) % 2;
 
     // 그림자는 땅(도트 세상)에
     this.softShadow(e.x, e.y + 6, 10 - jumpH * 0.2, 3.4, 0.3);
 
     const headWear = { crown: { type: 'crown' }, hat: { type: 'leather' } }[wear.find(id => ITEMS[id]?.slot === 'head')];
-    const hat = headWear || look.hat;
+    const hat = heroH ? headWear : headWear || look.hat; // 그림 캐릭터는 제 머리 모양 그대로 (쓴 것만)
 
     // 몸은 화면 해상도로 매끈하게 (둥근 얼굴, 큰 눈)
     this.hd(c => {
       c.save();
       if (blink) c.globalAlpha *= 0.4;
-      this.drawChibi(c, x, y + 6, dir, e, look, wear, hat, flash);
+      if (!Hero.draw(c, x, y + 6, dir, e, look, wear, hat, flash, look.hero)) this.drawChibi(c, x, y + 6, dir, e, look, wear, hat, flash);
 
       if (e.swingT > 0) {
         const k = e.swingT / 0.25;
@@ -7974,7 +8107,7 @@ const Render = {
     const saved = this.ctx;
     this.ctx = c.getContext('2d');
     this.ctx.setTransform(2.4 * dpr, 0, 0, 2.4 * dpr, 0, 0);
-    this.drawCharacter({ x: 15, y: 34, dir: 'down', moving: false, walkT: 0, swingT: 0 }, LOOKS[Game.lookIndex], 'hand', '');
+    this.drawCharacter({ x: 15, y: 34, dir: 'down', moving: false, walkT: 0, swingT: 0 }, Multi.myLook(), 'hand', '');
     this.ctx = saved;
   },
 
@@ -8072,6 +8205,7 @@ const Game = {
   busy: false, // 칸 바꾸기 답을 기다리는 중
   hearts: CONFIG.MAX_HEARTS,
   lookIndex: 0,
+  gender: null, // 'm' | 'f' (시작 화면에서 고른다)
   playerName: '',
   kills: 0,
   wasOnDoor: false,
@@ -8153,7 +8287,7 @@ const Game = {
 
   // 시작 버튼을 눌렀을 때 바로 (소리 권한은 누른 순간에 받아야 한다). 이름이 없으면 시작하지 않는다
   prepare() {
-    if (this.state !== 'title' || !this.readName()) return false;
+    if (this.state !== 'title' || !this.readName() || !this.readGender()) return false;
     this.state = 'starting';
     Sfx.unlock();
     Speech.unlock();
@@ -8202,11 +8336,43 @@ const Game = {
     const input = $('#name-input');
     input.maxLength = CONFIG.NAME_MAX;
     input.value = TabStore.get(KEYS.name, null) || Store.get(KEYS.name, '') || '';
+    // 미리보기 캐릭터가 이름을 따라 바뀌게 (지율/해인)
+    this.playerName = input.value.trim();
+    input.addEventListener('input', () => { this.playerName = input.value.trim(); Render.drawLookPreview(); });
+    this.initGender();
     // 글자를 칠 때 WASD/스페이스가 게임 조작으로 가지 않게
     input.addEventListener('keydown', e => {
       e.stopPropagation();
       if (e.key === 'Enter') input.blur();
     });
+  },
+
+  // 남자/여자: 이 탭과 이 기기에 저장. 고르기 전에는 시작하지 않는다
+  initGender() {
+    const g = TabStore.get(KEYS.gender, null) ?? Store.get(KEYS.gender, null);
+    this.gender = g === 'm' || g === 'f' ? g : null;
+    const show = () => {
+      for (const b of document.querySelectorAll('.gender-btn')) b.classList.toggle('on', b.dataset.g === this.gender);
+    };
+    for (const b of document.querySelectorAll('.gender-btn')) b.addEventListener('click', () => {
+      this.gender = b.dataset.g;
+      Store.set(KEYS.gender, this.gender);
+      TabStore.set(KEYS.gender, this.gender);
+      show();
+      Render.drawLookPreview();
+      Sfx.unlock();
+      Sfx.pickup();
+    });
+    show();
+  },
+
+  readGender() {
+    if (this.gender) return true;
+    const box = $('#gender-pick');
+    box.classList.remove('shake');
+    void box.offsetWidth; // 애니메이션 다시 시작
+    box.classList.add('shake');
+    return false;
   },
 
   readName() {

@@ -643,6 +643,17 @@ body:not(.touch) #btn-talk::after { content: 'C'; }
 }
 .name-input::placeholder { color: #bbb; }
 .name-input.shake { animation: shake .45s; border-color: #e53935; }
+/* 남자 / 여자 고르기 (고른 쪽이 밝게) */
+.gender-pick { display: flex; gap: 14px; justify-content: center; }
+.gender-btn {
+  width: 64px; height: 56px; font-size: 32px; line-height: 1;
+  background: #eceff1; border: 4px solid #90a4ae; border-radius: 14px;
+  opacity: .55; cursor: pointer; touch-action: manipulation;
+}
+.gender-btn.on { opacity: 1; border-color: #4e342e; background: #fff8e1; box-shadow: 0 4px 0 #4e342e; }
+.gender-pick.shake { animation: shake .45s; }
+.gender-pick.shake .gender-btn { border-color: #e53935; }
+@media (max-height: 500px) { .gender-btn { width: 52px; height: 42px; font-size: 24px; } }
 
 /* ---------- 원격 2인용 ---------- */
 .mp-panel {
