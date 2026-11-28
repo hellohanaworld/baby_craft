@@ -475,7 +475,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 135;
+const GAME_V = 136;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -3854,7 +3854,7 @@ PixelSprite.init();
 const TileArt = {
   NAMES: ['tree0', 'tree1', 'tree2', 'sapling', 'gold_tree', 'lock_tree', 'rock0', 'rock1', 'rock2',
     'flower_red', 'flower_yellow', 'flower_pink', 'brick', 'gate', 'torch', 'thorn', 'chest',
-    'clover0', 'clover1', 'lucky0', 'lucky1', 'tent', 'forge', 'bridge'],
+    'clover0', 'clover1', 'lucky0', 'lucky1', 'tent', 'forge', 'bridge', 'house', 'rockfill'],
   img: {},
   started: false,
   start() {
@@ -5063,6 +5063,25 @@ const World = {
       case TILE.ROCK: {
         grass();
         path('rgba(0,0,0,.18)', oval(16, 28.5, 12, 2.5), null);
+        // 바위 칸은 꽉 채운 돌무더기 무늬 (옆 바위 칸과 이어진다). 바위가 없는 쪽 모서리만 둥글게
+        if (TileArt.img.rockfill) {
+          const R = t => this.tile(x + t[0], y + t[1]) === TILE.ROCK;
+          const u = R([0, -1]), d = R([0, 1]), lf = R([-1, 0]), rt = R([1, 0]), rad = 11;
+          g.save(); g.beginPath();
+          g.roundRect(X, Y, T, T, [!u && !lf ? rad : 0, !u && !rt ? rad : 0, !d && !rt ? rad : 0, !d && !lf ? rad : 0]);
+          g.clip();
+          // 그림 한 장 = 2 x 2 칸 (돌이 크게 보인다, 2칸마다 되풀이되어 이어진다)
+          const im = TileArt.img.rockfill, hw = im.width / 2, hh = im.height / 2;
+          g.drawImage(im, (x & 1) * hw, (y & 1) * hh, hw, hh, X, Y, T, T);
+          // 바위가 없는 쪽 가장자리: 아래/오른쪽은 그늘, 위/왼쪽은 밝게 (솟아 보인다)
+          const edge = (on, x0, y0, x1, y1, c) => { if (on) return; const gg = g.createLinearGradient(X + x0, Y + y0, X + x1, Y + y1); gg.addColorStop(0, c); gg.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gg; g.fillRect(X, Y, T, T); };
+          edge(d, 0, T, 0, T - 7, 'rgba(40,30,30,.45)');
+          edge(rt, T, 0, T - 5, 0, 'rgba(40,30,30,.3)');
+          edge(u, 0, 0, 0, 5, 'rgba(255,255,255,.35)');
+          edge(lf, 0, 0, 4, 0, 'rgba(255,255,255,.2)');
+          g.restore();
+          break;
+        }
         if (TileArt.draw(g, X, Y, `rock${Math.floor(r(5) * 3) % 3}`, 30, 27, 30.5)) break;
         g.beginPath();
         g.moveTo(X + 4, Y + 26); g.bezierCurveTo(X + 1, Y + 16, X + 6, Y + 7, X + 14, Y + 7);
@@ -5250,6 +5269,14 @@ const World = {
   // 집 (3 x 3 칸): 나무 판자 벽 + 빨간 기와 지붕 + 창문 + 문 + 꽃 상자
   drawHouseHD(g) {
     const X = this.house.x * T, Y = this.house.y * T, W3 = 3 * T, OL = '#5a4032';
+    // 3D 장난감 집 그림: 3칸 폭(양옆 8px 더), 위로 한 칸까지. 문이 아래 가운데 (문 칸에 맞는다)
+    const art = TileArt.img.house;
+    TileArt.start();
+    if (art) {
+      const k = Math.min((W3 + 16) / art.width, (W3 + T - 4) / art.height), w = art.width * k, h = art.height * k;
+      g.drawImage(art, X + W3 / 2 - w / 2, Y + W3 + 1 - h, w, h);
+      return;
+    }
     g.lineJoin = 'round';
     const lin = (y0, y1, c0, c1) => { const gg = g.createLinearGradient(0, Y + y0, 0, Y + y1); gg.addColorStop(0, c0); gg.addColorStop(1, c1); gg._base = c1; return gg; };
     const rr = (x0, y0, w, h, r, fill, lw = 0.8) => { g.beginPath(); g.roundRect(X + x0, Y + y0, w, h, r); g.fillStyle = fill; g.fill(); if (lw) { g.strokeStyle = inkOf(fill); g.lineWidth = lw; g.stroke(); } };
