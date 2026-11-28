@@ -475,7 +475,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 129;
+const GAME_V = 130;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -10375,7 +10375,7 @@ const Buddy = {
     const t = this.task;
     // 위험: 아이 둘레 몬스터가 먼저 (아이에게 가까운 순), 그다음 나를 쫓는 몬스터
     // (아이에게 가는 길에는 바로 붙은 것만 상대한다)
-    const near = this.dist(a, me) < 8 * T ? 4 : 2;
+    const near = this.dist(a, me) < 8 * T ? 4 : 1.2; // 아이가 멀면 내 몸에 붙은 것만 상대하고 아이에게 간다
     const threats = Monsters.list.filter(m => !m.def.calm && !m.owner && (this.dist(m, a) < 6 * T || this.dist(m, me) < near * T));
     const threat = threats.sort((x, y) => this.dist(x, a) - this.dist(y, a))[0];
     if (threat) {
@@ -10405,6 +10405,11 @@ const Buddy = {
     // 아이 곁에 붙어 있는다 (짓는 중에는 재료를 캐러 조금 더 멀리까지)
     if (this.dist(a, me) > (this.project ? 7 : 4) * T || this.restT > 0) { if (!t) this.start('follow', {}, 4); return; }
 
+    // 아이가 짓던 곳에서 멀어졌으면 (가운데가 7칸 밖) 그만두고, 나중에 아이 곁에서 새로 짓는다
+    if (this.project && a !== this.home) {
+      const pr = this.project, cx = (pr.ox + pr.w / 2) * T, cy = (pr.oy + pr.h / 2) * T;
+      if (Math.hypot(a.x - cx, a.y - cy) > 7 * T) { this.project = null; this.projectT = 8; }
+    }
     // 짓는 중이면 대부분 그걸 이어서 한다
     if (!this.project && this.projectT <= 0) this.startProject(a);
     if (this.project && Math.random() < 0.6 && this.projectStep(a)) return;
@@ -10682,6 +10687,8 @@ const Buddy = {
   // 사람처럼: 휘두르는 틈을 두고, 맞으면 잠깐 물러서고, 하트가 적으면 도망친다 (아이가 바로 위험하면 그래도 싸운다)
   hunt(t) {
     const m = t.m, a = this.anchor(), kid = a !== this.home ? a : null;
+    const leave = kid && this.dist(kid, Player) > 10 * T && this.dist(m, kid) > 6 * T; // 아이가 멀어졌다: 아이에게
+    if (leave) { this.done(); this.start('follow', {}, 4); return; }
     if (!Monsters.list.includes(m) || (this.dist(m, a) > 7 * T && this.dist(m, Player) > 4 * T)) {
       if (Monsters.list.includes(m)) { this.done(); return; }
       this.done(kid && this.dist(kid, Player) < 6 * T ? (Math.random() < 0.5 ? '👍' : '😎') : '👍');
@@ -11084,7 +11091,12 @@ const Buddy = {
   },
 
   // 내가 주워도 되는 것: 없다 (떨어진 것은 모두 아이에게 양보)
-  mayTake() { return false; },
+  // 놀아주기 중에는 아이에게 양보하지만, ❤️ 하트는 아이가 다치지 않았거나 멀리(4칸 밖) 있으면 내가 먹는다
+  mayTake(it) {
+    if (it.type !== 'heart') return false;
+    const f = this.friend();
+    return !f || f.hearts >= CONFIG.MAX_HEARTS || this.dist(f, it) > 4 * T;
+  },
 
   // 떨어진 것 옆에 가서 아이를 보며 👉 (아이가 주우면 😄)
   show(t) {
