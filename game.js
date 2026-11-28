@@ -163,6 +163,7 @@ const WEAPONS = {
   axe:   { emoji: '🪓', ko: '도끼', en: 'axe',   power: 2, icon: 'AXE',   kind: 'weapon', slot: 'weapon', stats: { atk: 5 } },
   bow:   { emoji: '🏹', ko: '활',   en: 'bow',   power: 3, icon: 'BOW',   kind: 'weapon', slot: 'weapon', stats: { crit: 5 } },
   sword: { emoji: '🗡️', ko: '칼',   en: 'sword', power: 4, icon: 'SWORD', kind: 'weapon', slot: 'weapon', stats: { atk: 10 } },
+  staff: { emoji: '🪄', ko: '지팡이', en: 'staff', power: 3, icon: 'STAFF', kind: 'weapon', slot: 'weapon', stats: { atk: 8 } }, // 🔮 마법사: 따라가는 마법 구슬
 };
 
 // 제작대 레시피 (1탄 집 안, 2탄 ⛺ 텐트, 3탄 ⚒️ 대장간). unlock: 몬스터를 이만큼 잡아야 열린다.
@@ -171,6 +172,7 @@ const WEAPONS = {
 const RECIPES = [
   { result: 'axe',    needs: { wood: 2, stone: 1 },            unlock: 0 },
   { result: 'bow',    needs: { wood: 1, string: 2 },           unlock: 1 },
+  { result: 'staff',  needs: { wood: 2, flower: 2 },           unlock: 1 },
   { result: 'sword',  needs: { stone: 2, wood: 1, leather: 1 }, unlock: 2 }, // 돌 칼날 + 가죽 손잡이
   { result: 'shield', needs: { wood: 2, leather: 2 },          unlock: 1 },
   { result: 'hat',    needs: { leather: 2 },                   unlock: 0 },
@@ -482,7 +484,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 143;
+const GAME_V = 144;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -1807,6 +1809,7 @@ const Craft = {
       // 무기/방패/옷: 보통 등급 장비 하나. 그 곳이 비었거나 지금 것보다 좋으면 바로 입는다 (무기는 손에 든다)
       const g = makeGear(0, r.result), id = `g:${g.u}`;
       Game.addGear(g);
+      Game.gainXp(10);
       if (!Game.equip[w.slot] || Game.better(id)) Game.wear(id, false);
     } else {
       Game.inventory[r.result] = (Game.inventory[r.result] || 0) + (r.count || 1);  // 블록/음식/물약은 가방에 (손에 든 것은 그대로)
@@ -1933,6 +1936,45 @@ const WEAR_SLOTS = [
   { slot: 'arm', ko: '방패', en: 'Shield' },
   { slot: 'acc', ko: '장신구', en: 'Charm' },
 ];
+// ⭐ 레벨 (2-1): 몹을 잡으면 경험치. 레벨이 오르면 하트 + 공격, 새 스킬
+const LEVEL_MAX = 30;
+const xpNeed = lv => 20 + lv * 15;                 // 다음 레벨까지 경험치
+const STAGE_LV = [1, 5, 10, 15, 20, 25];           // 탄마다 추천 레벨
+const stageMul = st => 1 + 0.35 * (st || 0);       // 높은 탄일수록 몹 체력 (1탄 1배 ~ 6탄 2.75배)
+const mobMaxHp = (def, x, y) => (def.boss || x == null ? def.hp : Math.max(1, Math.round(def.hp * stageMul(World.stageAtPx(x, y)))));
+// 🛡️🏹🔮 직업 (2-2): 처음에 고르고, 집 앞에서 바꾼다. 자기 직업 무기가 아니면 힘이 60%
+const CLASSES = {
+  knight: { emoji: '🛡️', ko: '기사',   en: 'Knight', weapons: ['sword', 'axe'], start: 'sword', stats: { block: 15 }, hearts: 1,
+    desc: ['앞을 넓게 베요 · 하트 +1 · 막기 +15%', 'Wide swings · +1 heart · Block +15%'] },
+  hunter: { emoji: '🏹', ko: '사냥꾼', en: 'Hunter', weapons: ['bow'], start: 'bow', stats: { crit: 10, spd: 10 }, hearts: 0,
+    desc: ['멀리서 화살 · 치명타 +10% · 빠르기 +10%', 'Arrows from afar · Crit +10% · Speed +10%'] },
+  mage:   { emoji: '🔮', ko: '마법사', en: 'Mage', weapons: ['staff'], start: 'staff', stats: { atk: 15 }, hearts: 0,
+    desc: ['따라가는 마법 구슬 · 공격 +15%', 'Homing magic orbs · Attack +15%'] },
+};
+// ✨ 스킬 (2-3): 직업마다 4개, 레벨 1 / 3 / 6 / 10 에 열린다. mp: 💧 마나, cd: 다시 쓰기까지 초
+const SKILLS = {
+  knight: [
+    { id: 'dash',  icon: '💨', ko: '돌진',     en: 'Dash',      lv: 1,  mp: 15, cd: 4 },
+    { id: 'whirl', icon: '🌀', ko: '회전 베기', en: 'Whirl',     lv: 3,  mp: 25, cd: 6 },
+    { id: 'wall',  icon: '🧱', ko: '철벽',     en: 'Iron wall', lv: 6,  mp: 20, cd: 14 },
+    { id: 'aegis', icon: '🌟', ko: '무적',     en: 'Invincible', lv: 10, mp: 50, cd: 25 },
+  ],
+  hunter: [
+    { id: 'multi', icon: '🎯', ko: '세 발',    en: 'Triple',    lv: 1,  mp: 12, cd: 2.5 },
+    { id: 'trap',  icon: '🕸️', ko: '덫',       en: 'Trap',      lv: 3,  mp: 20, cd: 8 },
+    { id: 'hawk',  icon: '🦅', ko: '매의 눈',  en: 'Hawk eye',  lv: 6,  mp: 20, cd: 14 },
+    { id: 'rain',  icon: '🌧️', ko: '화살비',   en: 'Arrow rain', lv: 10, mp: 50, cd: 20 },
+  ],
+  mage: [
+    { id: 'fire',  icon: '🔥', ko: '불꽃',     en: 'Fire',      lv: 1,  mp: 18, cd: 5 },
+    { id: 'frost', icon: '❄️', ko: '얼음',     en: 'Frost',     lv: 3,  mp: 22, cd: 7 },
+    { id: 'blink', icon: '💫', ko: '순간이동', en: 'Blink',     lv: 6,  mp: 15, cd: 6 },
+    { id: 'bolt',  icon: '⚡', ko: '번개',     en: 'Lightning', lv: 10, mp: 45, cd: 15 },
+  ],
+};
+const SKILL_KEYS = ['KeyZ', 'KeyX', 'KeyV', 'KeyR'];
+const MP_MAX = 100;
+
 // ⚔️ 장비 능력치 (%): 공격 힘 / 막기(맞아도 안 다칠 확률) / 빠르기 / 치명타 (기본 CRIT_CHANCE 에 더한다)
 const STATS = [
   { key: 'atk',   icon: '⚔️', ko: '공격', en: 'Attack' },
@@ -1941,12 +1983,11 @@ const STATS = [
   { key: 'crit',  icon: '💥', ko: '치명타', en: 'Crit' },
   { key: 'vamp',  icon: '💖', ko: '회복', en: 'Life' }, // 잡으면 하트 하나 찰 확률
 ];
-const BLOCK_MAX = 60; // 막기는 이만큼까지만
+const BLOCK_MAX = 60; // 막기는 이만큼까지만 (🧱 철벽 중에는 85)
 // 입은 것들의 능력치 합
 function gearStats(equip) {
   const st = { atk: 0, block: 0, spd: 0, crit: 0, vamp: 0 };
   for (const id of Object.values(equip || {})) for (const [k, v] of Object.entries((itemDef(id) || {}).stats || {})) st[k] = (st[k] || 0) + v;
-  st.block = Math.min(BLOCK_MAX, st.block);
   return st;
 }
 // ---------- 💎 전리품 장비 (디아블로처럼): 등급 + 무작위 능력치. 가방에는 'g:번호' 로 적는다 ----------
@@ -1957,7 +1998,7 @@ const RARITY = [
   { ko: '전설', en: 'Legendary', c: '#ff9800', extra: 3, mul: 1.8 },
 ];
 const LOOT_BEAM = [null, '#1e88e5', '#ffb300', '#ff6d00']; // 바닥 빛기둥 색 (진하게)
-const LOOT_BASES = ['hat', 'vest', 'boots', 'ring', 'amulet', 'crown', 'shield', 'axe', 'bow', 'sword'];
+const LOOT_BASES = ['hat', 'vest', 'boots', 'ring', 'amulet', 'crown', 'shield', 'axe', 'bow', 'sword', 'staff'];
 const baseDef = b => ITEMS[b] || (b !== 'hand' && WEAPONS[b]) || null;
 const AFFIX = { atk: [5, 12], block: [4, 9], spd: [4, 9], crit: [3, 7], vamp: [5, 12] }; // 덧붙는 능력치 [최소, 최대] × 등급 배수
 const AFFIX_NAME = { atk: ['힘센', 'Mighty'], block: ['튼튼한', 'Sturdy'], spd: ['날쌘', 'Swift'], crit: ['날카로운', 'Keen'], vamp: ['생명의', 'Living'] };
@@ -2596,6 +2637,13 @@ const HD_ICONS = {
     bar([[7, 11.2], [12.8, 17]], 1.9, '#fbc02d', '#f9a825');
     bar([[9.6, 14.4], [5.4, 18.6]], 1.9, '#8d5a2b', '#6d4321');
     P(ell(4.8, 19.2, 1.5, 1.5), '#fbc02d', { base: '#f9a825', lw: 0.6 });
+  },
+  STAFF: ({ g, L, P, B, ell, bar, shine }) => {
+    // 나무 막대 + 위에 빛나는 보라 구슬
+    bar([[5, 20], [15.4, 8.8]], 2.2, '#a1683a', '#6d4321');
+    P(ell(16.8, 7.2, 4.4, 4.4), B(16, 6, 5, '#f3e5f5', '#ab47bc', '#4a148c'), { base: '#6a1b9a' });
+    P(ell(16.8, 7.2, 1.6, 1.6), '#ffffff', { base: null });
+    shine(15.4, 5.6, 1.2, 0.8, -0.5, 0.9);
   },
   BOW: ({ g, line, bar, P, poly, L }) => {
     line([[8.4, 3.6], [8.4, 20.4]], '#f5f5f5', 0.7);
@@ -5685,7 +5733,8 @@ const Monsters = {
   spawn(type, spot, extra) {
     const def = type === 'boss' ? BOSS : MONSTERS[type];
     const m = {
-      id: this.nextId++, type, def, x: spot.x * T + T / 2, y: spot.y * T + T / 2, hp: def.hp,
+      id: this.nextId++, type, def, x: spot.x * T + T / 2, y: spot.y * T + T / 2, hp: mobMaxHp(def, spot.x * T + T / 2, spot.y * T + T / 2),
+      maxHp: mobMaxHp(def, spot.x * T + T / 2, spot.y * T + T / 2),
       dirX: 0, dirY: 0, wanderT: 0, hitT: 0, biteT: 0, knock: { x: 0, y: 0, t: 0 },
       phase: Math.random() * Math.PI * 2, faceRight: false,
       home: def.boss ? -1 : def.region, owner: null,
@@ -6014,7 +6063,7 @@ const Monsters = {
 
   // 내 동물에게 먹이를 또 줌: 체력이 차고 신나서 콩콩 뛴다 (방장/혼자 기기)
   cheer(m) {
-    m.hp = m.def.hp;
+    m.hp = m.maxHp || m.def.hp;
     m.happyT = CONFIG.PET_HAPPY_SEC;
     m.hopT = 0;
     m.spot = null;
@@ -6064,7 +6113,7 @@ const Monsters = {
   tame(m, sid) {
     if (!this.tameable(m) || m.owner) return false;
     m.owner = sid;
-    m.hp = m.def.hp; // 배불러서 기운이 난다
+    m.hp = m.maxHp || m.def.hp; // 배불러서 기운이 난다
     for (let i = 0; i < 3; i++) Floaters.add(m.x + randFloat(-10, 10), m.y - m.def.size * 0.6 - randFloat(0, 10), '💕', 14);
     return true;
   },
@@ -6082,21 +6131,40 @@ const Monsters = {
 
   // 내 공격: 활은 화살을 쏘고, 나머지는 앞쪽을 휘두른다. 다른 사람 캐릭터도 맞는다
   attack() {
-    const w = Game.weapon, power = WEAPONS[w].power * (1 + Game.stats().atk / 100);
+    const w = Game.weapon, cls = CLASSES[Game.cls], off = cls && w !== 'hand' && !cls.weapons.includes(w);
+    const power = WEAPONS[w].power * (1 + Game.stats().atk / 100) * (off ? 0.6 : 1);
+    // 🧒 아이 모드: 가까운 몹 쪽으로 저절로 돌아본다
+    const near = Game.kid && this.nearFoe(Player.x, Player.y, (w === 'bow' || w === 'staff' ? 6 : 2.6) * T);
+    if (near) Player.dir = Math.abs(near.x - Player.x) > Math.abs(near.y - Player.y) ? (near.x < Player.x ? 'left' : 'right') : (near.y < Player.y ? 'up' : 'down');
     const [fx, fy] = FACING[Player.dir];
-    if (w === 'bow') {
+    if (w === 'bow' || w === 'staff') {
+      // 🏹 화살 / 🪄 마법 구슬 (가까운 몹을 따라간다)
+      const target = w === 'staff' ? this.nearFoe(Player.x, Player.y, 7 * T) : near || null;
       this.arrows.push({
         x: Player.x + fx * 10, y: Player.y - 8 + fy * 10, fx, fy,
-        left: CONFIG.ARROW_RANGE * T, power,
+        left: CONFIG.ARROW_RANGE * T * (w === 'staff' ? 1.2 : 1), power, orb: w === 'staff', target,
       });
       return;
     }
+    const reach = CONFIG.ATTACK_RANGE * T * (Game.cls === 'knight' ? 1.35 : 1);
     const cx = Player.x + fx * 0.5 * T, cy = Player.y + fy * 0.5 * T;
     for (const m of [...this.list]) {
-      if (!m.owner && Math.hypot(m.x - cx, m.y - cy) < CONFIG.ATTACK_RANGE * T + this.radius(m)) this.damage(m, power);
+      if (!m.owner && Math.hypot(m.x - cx, m.y - cy) < reach + this.radius(m)) this.damage(m, power);
     }
-    Multi.hitPeers(cx, cy, CONFIG.ATTACK_RANGE * T);
+    Multi.hitPeers(cx, cy, reach);
   },
+  // 가장 가까운 사나운 몹 (r 안, 내 동물 빼고)
+  nearFoe(x, y, r) {
+    let best = null, bd = r;
+    for (const m of this.list) {
+      if (m.owner) continue;
+      const d = Math.hypot(m.x - x, m.y - y) - this.radius(m);
+      if (d < bd) { bd = d; best = m; }
+    }
+    return best;
+  },
+  // r 안의 몹 모두
+  foesIn(x, y, r) { return this.list.filter(m => !m.owner && Math.hypot(m.x - x, m.y - y) < r + this.radius(m)); },
 
   // 앞쪽 휘두르는 곳에 몬스터나 다른 사람이 있는지 (있으면 캐지 않고 때린다)
   anyInFront() {
@@ -6194,6 +6262,7 @@ const Monsters = {
   damage(m, power) {
     const { dmg, crit } = this.roll(power);
     this.dmgText(m, dmg, crit);
+    Game.mp = Math.min(MP_MAX, Game.mp + 3);
     // 멈칫 (치명타는 조금 더) + 화면 살짝 흔들림
     Game.hitStop(crit ? 0.09 : 0.05);
     Render.shake(crit ? 0.16 : 0.08, crit ? 3 : 1.2);
@@ -6441,6 +6510,265 @@ const Particles = {
 };
 
 // ============================================================
+// ✨ Skills — 직업 스킬 (내 기기에서만 돌리고, 때리는 것은 Monsters.damage 로: 손님이면 방장에게 간다)
+// ============================================================
+const Skills = {
+  cd: {}, fx: [], fields: [], traps: [],
+  list() { return SKILLS[Game.cls] || []; },
+  cost(k) { return Math.round(k.mp * (Game.kid ? 0.6 : 1)); },
+  // 스킬 힘: 든 무기 힘 x 공격% x 배수 (스킬을 연 뒤 레벨이 오를수록 +3%씩)
+  power(k, mult) {
+    const w = Game.weapon;
+    return WEAPONS[w].power * (1 + Game.stats().atk / 100) * mult * (1 + 0.03 * Math.max(0, Game.level - k.lv));
+  },
+  use(i) {
+    const k = this.list()[i];
+    if (!k || Game.state !== 'play') return;
+    if (Game.level < k.lv) { Sfx.soft(); toast(`🔒 ${k.icon} ${tr(k.ko, k.en)} · Lv ${k.lv}`); return; }
+    const now = performance.now() / 1000;
+    if ((this.cd[k.id] || 0) > now) { Sfx.soft(); return; }
+    if (Game.mp < this.cost(k)) { Sfx.soft(); toast(tr('💧 마나가 모자라요', '💧 Not enough mana')); return; }
+    if (this[k.id](k) === false) { Sfx.soft(); return; }
+    Game.mp -= this.cost(k);
+    this.cd[k.id] = now + k.cd;
+    Player.swingT = 0.25;
+    Floaters.add(Player.x, Player.y - 46, `${k.icon} ${tr(k.ko, k.en)}`, 13, { num: true, color: '#fff59d', life: 0.9, vx: 0 });
+    this.paint(true);
+  },
+  facing() { const [fx, fy] = FACING[Player.dir]; return { fx, fy }; },
+  // 아이 모드 / 범위 스킬이 노릴 곳: 가까운 몹, 없으면 앞쪽
+  aimAt(r, ahead) {
+    const m = Monsters.nearFoe(Player.x, Player.y, r * T);
+    if (m) return { x: m.x, y: m.y, m };
+    const { fx, fy } = this.facing();
+    return { x: Player.x + fx * ahead * T, y: Player.y + fy * ahead * T, m: null };
+  },
+  hitAll(list, p) { for (const m of [...list]) if (Monsters.list.includes(m)) Monsters.damage(m, p); },
+  ring(x, y, r, color, life = 0.4) { this.fx.push({ kind: 'ring', x, y, r, color, t: 0, life }); },
+
+  // ---- 🛡️ 기사 ----
+  dash(k) {
+    const { fx, fy } = this.facing();
+    Player.dash = { t: 0.24, fx, fy, hit: new Set(), p: this.power(k, 1.5) };
+    Sfx.jump();
+  },
+  dashStep(dt) {
+    const d = Player.dash, sp = 15 * T * dt;
+    d.t -= dt;
+    Player.invulnT = Math.max(Player.invulnT, 0.12);
+    Player.moving = true;
+    Player.walkT += dt;
+    const nx = Player.x + d.fx * sp, ny = Player.y + d.fy * sp;
+    if (Player.canStand(nx, Player.y)) Player.x = nx;
+    if (Player.canStand(Player.x, ny)) Player.y = ny;
+    Particles.dust(Player.x, Player.y + 6);
+    for (const m of Monsters.foesIn(Player.x, Player.y, 0.8 * T)) if (!d.hit.has(m)) { d.hit.add(m); Monsters.damage(m, d.p); }
+    if (d.t <= 0) Player.dash = null;
+  },
+  whirl(k) {
+    this.hitAll(Monsters.foesIn(Player.x, Player.y, 1.9 * T), this.power(k, 1.6));
+    this.fx.push({ kind: 'whirl', x: Player.x, y: Player.y, r: 1.9 * T, t: 0, life: 0.35 });
+    Sfx.swing();
+  },
+  wall() { Game.buffs.wall = performance.now() + 6000; Sfx.door(); },
+  aegis() { Player.invulnT = Math.max(Player.invulnT, 3); Game.buffs.aegis = performance.now() + 3000; Sfx.success(); },
+
+  // ---- 🏹 사냥꾼 ----
+  multi(k) {
+    const a = this.aimAt(Game.kid ? 6 : 0, 1), base = a.m ? Math.atan2(a.y - Player.y, a.x - Player.x) : Math.atan2(this.facing().fy, this.facing().fx);
+    for (const da of [-0.26, 0, 0.26]) {
+      const fx = Math.cos(base + da), fy = Math.sin(base + da);
+      Monsters.arrows.push({ x: Player.x + fx * 10, y: Player.y - 8 + fy * 10, fx, fy, left: CONFIG.ARROW_RANGE * T, power: this.power(k, 1) });
+    }
+    Sfx.swing();
+  },
+  trap(k) {
+    if (this.traps.length >= 3) this.traps.shift();
+    this.traps.push({ x: Player.x, y: Player.y + 6, t: 0, life: 15, p: this.power(k, 3) });
+    Sfx.click();
+  },
+  hawk() { Game.buffs.hawk = performance.now() + 8000; Sfx.gain(); },
+  rain(k) {
+    const a = this.aimAt(7, 3);
+    this.fields.push({ kind: 'rain', x: a.x, y: a.y, r: 2 * T, t: 0, life: 1.6, tick: 0, every: 0.12, p: this.power(k, 0.9) });
+    Sfx.swing();
+  },
+
+  // ---- 🔮 마법사 ----
+  fire(k) {
+    const a = this.aimAt(5, 2);
+    this.fields.push({ kind: 'fire', x: a.x, y: a.y, r: 1.5 * T, t: 0, life: 3, tick: 0, every: 0.5, p: this.power(k, 0.7) });
+    Sfx.hurt();
+  },
+  frost(k) {
+    const list = Monsters.foesIn(Player.x, Player.y, 2.6 * T);
+    for (const m of list) m.slowT = 3; // 방장/혼자 기기에서만 느려진다
+    this.hitAll(list, this.power(k, 1.2));
+    this.ring(Player.x, Player.y, 2.6 * T, '#81d4fa', 0.5);
+    for (let i = 0; i < 10; i++) Floaters.add(Player.x + randFloat(-2.4, 2.4) * T, Player.y + randFloat(-2, 1.5) * T, '❄️', 14);
+    Sfx.click();
+  },
+  blink() {
+    const { fx, fy } = this.facing(), x0 = Player.x, y0 = Player.y;
+    let x = x0, y = y0;
+    for (let d = 0.25; d <= 4; d += 0.25) {
+      const nx = x0 + fx * d * T, ny = y0 + fy * d * T;
+      if (!Player.canStand(nx, ny)) break;
+      x = nx; y = ny;
+    }
+    if (Math.hypot(x - x0, y - y0) < T) return false;
+    Particles.poof(x0, y0 - 8, 20);
+    Player.x = x; Player.y = y;
+    Particles.poof(x, y - 8, 20);
+    Player.invulnT = Math.max(Player.invulnT, 0.5);
+    Sfx.jump();
+  },
+  bolt(k) {
+    let cur = Monsters.nearFoe(Player.x, Player.y, 7 * T);
+    if (!cur) return false;
+    const pts = [[Player.x, Player.y - 14]], hit = [];
+    while (cur && hit.length < 5) {
+      hit.push(cur);
+      pts.push([cur.x, cur.y - cur.def.size * 0.3]);
+      const last = cur;
+      cur = Monsters.list.filter(m => !m.owner && !hit.includes(m)).map(m => [m, Math.hypot(m.x - last.x, m.y - last.y)]).filter(([, d]) => d < 3.2 * T).sort((a, b) => a[1] - b[1]).map(([m]) => m)[0];
+    }
+    this.fx.push({ kind: 'bolt', pts, t: 0, life: 0.4, seed: Math.random() * 100 });
+    this.hitAll(hit, this.power(k, 2));
+    Render.shake(0.2, 2.5);
+    Sfx.crit();
+  },
+
+  update(dt) {
+    for (const f of this.fx) f.t += dt;
+    this.fx = this.fx.filter(f => f.t < f.life);
+    for (const f of this.fields) {
+      f.t += dt;
+      f.tick -= dt;
+      if (f.tick > 0) continue;
+      f.tick = f.every;
+      if (f.kind === 'fire') this.hitAll(Monsters.foesIn(f.x, f.y, f.r), f.p);
+      else {
+        // 🌧️ 화살비: 둘레 아무 곳에 하나씩
+        const a = Math.random() * Math.PI * 2, d = Math.sqrt(Math.random()) * f.r, x = f.x + Math.cos(a) * d, y = f.y + Math.sin(a) * d * 0.7;
+        this.fx.push({ kind: 'drop', x, y, t: 0, life: 0.25 });
+        this.hitAll(Monsters.foesIn(x, y, 0.8 * T), f.p);
+      }
+    }
+    this.fields = this.fields.filter(f => f.t < f.life);
+    for (const tr of [...this.traps]) {
+      tr.t += dt;
+      const m = Monsters.nearFoe(tr.x, tr.y, 0.5 * T);
+      if (m || tr.t > tr.life) {
+        this.traps.splice(this.traps.indexOf(tr), 1);
+        if (m) { this.hitAll(Monsters.foesIn(tr.x, tr.y, 1.2 * T), tr.p); this.ring(tr.x, tr.y, 1.2 * T, '#ffcc80'); Sfx.hit(); }
+      }
+    }
+    Game.mp = Math.min(MP_MAX, Game.mp + dt * 5);
+    this.paint(false);
+  },
+  // 단추: 남은 시간(어둡게 돌아가는 원) / 마나 모자라면 흐리게
+  paint(force) {
+    const now = performance.now() / 1000;
+    if (!force && now - (this.paintT || 0) < 0.1) return;
+    this.paintT = now;
+    Game.renderMp();
+    document.querySelectorAll('#skills [data-sk]').forEach(b => {
+      const k = this.list()[Number(b.dataset.sk)];
+      if (!k) return;
+      const left = Math.max(0, (this.cd[k.id] || 0) - now);
+      b.style.setProperty('--cd', left > 0 ? `${left / k.cd * 360}deg` : '0deg');
+      b.classList.toggle('cool', left > 0);
+      b.classList.toggle('low', Game.level >= k.lv && Game.mp < this.cost(k));
+    });
+  },
+  drawUnder(c, time) {
+    for (const f of this.fields) {
+      const a = Math.min(1, f.t / 0.2, (f.life - f.t) / 0.3);
+      c.save();
+      c.globalAlpha = a;
+      if (f.kind === 'fire') {
+        const g = c.createRadialGradient(f.x, f.y, 0, f.x, f.y, f.r);
+        g.addColorStop(0, 'rgba(255,235,59,.75)'); g.addColorStop(0.55, 'rgba(255,112,67,.55)'); g.addColorStop(1, 'rgba(229,57,53,0)');
+        c.fillStyle = g;
+        c.beginPath(); c.ellipse(f.x, f.y, f.r, f.r * 0.7, 0, 0, Math.PI * 2); c.fill();
+        c.font = `14px ${FONT_EMOJI}`; c.textAlign = 'center'; c.textBaseline = 'middle';
+        for (let i = 0; i < 6; i++) {
+          const an = i / 6 * Math.PI * 2 + time * 0.8, rr = f.r * (0.35 + 0.3 * ((i * 37) % 10) / 10);
+          c.globalAlpha = a * (0.6 + 0.4 * Math.sin(time * 9 + i));
+          c.fillText('🔥', f.x + Math.cos(an) * rr, f.y + Math.sin(an) * rr * 0.7 - 4);
+        }
+      } else {
+        c.strokeStyle = 'rgba(144,202,249,.9)'; c.lineWidth = 2; c.setLineDash([5, 4]);
+        c.beginPath(); c.ellipse(f.x, f.y, f.r, f.r * 0.7, 0, 0, Math.PI * 2); c.stroke();
+      }
+      c.restore();
+    }
+    c.save();
+    c.font = `16px ${FONT_EMOJI}`; c.textAlign = 'center'; c.textBaseline = 'middle';
+    for (const tr of this.traps) { c.globalAlpha = 0.8 + 0.2 * Math.sin(time * 5); c.fillText('🕸️', tr.x, tr.y); }
+    c.restore();
+    for (const f of this.fx) {
+      if (f.kind !== 'ring' && f.kind !== 'whirl') continue;
+      const p = f.t / f.life;
+      c.save();
+      c.globalAlpha = 1 - p;
+      c.strokeStyle = f.kind === 'whirl' ? '#ffffff' : f.color;
+      c.lineWidth = f.kind === 'whirl' ? 5 : 3;
+      c.beginPath(); c.ellipse(f.x, f.y, f.r * (0.4 + 0.6 * p), f.r * (0.4 + 0.6 * p) * 0.7, 0, 0, Math.PI * 2); c.stroke();
+      if (f.kind === 'whirl') {
+        c.strokeStyle = '#90caf9'; c.lineWidth = 3;
+        c.beginPath(); c.ellipse(f.x, f.y, f.r * 0.9, f.r * 0.63, 0, p * 6, p * 6 + 2.4); c.stroke();
+      }
+      c.restore();
+    }
+  },
+  drawOver(c, time) {
+    const now = performance.now();
+    // 🌟 무적 / 🧱 철벽: 내 둘레 빛
+    if ((Game.buffs.aegis || 0) > now || (Game.buffs.wall || 0) > now) {
+      const gold = (Game.buffs.aegis || 0) > now;
+      c.save();
+      c.globalAlpha = 0.35 + 0.15 * Math.sin(time * 8);
+      c.strokeStyle = gold ? '#ffd54f' : '#90a4ae';
+      c.fillStyle = gold ? 'rgba(255,213,79,.18)' : 'rgba(144,164,174,.15)';
+      c.lineWidth = 3;
+      c.beginPath(); c.ellipse(Player.x, Player.y - 12, 17, 22, 0, 0, Math.PI * 2); c.fill(); c.stroke();
+      c.restore();
+    }
+    for (const f of this.fx) {
+      const p = f.t / f.life;
+      if (f.kind === 'bolt') {
+        c.save();
+        c.globalAlpha = 1 - p * 0.8;
+        for (const [w, col] of [[6, 'rgba(129,212,250,.5)'], [2.2, '#ffffff']]) {
+          c.strokeStyle = col; c.lineWidth = w; c.lineJoin = 'round';
+          c.beginPath();
+          f.pts.forEach(([x, y], i) => {
+            if (!i) { c.moveTo(x, y); return; }
+            const [px, py] = f.pts[i - 1];
+            for (let s = 1; s <= 4; s++) {
+              const q = s / 4, j = s < 4 ? Math.sin(f.seed + i * 7 + s * 3 + time * 40) * 5 : 0;
+              c.lineTo(px + (x - px) * q + j, py + (y - py) * q - j);
+            }
+          });
+          c.stroke();
+        }
+        c.restore();
+      } else if (f.kind === 'drop') {
+        // 하늘에서 떨어지는 화살
+        c.save();
+        c.globalAlpha = 1 - p * 0.5;
+        c.strokeStyle = '#5d4037'; c.lineWidth = 2;
+        const yy = f.y - 40 * (1 - p);
+        c.beginPath(); c.moveTo(f.x, yy - 12); c.lineTo(f.x, yy); c.stroke();
+        c.restore();
+      }
+    }
+  },
+};
+
+// ============================================================
 // 💎 Loot — 내 화면에만 떨어지는 전리품 장비 (여럿이 할 때도 각자 따로). 걸어가면 줍는다
 // ============================================================
 const Loot = {
@@ -6464,9 +6792,10 @@ const Loot = {
   },
   // 동물/보스를 잡았다 (보스는 꼭 희귀 이상 둘)
   onKill(m) {
-    const x = m.x ?? Player.x, y = m.y ?? Player.y;
-    if (m.def.boss) { for (let i = 0; i < 2; i++) this.drop(x, y, this.roll(2, 20)); return; }
-    if (Math.random() < CONFIG.LOOT_CHANCE) this.drop(x, y, this.roll(0, Math.min(10, m.def.hp || 1)));
+    if (!m.def.hp) return; // 다른 사람 캐릭터를 쓰러뜨림 (놀이): 없음
+    const x = m.x ?? Player.x, y = m.y ?? Player.y, st = World.stageAtPx(x, y);
+    if (m.def.boss) { for (let i = 0; i < 2; i++) this.drop(x, y, this.roll(2, 20 + st * 6)); return; }
+    if (Math.random() < CONFIG.LOOT_CHANCE) this.drop(x, y, this.roll(0, Math.min(10, m.def.hp) + st * 6));
   },
   // 🎁 미로 보물 상자: 마법 이상 n개
   chest(x, y, n) { for (let i = 0; i < n; i++) this.drop(x, y, this.roll(1, 10)); },
@@ -6565,6 +6894,7 @@ const Player = {
       if (this.canStand(kx, this.y)) this.x = kx;
       if (this.canStand(this.x, ky)) this.y = ky;
     }
+    if (this.dash) { Skills.dashStep(dt); return; }
     const v = Input.vector();
     this.moving = v.x !== 0 || v.y !== 0;
     this.swingT = Math.max(0, this.swingT - dt);
@@ -7206,6 +7536,7 @@ const Multi = {
       lk: Game.lookIndex,
       g: Game.gender,
       wr: wornList(Game.equip),
+      lv: Game.level, cl: Game.cls, mh: Game.maxHearts,
       st: Game.state,
       p: [r(Player.x), r(Player.y), DIRS.indexOf(Player.dir), Player.moving ? 1 : 0,
         Player.swingT > 0 ? 1 : 0, Player.invulnT > 0 ? 1 : 0, Player.hitT > 0 ? 1 : 0, Player.jumpT > 0 ? 1 : 0],
@@ -7276,6 +7607,9 @@ const Multi = {
     p.lk = d.lk || 0;
     p.g = d.g === 'm' || d.g === 'f' ? d.g : null;
     p.wear = Array.isArray(d.wr) ? d.wr.filter(id => ITEMS[id] && ['wear', 'gear'].includes(ITEMS[id].kind)).slice(0, 5) : [];
+    p.lv = Math.min(LEVEL_MAX, Math.max(0, d.lv | 0));
+    p.cls = CLASSES[d.cl] ? d.cl : null;
+    p.mh = Math.min(12, Math.max(CONFIG.MAX_HEARTS, d.mh | 0));
     p.st = d.st;
     p.tx = pos[0];
     p.ty = pos[1];
@@ -7371,6 +7705,7 @@ const Multi = {
       let m = this.monsterMap.get(id);
       if (!m) {
         m = { id, type, def: type === 'boss' ? BOSS : MONSTERS[type], x, y, phase: id };
+        if (m.def) m.maxHp = Math.max(mobMaxHp(m.def, x, y), hp || 0);
         this.monsterMap.set(id, m);
       }
       Object.assign(m, { tx: x, ty: y, hp, faceRight: !!face, owner: owner || null });
@@ -7420,6 +7755,8 @@ const Input = {
       const digit = ['Digit1', 'Digit2', 'Digit3', 'Digit4'].indexOf(e.code);
       if (digit >= 0 && !e.repeat && Game.state === 'play') Game.pouchTap(digit);
       if (e.code === 'KeyM' && !e.repeat) Game.setBigMap(!Game.bigMap);
+      const sk = SKILL_KEYS.indexOf(e.code);
+      if (sk >= 0 && !e.repeat && Game.state === 'play') Skills.use(sk);
       if (e.code === 'Escape' && Game.bigMap) Game.setBigMap(false);
       if (KEYMAP[e.code]) { this.keys.add(e.code); e.preventDefault(); }
       if (e.code === 'KeyQ' && !e.repeat && Game.state === 'play') Game.pouchNext();
@@ -7700,10 +8037,10 @@ const Render = {
     for (const m of Monsters.list) if (m.x > vx0 && m.x < vx1 && m.y > vy0 && m.y < vy1) drawables.push({ y: m.y, draw: () => this.drawMonster(m, time) });
     const peers = Multi.visiblePeers(), showHearts = Multi.online;
     const myWear = wornList(Game.equip);
-    drawables.push({ y: Player.y, draw: () => this.drawCharacter(Player, Multi.myLook(), Game.held, Game.playerName, true, showHearts ? Game.hearts : null, myWear) });
+    drawables.push({ y: Player.y, draw: () => this.drawCharacter(Player, Multi.myLook(), Game.held, `Lv${Game.level} ${Game.playerName}`, true, showHearts ? Game.hearts : null, myWear) });
     for (const p of peers) {
       drawables.push({ y: p.y, draw: () => {
-        this.drawCharacter(p, Multi.peerLook(p), p.held, p.name, false, p.hearts, p.wear || []);
+        this.drawCharacter(p, Multi.peerLook(p), p.held, p.lv ? `Lv${p.lv} ${p.name}` : p.name, false, p.hearts, p.wear || []);
         const icon = STATUS_ICONS[p.st];
         if (icon) this.drawStatus(p, icon, time);
       } });
@@ -7713,7 +8050,9 @@ const Render = {
         drawables.push({ y: st.y * T + T * 0.9, draw: () => this.hd(c => { const saved = this.ctx; this.ctx = c; try { this.drawStation(st, time); } finally { this.ctx = saved; } }) });
       }
     }
+    this.hd(c => Skills.drawUnder(c, time));
     drawables.sort((a, b) => a.y - b.y).forEach(d => d.draw());
+    this.hd(c => Skills.drawOver(c, time));
     Particles.draw(ctx, false);
     Monsters.arrows.forEach(a => this.drawArrow(a));
     for (const p of peers) p.arrows.forEach(a => this.drawArrow(a));
@@ -7993,7 +8332,7 @@ const Render = {
     });
 
     // 체력 막대: 매끄러운 막대 + 깎인 몫은 흰색으로 잠깐 남았다가 줄어든다 (보스는 길게)
-    const max = m.def.hp, ch = m.def.boss ? 7 : 5, w = m.def.boss ? 70 : clamp(max * 9, 26, 50), top = known ? m.y + s * 0.35 - s * 1.12 * (m.def.ghost ? 1.05 : 0.98) - 12 - hop : m.y - s * 0.15 - s * 0.62 - 10;
+    const max = m.maxHp || m.def.hp, ch = m.def.boss ? 7 : 5, w = m.def.boss ? 70 : clamp(max * 9, 26, 50), top = known ? m.y + s * 0.35 - s * 1.12 * (m.def.ghost ? 1.05 : 0.98) - 12 - hop : m.y - s * 0.15 - s * 0.62 - 10;
     const left = m.x - w / 2, frac = clamp(m.hp / max, 0, 1);
     if (m.hpLag == null || m.hpLag < frac) m.hpLag = frac;
     m.hpLag += (frac - m.hpLag) * Math.min(1, (time - (m.hpLagT || time)) * 4);
@@ -8059,6 +8398,22 @@ const Render = {
 
   drawArrow(a) { this.hd(ctx => this.drawArrowHD(ctx, a)); },
   drawArrowHD(ctx, a) {
+    if (a.orb) {
+      // 🪄 마법 구슬: 보라 빛 + 꼬리
+      const t = performance.now() / 1000;
+      ctx.save();
+      for (let i = 3; i >= 0; i--) {
+        ctx.globalAlpha = 0.18 + (3 - i) * 0.12;
+        ctx.fillStyle = i ? '#ce93d8' : '#ffffff';
+        ctx.beginPath(); ctx.arc(a.x - a.fx * i * 4, a.y - a.fy * i * 4, (i ? 5.5 - i : 2.6) + Math.sin(t * 20) * 0.4, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.globalAlpha = 0.5;
+      const rg = ctx.createRadialGradient(a.x, a.y, 0, a.x, a.y, 9);
+      rg.addColorStop(0, '#e1bee7'); rg.addColorStop(1, 'rgba(171,71,188,0)');
+      ctx.fillStyle = rg; ctx.beginPath(); ctx.arc(a.x, a.y, 9, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+      return;
+    }
     if (a.food) {
       // 던진 먹이: 빙글빙글 돌며 날아간다
       ctx.save();
@@ -8342,7 +8697,7 @@ const Render = {
       if (hearts != null) {
         ctx.fillStyle = '#000';
         ctx.font = `7px ${FONT_EMOJI}`;
-        for (let i = 0; i < CONFIG.MAX_HEARTS; i++) ctx.fillText(i < hearts ? '❤️' : '🤍', x + (i - (CONFIG.MAX_HEARTS - 1) / 2) * 8, ly - 10);
+        for (let i = 0, mh = mine ? Game.maxHearts : e.mh || CONFIG.MAX_HEARTS; i < mh; i++) ctx.fillText(i < hearts ? '❤️' : '🤍', x + (i - (mh - 1) / 2) * 8, ly - 10);
       }
       // 머리 위 말풍선 그림 (💪 👍 😊)
       if (e.emoteT > 0 && e.emote) {
@@ -8717,7 +9072,144 @@ const Game = {
   inventory: {},
   equip: {}, // 입은 옷/방패: 입는 곳 → id (가방 inventory 에는 없다)
   gear: [], // 💎 전리품 장비 (입은 것도 여기 있다, equip 에는 'g:번호')
-  stats() { return gearStats(this.equip); },
+  level: 1, xp: 0, cls: null, kid: false, mp: MP_MAX,
+  get maxHearts() { return CONFIG.MAX_HEARTS + Math.floor((this.level - 1) / 6) + ((CLASSES[this.cls] || {}).hearts || 0); },
+  // 능력치: 장비 + 직업 + 레벨(공격 +2%씩) + 스킬 버프
+  statsFor(equip) {
+    const st = gearStats(equip), c = CLASSES[this.cls], now = performance.now();
+    if (c) for (const [k, v] of Object.entries(c.stats)) st[k] += v;
+    st.atk += (this.level - 1) * 2;
+    const wall = (this.buffs.wall || 0) > now, hawk = (this.buffs.hawk || 0) > now;
+    if (wall) st.block += 40;
+    if (hawk) { st.crit += 30; st.spd += 20; }
+    st.block = Math.min(wall ? 85 : BLOCK_MAX, st.block);
+    return st;
+  },
+  stats() { return this.statsFor(this.equip); },
+
+  // ⭐ 경험치 (레벨 30 이면 그만)
+  gainXp(n, x = Player.x, y = Player.y) {
+    n = Math.round(n);
+    if (!(n > 0) || this.level >= LEVEL_MAX) return;
+    this.xp += n;
+    Floaters.add(x + randFloat(-8, 8), y - 44, `+${n} XP`, 12, { num: true, color: '#e1bee7', life: 1.1, vx: 0 });
+    let up = false;
+    while (this.level < LEVEL_MAX && this.xp >= xpNeed(this.level)) { this.xp -= xpNeed(this.level); this.level++; up = true; }
+    if (this.level >= LEVEL_MAX) this.xp = 0;
+    if (up) this.onLevelUp();
+    this.renderXp();
+  },
+  onLevelUp() {
+    this.hearts = this.maxHearts;
+    this.renderHearts();
+    Sfx.success();
+    burst();
+    Render.shake(0.25, 2);
+    for (let i = 0; i < 12; i++) Floaters.add(Player.x + randFloat(-28, 28), Player.y - randFloat(0, 46), i % 2 ? '⭐' : '✨', 18);
+    Floaters.add(Player.x, Player.y - 56, `LEVEL UP! ${this.level}`, 20, { num: true, color: '#ffd54f', life: 1.8, vx: 0 });
+    const sk = (SKILLS[this.cls] || []).find(k => k.lv === this.level);
+    toast(`⭐ ${tr('레벨 업!', 'Level up!')} Lv ${this.level}${sk ? ` · ${tr('새 스킬', 'New skill')} ${sk.icon} ${tr(sk.ko, sk.en)}` : ''}`);
+    if (Store.settings.lang === 'en') Speech.speak(`Level up! Level ${this.level}!`, 'en'); else Speech.speak(`레벨 업! ${this.level} 레벨!`, 'ko');
+    this.renderSkills();
+  },
+  // 위쪽: ⭐ 레벨 + 경험치 막대 + 💧 마나 막대
+  renderXp() {
+    let el = $('#lvbar');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'lvbar';
+      el.className = 'lvbar';
+      el.innerHTML = '<b class="lv-num"></b><div class="bars"><div class="xp"><i></i></div><div class="mp"><i></i></div></div>';
+      $('#hud').appendChild(el);
+    }
+    const c = CLASSES[this.cls];
+    el.querySelector('.lv-num').textContent = `${c ? c.emoji : '⭐'} Lv ${this.level}`;
+    el.querySelector('.xp i').style.width = `${this.level >= LEVEL_MAX ? 100 : Math.round(this.xp / xpNeed(this.level) * 100)}%`;
+    this.renderMp(true);
+  },
+  renderMp(force) {
+    const v = Math.round(this.mp);
+    if (!force && v === this.mpShown) return;
+    this.mpShown = v;
+    const i = document.querySelector('#lvbar .mp i');
+    if (i) i.style.width = `${v}%`;
+  },
+
+  // 🛡️🏹🔮 직업 고르기 (처음 / 집 앞에서 바꾸기). 처음이면 그 직업 무기 하나 (보통 등급)
+  pickClass() {
+    return new Promise(res => {
+      const prev = this.state;
+      this.state = 'card';
+      Input.reset();
+      const ov = document.createElement('div');
+      ov.className = 'overlay class-pick';
+      ov.innerHTML = `<div class="class-box"><h2>${tr('어떤 모험가가 될까요?', 'Choose your class')}</h2><div class="class-cards">${Object.entries(CLASSES).map(([k, c]) =>
+        `<button class="class-card${this.cls === k ? ' on' : ''}" data-cls="${k}"><span class="ce">${c.emoji}</span><b>${tr(c.ko, c.en)}</b>${iconHtml(WEAPONS[c.start])}<small>${tr(...c.desc)}</small></button>`).join('')}</div></div>`;
+      document.body.appendChild(ov);
+      Speech.speak(Store.settings.lang === 'en' ? 'Choose your class!' : '어떤 모험가가 될까요?', Store.settings.lang === 'en' ? 'en' : 'ko');
+      ov.querySelectorAll('[data-cls]').forEach(b => b.addEventListener('pointerdown', e => {
+        e.preventDefault(); e.stopPropagation();
+        const k = b.dataset.cls, c = CLASSES[k];
+        this.cls = k;
+        if (!this.gear.some(g => g.b === c.start)) {
+          const g = makeGear(0, c.start);
+          if (this.addGear(g)) this.wear(`g:${g.u}`, false);
+        } else if (!c.weapons.includes(this.weapon)) {
+          const g = this.gear.filter(g => g.b === c.start).sort((a, b) => b.r - a.r)[0];
+          if (g) this.wear(`g:${g.u}`, false);
+        }
+        this.hearts = Math.min(this.hearts, this.maxHearts);
+        Sfx.success();
+        toast(`${c.emoji} ${tr(c.ko, c.en)}!`);
+        if (Store.settings.lang === 'en') Speech.speak(`${c.en}!`, 'en'); else Speech.speak(`${c.ko}!`, 'ko');
+        ov.remove();
+        this.state = prev === 'card' ? 'play' : prev;
+        this.renderHearts();
+        this.renderXp();
+        this.renderSkills();
+        this.renderInventory();
+        res();
+      }));
+    });
+  },
+  changeClass() {
+    if (!Monsters.safeZone(Player.x, Player.y)) { Sfx.soft(); toast(tr('🏠 집 앞에서 바꿀 수 있어요', '🏠 Change it near home')); return; }
+    this.closeBag(false);
+    this.pickClass();
+  },
+  // 🧒 아이 모드 (이름마다): 자동 조준, 다쳐도 절반은 막음, 큰 스킬 단추 2개, 쓰러지면 그 자리에서
+  toggleKid() {
+    this.kid = !this.kid;
+    Sfx.click();
+    toast(this.kid ? tr('🧒 아이 모드 켬', '🧒 Kid mode on') : tr('🧑 아이 모드 끔', '🧑 Kid mode off'));
+    this.renderSkills();
+    this.renderBag();
+  },
+
+  // ✨ 스킬 단추 (✋ 둘레). 아이 모드는 2개만 크게
+  renderSkills() {
+    let box = $('#skills');
+    if (!box) {
+      box = document.createElement('div');
+      box.id = 'skills';
+      $('#controls').appendChild(box);
+      box.addEventListener('pointerdown', e => {
+        const b = e.target.closest('[data-sk]');
+        if (!b) return;
+        e.preventDefault(); e.stopPropagation();
+        Skills.use(Number(b.dataset.sk));
+      });
+    }
+    const list = SKILLS[this.cls] || [], n = this.kid ? 2 : 4;
+    box.className = this.kid ? 'kid' : '';
+    box.innerHTML = list.slice(0, n).map((k, i) => {
+      const locked = this.level < k.lv;
+      return `<button class="skill-btn s${i}${locked ? ' locked' : ''}" data-sk="${i}" aria-label="${k.en}"><span class="si">${locked ? '🔒' : k.icon}</span>` +
+        `<i class="cd"></i><small>${locked ? `Lv${k.lv}` : `💧${Skills.cost(k)}`}</small><kbd>${SKILL_KEYS[i].slice(3)}</kbd></button>`;
+    }).join('');
+    Skills.paint(true);
+  },
+
   seen: new Set(), // 한 번이라도 얻은 아이템 (제작대에서 모르는 재료는 ??? 로)
   buffs: { speed: 0, light: 0 }, // 물약 힘이 끝나는 시각 (performance.now)
   // 가진 무기 종류 (무기 칸에 끼운 것)
@@ -8849,6 +9341,10 @@ const Game = {
     this.renderHearts();
     this.state = 'play';
     this.playAt = performance.now(); // 들어온 직전에 받은 칸 변화는 알리지 않는다
+    this.mp = MP_MAX;
+    this.renderXp();
+    this.renderSkills();
+    if (!this.cls && !SERVER_CH) setTimeout(() => { if (!this.cls && this.state === 'play') { if (Buddy.on) { this.cls = 'knight'; this.renderXp(); this.renderSkills(); } else this.pickClass(); } }, 900);
     // 두둥! 바로 시작
     Sfx.dudung();
     Render.shake(0.3, 3);
@@ -8959,13 +9455,17 @@ const Game = {
     this.picked = holdable(bag.picked) ? bag.picked : null;
     this.lastWeapon = WEAPONS[bag.lastWeapon] ? bag.lastWeapon : null;
     this.kills = bag.kills || 0;
+    this.level = Math.min(LEVEL_MAX, Math.max(1, bag.lv | 0 || 1));
+    this.xp = Math.max(0, bag.xp | 0);
+    this.cls = CLASSES[bag.cls] ? bag.cls : null;
+    this.kid = !!bag.kid;
     for (const r of RECIPES) if (r.unlock > 0 && this.kills >= r.unlock) this.unlockShown.add(r.result);
     this.bagJson = JSON.stringify(this.bagItems());
     this.bagT = bag.t || 0;
   },
 
   bagItems() {
-    return { v: BAG_V, gv: 2, inventory: this.inventory, equip: this.equip, gear: this.gear || [], seen: [...this.seen], picked: this.picked, lastWeapon: this.lastWeapon, kills: this.kills };
+    return { v: BAG_V, gv: 2, inventory: this.inventory, equip: this.equip, gear: this.gear || [], seen: [...this.seen], picked: this.picked, lastWeapon: this.lastWeapon, kills: this.kills, lv: this.level, xp: this.xp, cls: this.cls, kid: this.kid };
   },
 
   // 가방 + 누구 것인지(owner: 이름) + 마지막으로 바뀐 때(t). 바뀌었을 때만 t 를 새로
@@ -9316,6 +9816,7 @@ const Game = {
 
   update(dt) {
     const playing = this.state === 'play';
+    if (playing) Skills.update(dt);
     if (playing && Buddy.on) Buddy.update(dt);
     if (playing) this.tickQuiz(dt);
     if (playing) Player.update(dt);
@@ -9324,7 +9825,10 @@ const Game = {
     // 여럿이 할 때는 다른 사람이 계속 놀 수 있게 계속 돌린다. 손님 기기는 받아서 그리기만 한다
     if (!Multi.isGuest && (playing || Multi.isHost)) {
       Items.respawn();
+      // ❄️ 얼음 맞은 몹은 느리게 (움직인 만큼의 40%만)
+      const slow = Monsters.list.filter(m => m.slowT > 0).map(m => [m, m.x, m.y]);
       Monsters.update(dt);
+      for (const [m, px, py] of slow) { m.slowT -= dt; m.x = px + (m.x - px) * 0.4; m.y = py + (m.y - py) * 0.4; }
     }
     if (playing || Multi.online) Monsters.updateArrows(dt);
     // 보스, 모자란 동물, 네잎클로버: 방장/혼자/서버 기기 (여럿이 할 때는 카드 중에도)
@@ -9354,7 +9858,7 @@ const Game = {
       if (this.heldPotion) { this.drink(this.heldPotion); return; }
       Sfx.swing();
       const t = this.digTile();
-      if (t && !Monsters.anyInFront()) this.digAt(t.x, t.y);
+      if (t && !Monsters.anyInFront() && !(this.kid && Monsters.nearFoe(Player.x, Player.y, 2.6 * T))) this.digAt(t.x, t.y);
       else Monsters.attack();
     }
   },
@@ -9540,7 +10044,8 @@ const Game = {
     this.regionT += dt;
     if (this.regionT > 0.8 && this.regionShown !== r) {
       this.regionShown = r;
-      toast(`${REGIONS[r].emoji} ${itemNames(REGIONS[r]).main}`);
+      const st = World.stageAtPx(Player.x, Player.y), lv = STAGE_LV[st] || 1;
+      toast(`${REGIONS[r].emoji} ${itemNames(REGIONS[r]).main} <small style="opacity:.8">${tr('추천', 'Rec.')} Lv ${lv}+${this.level + 2 < lv ? ' ⚠️' : ''}</small>`);
     }
   },
 
@@ -9570,6 +10075,7 @@ const Game = {
     else Speech.speak(last ? '마지막 바다 미로까지 탈출! 정말 대단해요!' : '보물을 찾았어요! 다음 탄 문이 열렸어요!', 'ko');
     for (let i = 0; i < (last ? 3 : 1); i++) this.addItem('gem');
     Loot.chest(goal.x * T + T / 2, goal.y * T + T, last ? 3 : 1);
+    this.gainXp(60 * (mz.stage + 1));
     // 다음 탄이 골짜기/바다면 🌉 다리 5개 (낭떠러지와 바다에 놓아서 건넌다)
     if (mz.stage === 3 || mz.stage === 4) for (let i = 0; i < 5; i++) this.addItem('bridge');
     // 다음 탄 가는 🔒 나무 → ✨ 황금 나무 (모두의 기기에 알림)
@@ -9611,7 +10117,7 @@ const Game = {
     this.state = 'craft';
     Input.reset();
     Sfx.door();
-    this.hearts = CONFIG.MAX_HEARTS;
+    this.hearts = Game.maxHearts;
     this.renderHearts();
     await Craft.show();
     Player.reset();
@@ -9673,8 +10179,10 @@ const Game = {
   onMonsterDefeated(m) {
     Player.happyT = 1.6;
     Loot.onKill(m);
+    // ⭐ 경험치: 몹 체력 x4 (높은 탄 몹은 체력이 커서 더), 보스는 x6
+    if (m.def.hp) this.gainXp((m.maxHp || mobMaxHp(m.def, m.x, m.y)) * 4 * (m.def.boss ? 6 : 1), m.x ?? Player.x, m.y ?? Player.y);
     // 💖 회복: 잡으면 확률로 하트 하나
-    if (this.hearts < CONFIG.MAX_HEARTS && Math.random() * 100 < this.stats().vamp) {
+    if (this.hearts < Game.maxHearts && Math.random() * 100 < this.stats().vamp) {
       this.hearts++;
       this.renderHearts();
       Floaters.add(Player.x, Player.y - 34, '💖', 18);
@@ -9715,13 +10223,15 @@ const Game = {
   hurt(m) {
     if (this.state !== 'play' || Player.invulnT > 0) return;
     // 🛡️ 막기: 옷이 막아 주면 안 다친다 (잠깐 무적, 파란 "막음!")
-    if (Math.random() * 100 < this.stats().block) {
+    if (Math.random() * 100 < this.stats().block || (this.kid && Math.random() < 0.5)) {
       Player.invulnT = CONFIG.INVULN_SEC * 0.6;
       Sfx.click();
       Floaters.add(Player.x, Player.y - 34, tr('막음!', 'Block!'), 15, { num: true, color: '#90caf9', life: 0.8, vx: 0 });
       return;
     }
-    this.hearts--;
+    // 어른: 4탄(정글) 부터의 몹은 하트 2
+    this.hearts -= !this.kid && !m.isPlayer && m.def && !m.def.calm && World.stageAtPx(m.x, m.y) >= 3 ? 2 : 1;
+    this.hearts = Math.max(0, this.hearts);
     Player.invulnT = CONFIG.INVULN_SEC;
     Player.hitT = CONFIG.HIT_FLASH_SEC;
     Player.hurtT = 0.9;
@@ -9754,7 +10264,7 @@ const Game = {
       { icon: '😊', ko: '표정', en: 'Face', items: SAY_EMOJI.map(e => ({ html: e, act: () => Social.emote(e) })) },
     ];
     const peer = Social.nearPeer(4), held = this.heldBlock || this.heldFood || this.heldPotion, items = [];
-    if (this.hearts < CONFIG.MAX_HEARTS && this.edible()) items.push({ html: '😋', label: tr('먹기', 'Eat'), act: () => this.eatOne() });
+    if (this.hearts < Game.maxHearts && this.edible()) items.push({ html: '😋', label: tr('먹기', 'Eat'), act: () => this.eatOne() });
     if (peer && Monsters.list.some(m => m.owner === Multi.sid)) {
       items.push({ html: '🎁🐾', label: tr('동물 주기', 'Give pet'), act: () => { if (Social.givePet(peer)) Social.say(tr('선물이야!', 'For you!')); } });
     }
@@ -9911,11 +10421,11 @@ const Game = {
   // 하나 먹기 (💬 칸의 😋, 하트가 1 남았을 때 저절로, 🤝 놀아주기). 먹었으면 true
   eatOne() {
     const food = this.edible();
-    if (!food || this.hearts >= CONFIG.MAX_HEARTS) return false;
+    if (!food || this.hearts >= Game.maxHearts) return false;
     this.inventory[food]--;
     const def = ITEMS[food];
     const heal = def.heal || 1;
-    this.hearts = Math.min(CONFIG.MAX_HEARTS, this.hearts + heal);
+    this.hearts = Math.min(Game.maxHearts, this.hearts + heal);
     toast(`${iconHtml(def)} ${itemNames(def).main} ❤️+${heal}`);
     Sfx.pickup();
     this.renderInventory();
@@ -9939,11 +10449,11 @@ const Game = {
     const el = $('#faint');
     el.textContent = Store.settings.lang === 'en' ? '💫 Oops!' : '💫 기절!';
     el.classList.remove('hidden');
-    await delay(1600);
+    await delay(this.kid ? 1000 : 3500);
     el.classList.add('hidden');
-    Player.reset();
+    if (!this.kid) Player.reset();
     this.wasOnDoor = false;
-    this.hearts = CONFIG.MAX_HEARTS;
+    this.hearts = Game.maxHearts;
     this.renderHearts();
     if (!Buddy.on) await this.showCards(1);
     Player.invulnT = CONFIG.SPAWN_INVULN_SEC;
@@ -9980,6 +10490,7 @@ const Game = {
         ['✋', '때리기 · 캐기 · 놓기 · 먹이 던지기', 'Hit · Dig · Place · Throw food', 'Space', '✋ 큰 버튼', 'Big ✋ button'],
         ['🗡️', '손에 들 것 (무기 · 블록 · 음식 · 물약)', 'Hold (weapon · block · food · potion)', '1 / 2 / 3 / 4', '아래 주머니 4칸', '4 pockets at the bottom'],
         ['🔁', '같은 칸의 다음 것', 'Next in the same pocket', 'Q', '같은 칸 한 번 더', 'Tap the pocket again'],
+        ['✨', '스킬 (직업마다 4개, 💧 마나)', 'Skills (4 per class, 💧 mana)', 'Z / X / V / R', '✋ 둘레 동그란 단추', 'Round buttons around ✋'],
         ['🦘', '점프', 'Jump', 'J', '🦘 버튼', '🦘 button'],
         ['💬', '말하기 (✏️ 쓰기, 표정, 먹기, 주기)', 'Talk (write, faces, eat, give)', 'C / Enter', '💬 버튼', '💬 button'],
         ['🎒', '가방 (옷 입고 벗기, 아이템 보기)', 'Bag (wear clothes, see items)', 'B', '하트 옆 🎒', '🎒 next to hearts'],
@@ -10009,7 +10520,7 @@ const Game = {
 
   renderHearts() {
     let html = '';
-    for (let i = 0; i < CONFIG.MAX_HEARTS; i++) html += i < this.hearts ? '❤️' : '🤍';
+    for (let i = 0; i < Game.maxHearts; i++) html += i < this.hearts ? '❤️' : '🤍';
     $('#hearts').textContent = html;
   },
 
@@ -10044,14 +10555,14 @@ const Game = {
   // 물약 마시기: 빨강 ❤️ (다쳤을 때만, 가득이면 아껴 둔다) / 파랑 🏃 빨리 달리기 / 노랑 💡 어두운 곳이 밝다
   drink(id) {
     const def = ITEMS[id];
-    if (def.heal && this.hearts >= CONFIG.MAX_HEARTS) {
+    if (def.heal && this.hearts >= Game.maxHearts) {
       Sfx.soft();
       toast(tr('❤️ 하트가 가득해요! 다치면 마셔요', '❤️ Hearts are full! Drink it when you get hurt'));
       return;
     }
     this.inventory[id]--;
     if (!this.inventory[id]) this.picked = this.lastWeapon;
-    if (def.heal) this.hearts = Math.min(CONFIG.MAX_HEARTS, this.hearts + def.heal);
+    if (def.heal) this.hearts = Math.min(Game.maxHearts, this.hearts + def.heal);
     if (def.speed) this.buffs.speed = performance.now() + def.speed * 1000;
     if (def.light) this.buffs.light = performance.now() + def.light * 1000;
     Sfx.success();
@@ -10123,8 +10634,9 @@ const Game = {
 
   // 능력치 값 (공격 = 무기 힘 x 10 x 공격%, 나머지는 %)
   statVals(equip) {
-    const st = gearStats(equip), g = gearOf(equip.weapon), pow = g ? WEAPONS[g.b].power : WEAPONS.hand.power;
-    return { ...st, atk: Math.round(pow * CONFIG.HP_SHOW * (1 + st.atk / 100)) };
+    const st = this.statsFor(equip), g = gearOf(equip.weapon), pow = g ? WEAPONS[g.b].power : WEAPONS.hand.power;
+    const c = CLASSES[this.cls], off = c && g && !c.weapons.includes(g.b);
+    return { ...st, atk: Math.round(pow * CONFIG.HP_SHOW * (1 + st.atk / 100) * (off ? 0.6 : 1)) };
   },
   // 가방 능력치 표: 고른 장비가 있으면 "지금 → 입으면", 방금 바꿨으면 바뀐 만큼 반짝
   statRows() {
@@ -10252,15 +10764,19 @@ const Game = {
     panel.innerHTML = `<div class="bag-head"><span>🎒 ${tr('가방', 'Bag')}</span><button class="bag-close" aria-label="close">✖</button></div>
       <div class="bag-body">
         <div class="bag-me"><canvas class="bag-look"></canvas>
+          <div class="bag-lv"><button class="bag-cls" data-x="cls">${CLASSES[this.cls] ? `${CLASSES[this.cls].emoji} ${tr(CLASSES[this.cls].ko, CLASSES[this.cls].en)}` : '❔'} 🔁</button><b>Lv ${this.level}</b></div>
+          <div class="bag-xp"><i style="width:${this.level >= LEVEL_MAX ? 100 : Math.round(this.xp / xpNeed(this.level) * 100)}%"></i><span>${this.level >= LEVEL_MAX ? 'MAX' : `${this.xp}/${xpNeed(this.level)} XP`}</span></div>
           <div class="bag-stats">${this.statRows()}</div>
           <div class="bag-wear">${WEAR_SLOTS.map(w => cell(`slot:${w.slot}`)).join('')}</div></div>
         <div class="bag-items">${groups.map(g => `<div class="bag-group"><div class="bag-group-label"><span>${g.icon}</span>${tr(g.ko, g.en)}</div>` +
           `<div class="bag-cells">${g.ids.length ? g.ids.map(cell).join('') : '<span class="bag-none">·</span>'}</div></div>`).join('')}</div>
       </div>
-      <div class="bag-info">${this.bagInfo()}</div>`;
+      <div class="bag-info">${this.bagInfo()}</div>
+      <button class="bag-kid${this.kid ? ' on' : ''}" data-x="kid">🧒 ${tr('아이 모드', 'Kid mode')} ${this.kid ? 'ON' : 'OFF'}</button>`;
     panel.querySelectorAll('[data-cell]').forEach(b => b.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); this.bagPress(b, e); }));
     panel.querySelectorAll('[data-act]').forEach(b => b.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); this.bagAct(b.dataset.act); }));
     panel.querySelector('.bag-close').addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); this.closeBag(); });
+    panel.querySelectorAll('[data-x]').forEach(b => b.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); if (b.dataset.x === 'kid') this.toggleKid(); else this.changeClass(); }));
     // 내 모습 (입은 옷, 손에 든 것까지)
     const c = panel.querySelector('.bag-look'), dpr = Math.min(window.devicePixelRatio || 1, 2), saved = Render.ctx;
     c.width = 72 * dpr;
@@ -10382,11 +10898,11 @@ const Game = {
     else if (act === 'hold') { Sfx.click(); this.setWeapon(id); return; }
     else if (act === 'drink') this.drink(id);
     else if (act === 'eat') {
-      if (this.hearts >= CONFIG.MAX_HEARTS) { Sfx.soft(); toast(tr('❤️ 하트가 가득해요!', '❤️ Hearts are full!')); return; }
+      if (this.hearts >= Game.maxHearts) { Sfx.soft(); toast(tr('❤️ 하트가 가득해요!', '❤️ Hearts are full!')); return; }
       const def = ITEMS[id];
       this.inventory[id]--;
       if (!this.inventory[id]) delete this.inventory[id];
-      this.hearts = Math.min(CONFIG.MAX_HEARTS, this.hearts + def.heal);
+      this.hearts = Math.min(Game.maxHearts, this.hearts + def.heal);
       toast(`${iconHtml(def)} ${itemNames(def).main} ❤️+${def.heal}`);
       Sfx.pickup();
       this.renderHearts();
@@ -10436,14 +10952,14 @@ const Game = {
     const def = ITEMS[type];
     this.seen.add(type);
     if (def.kind === 'heart') {
-      this.hearts = Math.min(CONFIG.MAX_HEARTS, this.hearts + CONFIG.HEART_HEAL);
+      this.hearts = Math.min(Game.maxHearts, this.hearts + CONFIG.HEART_HEAL);
       this.showGain(def, `+${CONFIG.HEART_HEAL}`, "#e53935");
       this.renderHearts();
       return;
     }
     // 다쳤을 때 음식을 주우면 바로 먹는다
-    if (def.kind === 'food' && this.hearts < CONFIG.MAX_HEARTS) {
-      this.hearts = Math.min(CONFIG.MAX_HEARTS, this.hearts + (def.heal || 1));
+    if (def.kind === 'food' && this.hearts < Game.maxHearts) {
+      this.hearts = Math.min(Game.maxHearts, this.hearts + (def.heal || 1));
       this.showGain(def, `😋 ❤️+${def.heal || 1}`, '#e53935');
       this.renderHearts();
       return;
@@ -10845,7 +11361,7 @@ const Buddy = {
     }
     if (t && t.kind !== 'follow') return;
     // ❤️ 내가 다쳤으면 가까운(7칸 안) 하트를 먹으러 간다 (아이가 다쳐서 가까이 있으면 양보)
-    if (Game.hearts < CONFIG.MAX_HEARTS) {
+    if (Game.hearts < Game.maxHearts) {
       const h = Items.list.filter(it => it.type === 'heart' && !Items.pending.has(it.id) && this.dist(it, me) < 7 * T && this.dist(it, a) < BUDDY_LEASH * T && this.mayTake(it))
         .sort((x, y) => this.dist(x, me) - this.dist(y, me))[0];
       if (h) { this.start('heart', { it: h }, 10); this.emote('❤️'); return; }
@@ -11553,13 +12069,13 @@ const Buddy = {
   mayTake(it) {
     if (it.type !== 'heart') return false;
     const f = this.friend();
-    return !f || f.hearts >= CONFIG.MAX_HEARTS || this.dist(f, it) > 4 * T;
+    return !f || f.hearts >= (f.mh || CONFIG.MAX_HEARTS) || this.dist(f, it) > 4 * T;
   },
 
   // 떨어진 것 옆에 가서 아이를 보며 👉 (아이가 주우면 😄)
   // 떨어진 하트 먹으러 가기 (밟으면 Items.pickup 이 줍는다)
   heart(t) {
-    if (!Items.list.includes(t.it) || Game.hearts >= CONFIG.MAX_HEARTS || !this.mayTake(t.it)) { this.done(Items.list.includes(t.it) ? '' : '😋'); return; }
+    if (!Items.list.includes(t.it) || Game.hearts >= Game.maxHearts || !this.mayTake(t.it)) { this.done(Items.list.includes(t.it) ? '' : '😋'); return; }
     this.goTo(t.it.x, t.it.y, 2);
   },
 
