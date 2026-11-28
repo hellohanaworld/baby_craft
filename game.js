@@ -482,7 +482,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 140;
+const GAME_V = 141;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -1963,6 +1963,7 @@ const AFFIX = { atk: [5, 12], block: [4, 9], spd: [4, 9], crit: [3, 7], vamp: [5
 const AFFIX_NAME = { atk: ['힘센', 'Mighty'], block: ['튼튼한', 'Sturdy'], spd: ['날쌘', 'Swift'], crit: ['날카로운', 'Keen'], vamp: ['생명의', 'Living'] };
 const GEAR_MAX = 30; // 가방에 든 전리품 장비 최대 (입은 것 포함)
 const SALVAGE = [{ leather: 1 }, { leather: 1, string: 1 }, { gem: 1 }, { gem: 2 }]; // 🔨 분해하면 나오는 재료 (등급별)
+const rarBadge = r => `<s class="rb rb${r}">${tr(RARITY[r].ko[0], RARITY[r].en[0])}</s>`; // 칸 오른쪽 위 등급 글자 (보/마/희/전)
 const isGear = id => typeof id === 'string' && id.startsWith('g:');
 const gearOf = id => isGear(id) && typeof Game !== 'undefined' ? (Game.gear || []).find(g => `g:${g.u}` === id) || null : null;
 // 무작위 장비 하나 (rar: 등급 0~3)
@@ -10111,7 +10112,42 @@ const Game = {
     const old = this.equip[def.slot];
     this.equip[def.slot] = id;
     if (def.slot === 'weapon') { this.picked = this.lastWeapon = def.gear.b; this.renderInventory(); } // 무기는 바로 손에
-    if (sound) { Sfx.success(); toast(`${iconHtml(def)} ${itemNames(def).main} 👕`); }
+    if (sound) Sfx.success();
+  },
+
+  // 능력치 값 (공격 = 무기 힘 x 10 x 공격%, 나머지는 %)
+  statVals(equip) {
+    const st = gearStats(equip), g = gearOf(equip.weapon), pow = g ? WEAPONS[g.b].power : WEAPONS.hand.power;
+    return { ...st, atk: Math.round(pow * CONFIG.HP_SHOW * (1 + st.atk / 100)) };
+  },
+  // 가방 능력치 표: 고른 장비가 있으면 "지금 → 입으면", 방금 바꿨으면 바뀐 만큼 반짝
+  statRows() {
+    const cur = this.statVals(this.equip), sel = this.bagSel, sd = sel && isGear(sel) && !Object.values(this.equip).includes(sel) && itemDef(sel);
+    const next = sd ? this.statVals({ ...this.equip, [sd.slot]: sel }) : null;
+    const fl = this.statFlash && performance.now() - this.statFlash.at < 1500 ? this.statFlash.before : null;
+    const fmt = (k, v) => (k === 'atk' ? `${v}` : `${v}%`);
+    return STATS.map(x => {
+      const v = cur[x.key], label = x.key === 'atk' ? tr('공격력', 'Attack') : tr(x.ko, x.en);
+      let tail = '', cls = v ? 'on' : '';
+      if (next && next[x.key] !== v) {
+        const up = next[x.key] > v;
+        tail = `<em class="${up ? 'up' : 'down'}">${up ? '⬆' : '⬇'}${fmt(x.key, next[x.key])}</em>`;
+      } else if (fl && fl[x.key] !== v) {
+        const d = v - fl[x.key];
+        cls += d > 0 ? ' flash-up' : ' flash-down';
+        tail = `<em class="${d > 0 ? 'up' : 'down'}">${d > 0 ? '+' : ''}${d}</em>`;
+      }
+      return `<div class="st ${cls}"><span>${x.icon}</span><i>${label}</i><b>${v || x.key === 'atk' ? fmt(x.key, v) : '·'}</b>${tail}</div>`;
+    }).join('');
+  },
+  // 입은 것 바꾸기 전 능력치를 기억 (바꾼 뒤 가방 표에서 차이가 반짝, 알림에도 차이)
+  markStats() { this.statFlash = { before: this.statVals(this.equip), at: performance.now() }; },
+  statDiffText(before) {
+    const now = this.statVals(this.equip);
+    return STATS.filter(x => now[x.key] !== before[x.key]).map(x => {
+      const d = now[x.key] - before[x.key];
+      return `<span style="color:${d > 0 ? '#2e7d32' : '#c62828'}">${x.icon}${d > 0 ? '+' : ''}${d}</span>`;
+    }).join(' ');
   },
 
   // 💎 입지 않은 전리품 장비 (좋은 등급 먼저)
@@ -10148,7 +10184,6 @@ const Game = {
     delete this.equip[slot];
     if (slot === 'weapon') { this.picked = 'hand'; this.renderInventory(); }
     Sfx.pickup();
-    toast(`${iconHtml(itemDef(id))} ${itemNames(itemDef(id)).main} → 🎒`);
     return true;
   },
 
@@ -10202,16 +10237,16 @@ const Game = {
       const sel = id === this.bagSel ? ' sel' : '';
       if (id.startsWith('slot:')) {
         const w = WEAR_SLOTS.find(x => x.slot === id.slice(5)), on = this.equip[w.slot], od = on && itemDef(on);
-        return `<button class="bag-cell wear-cell${on ? ' on' : ' empty'}${od && od.rar ? ` rar${od.rar}` : ''}${sel}" data-cell="${id}">${od ? iconHtml(od) : ''}<i>${tr(w.ko, w.en)}</i></button>`;
+        return `<button class="bag-cell wear-cell${on ? ' on' : ' empty'}${od && od.gear ? ` rar${od.rar}` : ''}${sel}" data-cell="${id}">${od ? iconHtml(od) : ''}${od && od.gear ? rarBadge(od.rar) : ''}<i>${tr(w.ko, w.en)}</i></button>`;
       }
       const def = itemDef(id), held = WEAPONS[id] && this.held === id ? ' held' : '';
-      if (def.gear) return `<button class="bag-cell rar${def.rar}${sel}" data-cell="${id}">${iconHtml(def)}${this.better(id) ? '<em class="up">⬆</em>' : ''}<i>${itemNames(def).main}</i></button>`;
+      if (def.gear) return `<button class="bag-cell rar${def.rar}${sel}" data-cell="${id}">${iconHtml(def)}${rarBadge(def.rar)}${this.better(id) ? '<em class="up">⬆</em>' : ''}<i>${itemNames(def).main}</i></button>`;
       return `<button class="bag-cell${sel}${held}" data-cell="${id}">${iconHtml(def)}${ITEMS[id] ? `<b>${this.inventory[id]}</b>` : ''}<i>${itemNames(def).main}</i></button>`;
     };
     panel.innerHTML = `<div class="bag-head"><span>🎒 ${tr('가방', 'Bag')}</span><button class="bag-close" aria-label="close">✖</button></div>
       <div class="bag-body">
         <div class="bag-me"><canvas class="bag-look"></canvas>
-          <div class="bag-stats">${STATS.map(x => { const v = this.stats()[x.key]; return `<span class="${v ? 'on' : ''}">${x.icon}<b>${v ? `+${v}%` : '·'}</b></span>`; }).join('')}</div>
+          <div class="bag-stats">${this.statRows()}</div>
           <div class="bag-wear">${WEAR_SLOTS.map(w => cell(`slot:${w.slot}`)).join('')}</div></div>
         <div class="bag-items">${groups.map(g => `<div class="bag-group"><div class="bag-group-label"><span>${g.icon}</span>${tr(g.ko, g.en)}</div>` +
           `<div class="bag-cells">${g.ids.length ? g.ids.map(cell).join('') : '<span class="bag-none">·</span>'}</div></div>`).join('')}</div>
@@ -10330,8 +10365,13 @@ const Game = {
   bagAct(act) {
     const id = this.bagItem();
     if (!id) return;
-    if (act === 'off') { this.takeOff(this.bagSel.slice(5)); this.bagSel = id; }
-    else if (act === 'wear') { this.wear(id); this.bagSel = `slot:${itemDef(id).slot}`; }
+    if (act === 'off' || act === 'wear') {
+      this.markStats();
+      if (act === 'off') { this.takeOff(this.bagSel.slice(5)); this.bagSel = id; }
+      else { this.wear(id); this.bagSel = `slot:${itemDef(id).slot}`; }
+      const diff = this.statDiffText(this.statFlash.before);
+      if (diff) toast(`${iconHtml(itemDef(id))} ${diff}`);
+    }
     else if (act === 'salvage') { this.salvage(id); this.bagSel = null; }
     else if (act === 'hold') { Sfx.click(); this.setWeapon(id); return; }
     else if (act === 'drink') this.drink(id);
