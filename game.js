@@ -482,7 +482,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 142;
+const GAME_V = 143;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -8152,7 +8152,7 @@ const Render = {
 
   // 💎 바닥 전리품: 등급 색 빛기둥 (마법 이상) + 반짝 + 통통 튀는 그림
   drawLoot(l, time) {
-    const R = RARITY[l.g.r], def = ITEMS[l.g.b], k = Math.min(1, l.t / 0.5);
+    const R = RARITY[l.g.r], def = baseDef(l.g.b), k = Math.min(1, l.t / 0.5);
     const up = l.t < 0.5 ? Math.sin(k * Math.PI) * 22 : Math.sin(time * 3 + l.phase) * 2;
     const x = l.x0 + (l.x - l.x0) * k, y = l.y0 + (l.y - l.y0) * k;
     this.hd(c => {
@@ -9263,10 +9263,16 @@ const Game = {
   hitStop(sec) { this.stopLeft = Math.max(this.stopLeft || 0, sec); },
 
   loop(ts) {
-    this.step(ts);
-    Render.draw(ts / 1000);
-    if (Card.active) Card.el.mic.style.setProperty('--level', Meter.read().toFixed(2));
+    // 다음 장면을 먼저 예약한다: 한 장면에서 오류가 나도 게임이 멈추지 않게 (오류는 콘솔에, 같은 것은 한 번만)
     requestAnimationFrame(t => this.loop(t));
+    try {
+      this.step(ts);
+      Render.draw(ts / 1000);
+      if (Card.active) Card.el.mic.style.setProperty('--level', Meter.read().toFixed(2));
+    } catch (e) {
+      const k = String(e && e.message);
+      if (!(this.loopErrs || (this.loopErrs = new Set())).has(k)) { this.loopErrs.add(k); console.error('[Loop]', e); }
+    }
   },
 
   // 지난 시간만큼 게임을 진행한다. 0.05초씩 나눠서 움직여 벽을 뚫지 않게 한다
