@@ -475,7 +475,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 123;
+const GAME_V = 124;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -2630,7 +2630,7 @@ const CRITTERS = {
   cow:      { plan: 'quad', c: '#ffffff', ear: 'floppy', snout: 'cow', tail: 'thin', patches: '#3e302b', horns: 'nub' },
   pig:      { plan: 'quad', c: '#ffb9c6', ear: 'floppy', snout: 'pig', tail: 'curl' },
   deer:     { plan: 'quad', c: '#c98b55', belly: '#f6e3cb', ear: 'leaf', snout: 'tinynose', tail: 'pom', tailColor: '#ffffff', dots: '#fff8ec', slim: true },
-  rabbit:   { plan: 'quad', c: '#f6f4f2', ear: 'long', earIn: '#f8bbd0', snout: 'tinynose', tail: 'pom', hop: true },
+  rabbit:   { plan: 'bun', c: '#f7f3ee', earIn: '#f6b8cc', sheet: 'sprites/rabbit.png' },
   bunny:    { plan: 'quad', c: '#cfa77d', belly: '#f3e3cf', ear: 'long', earIn: '#f8bbd0', snout: 'tinynose', tail: 'pom', tailColor: '#ffffff', hop: true },
   hedgehog: { plan: 'quad', c: '#f2d6b3', ear: 'tiny', snout: 'tinynose', tail: 'none', spikes: '#7a5a44', low: true },
   rat:      { plan: 'quad', c: '#a9a9b3', belly: '#e6e6ea', ear: 'big', earIn: '#f8bbd0', snout: 'tinynose', tail: 'long', tailColor: '#f4a7b9', low: true },
@@ -2668,6 +2668,9 @@ const Critter = {
   // 그림 상자: 움직이면 걸음 8장, 가만히 있으면 숨쉬기 12장, 맞음/깜빡 1장씩 미리 그려 두고 쓴다 (그라데이션이 많아 매번 그리면 무겁다)
   cache: new Map(),
   drawCached(c, type, s, m, time) {
+    // 그림 시트가 아직 안 왔으면 담아 두지 않고 바로 그린다 (오면 그림으로 바뀐다)
+    const sp = CRITTERS[type];
+    if (sp && sp.sheet && !this.sheetImg(sp)) return this.draw(c, type, s, m, time);
     const tf = c.getTransform(), k = Math.round(Math.hypot(tf.a, tf.b) * 4) / 4;
     const S = s, mv = (m.animMv || 0) > 0.35, hurt = m.hitT > 0;
     const blink = !hurt && (time + m.phase * 3) % 4.2 < 0.12;
@@ -2705,7 +2708,38 @@ const Critter = {
     c.strokeStyle = this.OL;
     const mv = m.animMv || 0, ph = (m.animT || 0) * 11 + m.phase;
     const st = { spec, mv, ph, time, hurt: m.hitT > 0, blink: (time + m.phase * 3) % 4.2 < 0.12, lw: c.lineWidth, fierce: !(m.def && m.def.calm) };
-    this[spec.plan](c, st);
+    if (spec.sheet && this.sheetImg(spec)) this.sprite(c, st);
+    else this[spec.plan](c, st);
+    c.restore();
+  },
+
+  // ---------- 그림 시트 (이미지 생성으로 만든 6 자세: 0 앉기, 1 귀 까딱, 2 웅크림, 3 공중, 4 착지, 5 맞음) ----------
+  sheets: {},
+  sheetImg(spec) {
+    let e = this.sheets[spec.sheet];
+    if (!e) {
+      e = this.sheets[spec.sheet] = { img: new Image(), ok: false };
+      e.img.onload = () => { e.ok = true; };
+      e.img.src = spec.sheet;
+    }
+    return e.ok ? e.img : null;
+  },
+  sprite(c, st) {
+    const img = this.sheetImg(st.spec), FW = img.width / 6, FH = img.height;
+    let f, lift = 0, sx = 1, sy = 1;
+    if (st.hurt) f = 5;
+    else if (!st.mv) { f = st.blink ? 0 : Math.floor(st.time / 0.9) % 2; sy = 1 + Math.sin(st.time * 2.4) * 0.015; }
+    else {
+      const p = (((st.ph / (Math.PI * 2)) % 1) + 1) % 1;   // 깡총 한 번
+      if (p < 0.22) { f = 2; sy = 0.96; sx = 1.03; }
+      else if (p < 0.72) { f = 3; lift = Math.sin((p - 0.22) / 0.5 * Math.PI) * 2.5; }
+      else { f = 4; sy = 0.97; sx = 1.02; }
+    }
+    const h = 33, w = h * FW / FH;   // 24 칸 기준 (원점 = 발바닥)
+    c.save();
+    c.translate(0, -lift); c.scale(sx, sy);
+    c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
+    c.drawImage(img, f * FW, 0, FW, FH, -w / 2, -h + h * 5 / FH, w, h);
     c.restore();
   },
 
@@ -3262,6 +3296,105 @@ const Critter = {
     this.sh(c, this.grad(c, -1.4, -7.4, 2.2, '#ffcc80', '#fb8c00'), () => {
       c.moveTo(-3.4, -7.7); c.quadraticCurveTo(-1.4, -9.2, 0.6, -7.7); c.quadraticCurveTo(-1.4, -5.1, -3.4, -7.7); c.closePath();
     });
+    c.restore();
+  },
+
+  // ---------- 토끼 (실루엣 방식): 머리-등-엉덩이를 한 줄 곡선으로, 그 안에 명암/허벅지/발. 귀는 끝이 가늘어지는 잎 모양 ----------
+  bun(c, st) {
+    const S = st.spec, { mv, ph } = st;
+    const hop = Math.max(0, Math.sin(ph)) * 3.4 * mv;
+    const air = hop > 0.4 ? 1 : 0, land = mv ? Math.max(0, -Math.sin(ph)) : 0;
+    const br = Math.sin(st.time * 2.4) * 0.02;
+    const col = S.c, dark = shade(col, 0.78), deep = shade(col, 0.62);
+    c.save();
+    c.translate(0, -hop);
+    c.scale(1 + land * 0.08 - br, 1 - land * 0.08 + br + air * 0.05);
+    c.rotate(mv ? -Math.sin(ph) * 0.1 : 0);
+    // 귀 (끝이 가늘어지는 잎 모양, 뒤로 살짝 눕는다)
+    const flop = Math.sin(ph) * 0.22 * mv + Math.sin(st.time * 1.3) * 0.04;
+    const ear = (x, y, rot, fill, inner) => {
+      c.save(); c.translate(x, y); c.rotate(rot);
+      const shape = (w, h) => () => { c.moveTo(-w * 0.55, 0.6); c.bezierCurveTo(-w * 1.15, -h * 0.4, -w * 0.5, -h * 0.95, w * 0.1, -h); c.bezierCurveTo(w * 0.9, -h * 0.9, w * 1.05, -h * 0.35, w * 0.6, 0.6); c.closePath(); };
+      const g = c.createLinearGradient(-2, 0, 2, -10); g.addColorStop(0, shade(fill, 0.9)); g.addColorStop(1, shade(fill, 1.06)); g._base = fill;
+      this.sh(c, g, shape(2.5, 11));
+      if (inner) {
+        const ig = c.createLinearGradient(0, 0, 0, -9); ig.addColorStop(0, shade(inner, 0.92)); ig.addColorStop(1, 'rgba(255,214,226,.55)');
+        this.sh(c, ig, () => { c.moveTo(-0.6, -0.4); c.bezierCurveTo(-1.5, -3.5, -0.9, -7.6, 0.15, -8.6); c.bezierCurveTo(1.1, -7.4, 1.3, -3.4, 0.7, -0.4); c.closePath(); }, false);
+      }
+      c.restore();
+    };
+    ear(-1.2, -17.6, 0.42 + flop, shade(col, 0.88), shade(S.earIn, 0.85));
+    // 몸 실루엣 (왼쪽 보기): 턱 → 얼굴 앞 → 이마 → 뒤통수 → 등 → 엉덩이 → 바닥 → 가슴
+    const body = () => {
+      c.moveTo(-6.6, -7.6);
+      c.bezierCurveTo(-9.9, -8.3, -11.3, -11.2, -10.7, -14.1);
+      c.bezierCurveTo(-10.1, -17.6, -6.9, -19.7, -3.6, -19.3);
+      c.bezierCurveTo(-0.5, -18.9, 1.3, -16.8, 1.7, -14.3);
+      c.bezierCurveTo(2.1, -12.5, 3.9, -11.6, 6.2, -11.1);
+      c.bezierCurveTo(10.4, -10.2, 12.5, -6.4, 11.7, -2.9);
+      c.bezierCurveTo(11.3, -0.7, 9.3, 0.25, 6.6, 0.15);
+      c.quadraticCurveTo(1, 0.5, -3.2, 0.1);
+      c.bezierCurveTo(-5.4, -0.2, -6, -3.8, -6.6, -7.6);
+      c.closePath();
+    };
+    // 꼬리 (몸 뒤에서 몽실)
+    const tg = this.grad(c, 11.6, -4.6, 3.2, '#ffffff', shade(col, 0.95));
+    this.sh(c, tg, () => { const N = 8; for (let i = 0; i <= N; i++) { const a0 = i / N * Math.PI * 2, a1 = (i + 0.5) / N * Math.PI * 2, r = 3; const p = [12 + Math.cos(a0) * r, -4.8 + Math.sin(a0) * r], q = [12 + Math.cos(a1) * (r + 0.9), -4.8 + Math.sin(a1) * (r + 0.9)], e = [12 + Math.cos(a1 + Math.PI / N) * r, -4.8 + Math.sin(a1 + Math.PI / N) * r]; if (!i) c.moveTo(...p); if (i < N) c.quadraticCurveTo(...q, ...e); } c.closePath(); });
+    // 몸 칠 + 안쪽 명암
+    const bg = c.createRadialGradient(-5, -15, 1, 2, -8, 15);
+    bg.addColorStop(0, '#ffffff'); bg.addColorStop(0.45, col); bg.addColorStop(1, dark); bg._base = col;
+    this.sh(c, bg, body);
+    c.save(); c.beginPath(); body(); c.clip();
+    // 아래쪽 그늘
+    const sg = c.createLinearGradient(0, -6, 0, 0.5); sg.addColorStop(0, 'rgba(120,90,80,0)'); sg.addColorStop(1, 'rgba(120,90,80,.28)');
+    c.fillStyle = sg; c.fillRect(-12, -7, 26, 8);
+    // 뒷다리 허벅지: 엉덩이 안쪽의 둥근 덩어리 (선이 아닌 명암으로)
+    const th = c.createRadialGradient(6.4, -5.6, 0.5, 6.4, -4.8, 6.4);
+    th.addColorStop(0, 'rgba(255,255,255,.55)'); th.addColorStop(0.62, 'rgba(255,255,255,0)'); th.addColorStop(0.8, 'rgba(110,80,70,.16)'); th.addColorStop(1, 'rgba(110,80,70,0)');
+    c.fillStyle = th; c.beginPath(); c.arc(6.4, -4.8, 6.6, 0, Math.PI * 2); c.fill();
+    c.strokeStyle = 'rgba(120,90,80,.32)'; c.lineWidth = st.lw * 0.9;
+    c.beginPath(); c.moveTo(1.6, -3.2); c.bezierCurveTo(1.8, -8.6, 8.6, -10, 10.2, -5.4); c.stroke();
+    // 가슴 털 (밝게)
+    c.fillStyle = 'rgba(255,255,255,.75)';
+    c.beginPath(); c.ellipse(-5.6, -5.4, 2.4, 3.6, 0.15, 0, Math.PI * 2); c.fill();
+    // 뺨 볼록 (얼굴 아래 밝게)
+    c.fillStyle = 'rgba(255,255,255,.6)';
+    c.beginPath(); c.ellipse(-7.6, -10.6, 3, 2.2, -0.2, 0, Math.PI * 2); c.fill();
+    // 머리 위 빛
+    c.fillStyle = 'rgba(255,255,255,.7)';
+    c.beginPath(); c.ellipse(-5.4, -17.4, 3.2, 1.1, -0.25, 0, Math.PI * 2); c.fill();
+    c.restore();
+    // 목덜미 털 결 (짧은 붓질)
+    c.strokeStyle = shade(col, 0.72); c.lineWidth = st.lw * 0.75;
+    c.beginPath(); c.moveTo(2.5, -12.4); c.quadraticCurveTo(3.4, -11.6, 4.6, -11.5); c.moveTo(-10.4, -9.8); c.quadraticCurveTo(-9.4, -9.4, -9, -8.6); c.stroke();
+    // 발: 뒷발 (길쭉, 바닥에), 앞발 (가슴 아래 작게 두 개)
+    const foot = (x, y, rx, ry, f) => this.sh(c, this.grad(c, x, y, rx, '#ffffff', f), this.el(c, x, y, rx, ry));
+    foot(3.4, -0.9, 3.6, 1.35, shade(col, 0.93));
+    foot(-4.6, -0.9, 1.6, 1.15, shade(col, 0.9));
+    foot(-2.6, -0.8, 1.6, 1.15, col);
+    // 앞쪽 귀
+    ear(-4.6, -18.4, 0.18 + flop * 0.7, col, S.earIn);
+    // 얼굴: 큰 눈 하나 + 반대쪽 눈은 살짝 (3/4 보기), 분홍 코, ω 입, 볼터치
+    const ex = -7.2, ey = -13.4;
+    if (st.hurt) {
+      c.strokeStyle = '#2a1a12'; c.lineWidth = st.lw * 1.2;
+      c.beginPath(); c.moveTo(ex + 1.4, ey - 1.2); c.lineTo(ex - 0.4, ey); c.lineTo(ex + 1.4, ey + 1.2); c.stroke();
+    } else if (st.blink) {
+      c.strokeStyle = '#2a1a12'; c.lineWidth = st.lw * 1.2;
+      c.beginPath(); c.arc(ex, ey - 0.3, 1.5, Math.PI * 0.15, Math.PI * 0.85); c.stroke();
+    } else {
+      const eg = c.createLinearGradient(0, ey - 2, 0, ey + 2); eg.addColorStop(0, '#1d120c'); eg.addColorStop(1, '#5a3a2c');
+      c.fillStyle = eg; c.beginPath(); c.ellipse(ex, ey, 1.55, 1.95, 0.05, 0, Math.PI * 2); c.fill();
+      c.fillStyle = '#fff'; c.beginPath(); c.arc(ex - 0.5, ey - 0.75, 0.65, 0, Math.PI * 2); c.fill();
+      c.beginPath(); c.arc(ex + 0.55, ey + 0.7, 0.28, 0, Math.PI * 2); c.fill();
+      // 반대쪽 눈 (얼굴 앞 가장자리, 작게)
+      c.fillStyle = '#2a1a12'; c.beginPath(); c.ellipse(-10.1, ey + 0.1, 0.55, 1.5, 0, 0, Math.PI * 2); c.fill();
+    }
+    c.fillStyle = 'rgba(255,128,150,.45)'; c.beginPath(); c.ellipse(-6.4, -10.6, 1.7, 0.9, 0, 0, Math.PI * 2); c.fill();
+    this.sh(c, '#f48fb1', () => { c.moveTo(-10.6, -11.6); c.quadraticCurveTo(-9.7, -12.3, -9.2, -11.4); c.quadraticCurveTo(-9.9, -10.6, -10.6, -11.6); c.closePath(); }, false);
+    c.strokeStyle = '#8d5a4c'; c.lineWidth = st.lw * 0.75;
+    c.beginPath(); c.moveTo(-9.9, -11.1); c.lineTo(-9.9, -10.3); c.quadraticCurveTo(-9.3, -9.7, -8.7, -10.2); c.moveTo(-9.9, -10.3); c.quadraticCurveTo(-10.5, -9.7, -10.9, -10.1); c.stroke();
+    c.strokeStyle = this.OL; c.lineWidth = st.lw;
     c.restore();
   },
 
