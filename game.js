@@ -475,7 +475,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 134;
+const GAME_V = 135;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -2665,8 +2665,8 @@ const CRITTERS = {
   pig:      { plan: 'quad', c: '#ffb9c6', ear: 'floppy', snout: 'pig', tail: 'curl', sheet: 'sprites/critters/pig.png', sh: 28 },
   deer:     { plan: 'quad', c: '#c98b55', belly: '#f6e3cb', ear: 'leaf', snout: 'tinynose', tail: 'pom', tailColor: '#ffffff', dots: '#fff8ec', slim: true, sheet: 'sprites/critters/deer.png', sh: 33 },
   rabbit:   { plan: 'bun', c: '#f7f3ee', earIn: '#f6b8cc', sheet: 'sprites/rabbit.png', anim: 'hop', sh: 33, pad: 5 },
-  bunny:    { plan: 'quad', c: '#cfa77d', belly: '#f3e3cf', ear: 'long', earIn: '#f8bbd0', snout: 'tinynose', tail: 'pom', tailColor: '#ffffff', hop: true },
-  hedgehog: { plan: 'quad', c: '#f2d6b3', ear: 'tiny', snout: 'tinynose', tail: 'none', spikes: '#7a5a44', low: true },
+  bunny:    { plan: 'quad', c: '#cfa77d', belly: '#f3e3cf', ear: 'long', earIn: '#f8bbd0', snout: 'tinynose', tail: 'pom', tailColor: '#ffffff', hop: true, sheet: 'sprites/critters/bunny.png', anim: 'hopb', sh: 32 },
+  hedgehog: { plan: 'quad', c: '#f2d6b3', ear: 'tiny', snout: 'tinynose', tail: 'none', spikes: '#7a5a44', low: true, sheet: 'sprites/critters/hedgehog.png', sh: 26 },
   rat:      { plan: 'quad', c: '#a9a9b3', belly: '#e6e6ea', ear: 'big', earIn: '#f8bbd0', snout: 'tinynose', tail: 'long', tailColor: '#f4a7b9', low: true },
   monkey:   { plan: 'quad', c: '#8d5a3b', face: '#f2d0a9', ear: 'side', snout: 'none', tail: 'curlLong' },
   leopard:  { plan: 'quad', c: '#f3c76f', belly: '#fff7e6', ear: 'pointy', snout: 'muzzle', tail: 'thin', spots: '#6d4c2f' },
@@ -2675,10 +2675,10 @@ const CRITTERS = {
   dragon:   { plan: 'quad', c: '#5fc06c', belly: '#f7e7a6', ear: 'none', snout: 'dragon', tail: 'dragon', horns: 'dragon', wings: '#7fd08a', backSpikes: '#f9a825', sheet: 'sprites/critters/dragon.png', sh: 34 },
   chicken:  { plan: 'bird', c: '#ffffff', wing: '#f2f2f2', comb: '#e53935', beak: '#ffa726', feet: '#ffa726', sheet: 'sprites/critters/chicken.png', sh: 28 },
   parrot:   { plan: 'bird', c: '#4caf50', head: '#e53935', wing: '#1e88e5', crest: '#ffeb3b', beak: '#fff3c4', feet: '#8d6e63', tailLong: '#1e88e5' },
-  eagle:    { plan: 'bird', c: '#8a5a33', head: '#ffffff', wing: '#6d4426', beak: '#ffc107', feet: '#ffc107', big: true },
+  eagle:    { plan: 'bird', c: '#8a5a33', head: '#ffffff', wing: '#6d4426', beak: '#ffc107', feet: '#ffc107', big: true, sheet: 'sprites/critters/eagle.png', anim: 'fly', sh: 32 },
   bat:      { plan: 'fly', c: '#7a5aa6', wing: '#4a3570', ear: 'pointy', sheet: 'sprites/critters/bat.png', anim: 'fly', sh: 28 },
   cavebat:  { plan: 'fly', c: '#5b4b6e', wing: '#3a2f48', ear: 'pointy' },
-  bee:      { plan: 'fly', c: '#ffd54f', wing: 'rgba(255,255,255,.75)', stripes: '#3e2723', antenna: true, stinger: true },
+  bee:      { plan: 'fly', c: '#ffd54f', wing: 'rgba(255,255,255,.75)', stripes: '#3e2723', antenna: true, stinger: true, sheet: 'sprites/critters/bee.png', anim: 'fly', sh: 27 },
   fish:     { plan: 'fish', c: '#4fc3f7', fin: '#0288d1', sheet: 'sprites/critters/fish.png', anim: 'swim', sh: 22 },
   blowfish: { plan: 'fish', c: '#ffd180', fin: '#ffb74d', puff: true, sheet: 'sprites/critters/blowfish.png', anim: 'swim', sh: 24 },
   shark:    { plan: 'fish', c: '#9fb3bf', belly: '#ffffff', fin: '#78909c', shark: true },
@@ -2686,13 +2686,13 @@ const CRITTERS = {
   scorpion: { plan: 'bug', c: '#d9a64e', legs: 6, kind: 'scorpion', sheet: 'sprites/critters/scorpion.png', sh: 30 },
   ant:      { plan: 'bug', c: '#a1453a', legs: 6, kind: 'ant', sheet: 'sprites/critters/ant.png', sh: 28 },
   crab:     { plan: 'bug', c: '#ef6a5a', legs: 6, kind: 'crab', sheet: 'sprites/critters/crab.png', sh: 26 },
-  snake:    { plan: 'snake', c: '#86c25a', belly: '#e4f2d0' },
+  snake:    { plan: 'snake', c: '#86c25a', belly: '#e4f2d0', sheet: 'sprites/critters/snake.png', sh: 27 },
   lizard:   { plan: 'snake', c: '#4fb8ac', belly: '#d6f2ee', legs: true },
-  snail:    { plan: 'snail', c: '#f2dfc4', shell: '#d79a5b' },
+  snail:    { plan: 'snail', c: '#f2dfc4', shell: '#d79a5b', sheet: 'sprites/critters/snail.png', sh: 24 },
   turtle:   { plan: 'turtle', c: '#a9d67c', shell: '#5f9e3a' },
   octopus:  { plan: 'octo', c: '#f59bbd' },
   ghost:    { plan: 'ghost', c: '#ffffff' },
-  jellippi: { plan: 'jelly', c: '#fdd835' },
+  jellippi: { plan: 'jelly', c: '#fdd835', sheet: 'sprites/critters/jellippi.png', anim: 'hopb', sh: 26 },
 };
 const CRITTER_BY_EMOJI = { '🐉': 'dragon' };
 
@@ -2765,8 +2765,9 @@ const Critter = {
     const sp = st.spec, img = this.sheetImg(sp), FW = img.width / 6, FH = img.height, anim = sp.anim || 'walk';
     let f, lift = 0, sx = 1, sy = 1;
     if (st.hurt) f = 5;
-    else if (anim === 'hop') {
-      if (!st.mv) { f = st.blink ? 0 : Math.floor(st.time / 0.9) % 2; sy = 1 + Math.sin(st.time * 2.4) * 0.015; }
+    else if (anim === 'hop' || anim === 'hopb') {
+      // hopb: 1번 그림이 눈 깜빡 (귀 까딱 대신)
+      if (!st.mv) { f = anim === 'hopb' ? (st.blink ? 1 : 0) : st.blink ? 0 : Math.floor(st.time / 0.9) % 2; sy = 1 + Math.sin(st.time * 2.4) * 0.015; }
       else {
         const p = (((st.ph / (Math.PI * 2)) % 1) + 1) % 1;   // 깡총 한 번
         if (p < 0.22) { f = 2; sy = 0.96; sx = 1.03; }
@@ -3852,7 +3853,8 @@ PixelSprite.init();
 // 🧱 3D 장난감 그림 칸 (sprites/tiles/이름.png 한 장 = 칸 그림 하나). 다 받으면 칸 조각을 새로 그린다 (그 전에는 예전 그림)
 const TileArt = {
   NAMES: ['tree0', 'tree1', 'tree2', 'sapling', 'gold_tree', 'lock_tree', 'rock0', 'rock1', 'rock2',
-    'flower_red', 'flower_yellow', 'flower_pink', 'brick', 'gate', 'torch', 'thorn', 'chest'],
+    'flower_red', 'flower_yellow', 'flower_pink', 'brick', 'gate', 'torch', 'thorn', 'chest',
+    'clover0', 'clover1', 'lucky0', 'lucky1', 'tent', 'forge', 'bridge'],
   img: {},
   started: false,
   start() {
@@ -3866,6 +3868,14 @@ const TileArt = {
       i.onerror = done;
       i.src = `sprites/tiles/${n}.png?v=${GAME_V}`;
     }
+  },
+  // 칸 하나를 꽉 채워 그린다 (벽돌/울타리/문/다리: 옆 칸과 이어진다)
+  fill(g, X, Y, n) {
+    this.start();
+    const im = this.img[n];
+    if (!im) return false;
+    g.drawImage(im, X, Y, T, T);
+    return true;
   },
   // 칸(32) 안에 가운데 맞춰 그린다: 폭 w, 높이 h 안에 들게, 바닥은 칸 위에서 bottom px
   draw(g, X, Y, n, w = 30, h = 31, bottom = 31) {
@@ -5080,6 +5090,7 @@ const World = {
         for (const a of [0, -2.1, 2.1]) leafAt(sx, sy, a, 3.2, '#66bb6a');
         // 가운데 큰 클로버 (세잎과 네잎은 크기/색이 똑같고 잎 수만 다르다)
         const cx = 15 + r(11) * 2, cy = 15 + r(12) * 2;
+        if (TileArt.draw(g, X + cx - 16, Y, `${lucky ? 'lucky' : 'clover'}${Math.floor(r(23) * 2) % 2}`, 19, 19, cy + 9.5)) break;
         g.strokeStyle = '#2e7d32'; g.lineWidth = 0.82;
         g.beginPath(); g.moveTo(X + cx, Y + cy); g.quadraticCurveTo(X + cx + 2, Y + cy + 6, X + cx + 1, Y + cy + 10); g.stroke();
         const angs = lucky ? [0, Math.PI / 2, Math.PI, -Math.PI / 2] : [0, -2.1, 2.1];
@@ -5150,7 +5161,7 @@ const World = {
       }
       case TILE.BRICK: {
         if (!bare) grass();
-        if (TileArt.draw(g, X, Y, 'brick', 32, 32, 32)) break;
+        if (TileArt.fill(g, X, Y, 'brick')) break;
         path('#e8d8b8', rrect(1, 1, 30, 30, 3), 'auto', 0.75);
         for (let row = 0; row < 4; row++) {
           const by = 2 + row * 7, off = row % 2 ? 0 : 7;
@@ -5166,7 +5177,7 @@ const World = {
       }
       case TILE.GATE: {
         if (!bare) grass();
-        if (TileArt.draw(g, X, Y, 'gate', 32, 32, 32)) break;
+        if (TileArt.fill(g, X, Y, 'gate')) break;
         for (const [gx, w] of [[5, 7.5], [12.8, 7.5], [20.6, 7]]) path(lin(1, 31, '#c08a50', '#8d5a2b'), rrect(gx, 1, w, 30, [3, 3, 1, 1]), 'auto', 0.68);
         for (const by of [6, 22]) { path('#5d4037', rrect(4.5, by, 23.5, 3.4, 1.2), 'auto', 0.61); g.fillStyle = '#e0e0e0'; for (const rx of [7, 25]) { g.beginPath(); g.arc(X + rx, Y + by + 1.7, 0.8, 0, 7); g.fill(); } }
         path('#ffca28', circle(23, 15.5, 1.6), '#8d6e00', 0.48);
@@ -5179,6 +5190,7 @@ const World = {
           else if (base === TILE.SEA) water('#0d47a1', '#1e88e5', false);
           else water(gr.water[0], gr.water[1], false);
         }
+        if (TileArt.fill(g, X, Y, 'bridge')) break;
         path('rgba(0,0,0,.25)', rrect(0, 7, T, 21, 2), null);
         for (let k = 0; k < 4; k++) path(lin(5, 27, '#c9925a', '#946238'), rrect(k * 8 + 0.4, 5, 7.2, 22, 1.6), 'auto', 0.61);
         for (const by of [1.5, 26.5]) path('#7a5238', rrect(-0.3, by, T + 0.6, 4, 2), 'auto', 0.68);
@@ -5199,7 +5211,7 @@ const World = {
       }
       case TILE.THORN: {
         if (!bare) grass();
-        if (TileArt.draw(g, X, Y, 'thorn', 32, 31, 31.5)) break;
+        if (TileArt.fill(g, X, Y, 'thorn')) break;
         path('rgba(0,0,0,.18)', oval(16, 29.5, 14, 1.8), null);
         for (const [cx, top, hw] of [[6, 11, 4.2], [12.5, 4, 4.6], [19.5, 7, 4.6], [26, 12, 4.2]]) {
           g.beginPath(); g.moveTo(X + cx - hw, Y + 25); g.quadraticCurveTo(X + cx - hw * 0.3, Y + top + 6, X + cx, Y + top); g.quadraticCurveTo(X + cx + hw * 0.3, Y + top + 6, X + cx + hw, Y + 25); g.closePath();
@@ -7681,7 +7693,13 @@ const Render = {
       ctx.fillStyle = color;
       ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.lineTo(x3, y3); ctx.closePath(); ctx.fill();
     };
-    if (st.kind === 'tent') {
+    const art = TileArt.img[st.kind === 'tent' ? 'tent' : 'forge'];
+    TileArt.start();
+    if (art) {
+      // 3D 장난감 그림 (텐트: 칸 1.7개 폭 / 화덕: 1.5칸 높이)
+      const h = T * (st.kind === 'tent' ? 1.75 : 1.5), w = h * art.width / art.height;
+      ctx.drawImage(art, cx - w / 2, by - h + 1, w, h);
+    } else if (st.kind === 'tent') {
       // 초록/하양 줄무늬 텐트 + 열린 입구 + 꼭대기 🍀 깃발
       const w = T * 0.8, top = by - T * 1.45;
       tri(cx - w, by, cx + w, by, cx, top, '#2e7d32');
@@ -7719,7 +7737,7 @@ const Render = {
       ctx.textBaseline = 'middle';
       ctx.fillStyle = '#000';
       ctx.font = `${ready ? 16 : 12}px ${FONT_EMOJI}`;
-      ctx.fillText('🔨', cx, by - T * (st.kind === 'tent' ? 1.95 : 1.65) - hop);
+      ctx.fillText('🔨', cx, by - T * (st.kind === 'tent' ? 1.95 : 1.65) - (art ? T * 0.15 : 0) - hop);
     });
   },
 
