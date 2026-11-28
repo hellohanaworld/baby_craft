@@ -142,7 +142,7 @@ const ITEMS = {
   boots:   { emoji: '👢', ko: '장화',      en: 'boots',          kind: 'wear', slot: 'feet', weight: 0, icon: 'BOOTS', stats: { spd: 12 } },
   ring:    { emoji: '💍', ko: '행운 반지', en: 'lucky ring',     kind: 'wear', slot: 'acc', weight: 0, icon: 'RING', stats: { crit: 10 } },
   amulet:  { emoji: '📿', ko: '힘 목걸이', en: 'power necklace', kind: 'wear', slot: 'acc', weight: 0, icon: 'AMULET', stats: { atk: 15 } },
-  shield:  { emoji: '🛡️', ko: '방패',      en: 'shield',         kind: 'gear', slot: 'arm', weight: 0, icon: 'SHIELD' }, // 방패 칸에 끼우면 맞을 때 막는다 (SHIELD_HITS 번 막으면 부서짐)
+  shield:  { emoji: '🛡️', ko: '방패',      en: 'shield',         kind: 'wear', slot: 'arm', weight: 0, icon: 'SHIELD', stats: { block: 20 } },
   // 🧱 블록: 꽃은 캐서, 묘목은 나무를 캐면 같이 나온다 (심으면 자라서 나무), 나머지는 제작대에서
   flower:  { emoji: '🌷', ko: '꽃',     en: 'flower',  kind: 'block', tile: 'FLOWER',  weight: 0 },
   sapling: { emoji: '🌱', ko: '묘목',   en: 'sapling', kind: 'block', tile: 'SAPLING', weight: 0 },
@@ -160,9 +160,9 @@ const BAG_V = 2;
 // 무기 (power 가 클수록 강하다)
 const WEAPONS = {
   hand:  { emoji: '✋', ko: '손',   en: 'hand',  power: 1 },
-  axe:   { emoji: '🪓', ko: '도끼', en: 'axe',   power: 2, icon: 'AXE' },
-  bow:   { emoji: '🏹', ko: '활',   en: 'bow',   power: 3, icon: 'BOW' },
-  sword: { emoji: '🗡️', ko: '칼',   en: 'sword', power: 4, icon: 'SWORD' },
+  axe:   { emoji: '🪓', ko: '도끼', en: 'axe',   power: 2, icon: 'AXE',   kind: 'weapon', slot: 'weapon', stats: { atk: 5 } },
+  bow:   { emoji: '🏹', ko: '활',   en: 'bow',   power: 3, icon: 'BOW',   kind: 'weapon', slot: 'weapon', stats: { crit: 5 } },
+  sword: { emoji: '🗡️', ko: '칼',   en: 'sword', power: 4, icon: 'SWORD', kind: 'weapon', slot: 'weapon', stats: { atk: 10 } },
 };
 
 // 제작대 레시피 (1탄 집 안, 2탄 ⛺ 텐트, 3탄 ⚒️ 대장간). unlock: 몬스터를 이만큼 잡아야 열린다.
@@ -191,7 +191,7 @@ const RECIPES = [
 ];
 // 제작대 줄: 무기(+방패) / 옷 / 블록(+재료) / 음식 / 물약
 const recipeGroup = r => {
-  if (WEAPONS[r.result] || ITEMS[r.result].kind === 'gear') return 'weapon';
+  if (WEAPONS[r.result] || r.result === 'shield') return 'weapon';
   return { wear: 'wear', food: 'food', potion: 'potion' }[ITEMS[r.result].kind] || 'block';
 };
 
@@ -482,7 +482,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 139;
+const GAME_V = 140;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -811,7 +811,6 @@ function abcHeard(heard, ch) {
   }
   return false;
 }
-const SHIELD_HITS = 10; // 🛡️ 방패가 버티는 횟수
 const rint = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
 
 const Quiz = {
@@ -1740,8 +1739,8 @@ const Craft = {
   unlocked(r) { return Game.kills >= r.unlock; },
   // 무기 / 방패는 한 번만
   owned(r) {
-    const def = ITEMS[r.result];
-    return Game.weapons.has(r.result) || (def && ['gear', 'wear'].includes(def.kind) && (this.has(r.result, 1) || Game.equip[def.slot] === r.result));
+    const def = baseDef(r.result);
+    return !!(def && def.slot) && Game.gear.some(g => g.b === r.result);
   },
   canMake(r) {
     return this.unlocked(r) && !this.owned(r) &&
@@ -1801,14 +1800,16 @@ const Craft = {
 
   make(r) {
     if (!r || !this.canMake(r)) return;
-    for (const [type, n] of Object.entries(r.needs)) Game.inventory[type] -= n;
     const w = WEAPONS[r.result] || ITEMS[r.result], { main } = itemNames(w);
-    if (WEAPONS[r.result]) {
-      Game.weapons.add(r.result);
-      Game.picked = Game.lastWeapon = r.result;  // 새로 만든 무기를 바로 든다
+    if (w.slot && Game.gear.length >= GEAR_MAX) { Sfx.soft(); toast(tr('🎒 장비가 꽉 찼어요! 🔨 분해해 주세요', '🎒 Gear is full! 🔨 Salvage some')); return; }
+    for (const [type, n] of Object.entries(r.needs)) Game.inventory[type] -= n;
+    if (w.slot) {
+      // 무기/방패/옷: 보통 등급 장비 하나. 그 곳이 비었거나 지금 것보다 좋으면 바로 입는다 (무기는 손에 든다)
+      const g = makeGear(0, r.result), id = `g:${g.u}`;
+      Game.addGear(g);
+      if (!Game.equip[w.slot] || Game.better(id)) Game.wear(id, false);
     } else {
-      Game.inventory[r.result] = (Game.inventory[r.result] || 0) + (r.count || 1);  // 블록/음식/방패/옷은 가방에 (손에 든 것은 그대로, 옷은 바로 입는다)
-      if (ITEMS[r.result].slot && !Game.equip[ITEMS[r.result].slot]) Game.wear(r.result, false); // 그 곳이 비어 있으면 바로 입는다
+      Game.inventory[r.result] = (Game.inventory[r.result] || 0) + (r.count || 1);  // 블록/음식/물약은 가방에 (손에 든 것은 그대로)
       // 물약은 손에 든 것이 무기면 바로 손에 (다치면 ✋ 로 마신다)
       if (ITEMS[r.result].kind === 'potion' && !Game.heldBlock && !Game.heldFood && !Game.heldPotion) Game.picked = r.result;
     }
@@ -1919,13 +1920,13 @@ function itemDesc(id) {
     return tr(`마시면 ${d.light}초 동안 어두운 곳이 밝아요 💡`, `Drink: bright for ${d.light}s 💡`);
   }
   if (d.kind === 'wear') return d.stats ? statText(d.stats) : tr('입으면 캐릭터에 보여요', 'Wear it to show on your character');
-  if (d.kind === 'gear') return tr('끼우면 두 번에 한 번 막아 줘요', 'Put it on: blocks every other hit');
   return tr('제작대에서 만들 때 써요', 'Used at the crafting table');
 }
 
 const holdable = id => !!WEAPONS[id] || !!(ITEMS[id] && (ITEMS[id].tile || ['food', 'potion'].includes(ITEMS[id].kind)));
 // 옷 입는 곳 (Q 고르는 칸 맨 위 줄). 입은 옷은 가방에서 빠지고, 벗으면 가방으로 돌아간다
 const WEAR_SLOTS = [
+  { slot: 'weapon', ko: '무기', en: 'Weapon' },
   { slot: 'head', ko: '머리', en: 'Head' },
   { slot: 'body', ko: '몸통', en: 'Body' },
   { slot: 'feet', ko: '다리', en: 'Legs' },
@@ -1956,7 +1957,8 @@ const RARITY = [
   { ko: '전설', en: 'Legendary', c: '#ff9800', extra: 3, mul: 1.8 },
 ];
 const LOOT_BEAM = [null, '#1e88e5', '#ffb300', '#ff6d00']; // 바닥 빛기둥 색 (진하게)
-const LOOT_BASES = ['hat', 'vest', 'boots', 'ring', 'amulet', 'crown'];
+const LOOT_BASES = ['hat', 'vest', 'boots', 'ring', 'amulet', 'crown', 'shield', 'axe', 'bow', 'sword'];
+const baseDef = b => ITEMS[b] || (b !== 'hand' && WEAPONS[b]) || null;
 const AFFIX = { atk: [5, 12], block: [4, 9], spd: [4, 9], crit: [3, 7], vamp: [5, 12] }; // 덧붙는 능력치 [최소, 최대] × 등급 배수
 const AFFIX_NAME = { atk: ['힘센', 'Mighty'], block: ['튼튼한', 'Sturdy'], spd: ['날쌘', 'Swift'], crit: ['날카로운', 'Keen'], vamp: ['생명의', 'Living'] };
 const GEAR_MAX = 30; // 가방에 든 전리품 장비 최대 (입은 것 포함)
@@ -1967,7 +1969,7 @@ const gearOf = id => isGear(id) && typeof Game !== 'undefined' ? (Game.gear || [
 function makeGear(rar, base) {
   base = base || LOOT_BASES[Math.floor(Math.random() * LOOT_BASES.length)];
   const R = RARITY[rar], s = {};
-  for (const [k, v] of Object.entries(ITEMS[base].stats)) s[k] = Math.round(v * R.mul);
+  for (const [k, v] of Object.entries(baseDef(base).stats || {})) s[k] = Math.round(v * R.mul);
   const keys = Object.keys(AFFIX).filter(k => !s[k]), added = [];
   for (let i = 0; i < R.extra && keys.length; i++) {
     const k = keys.splice(Math.floor(Math.random() * keys.length), 1)[0], [a, b] = AFFIX[k];
@@ -1978,16 +1980,18 @@ function makeGear(rar, base) {
 }
 // 장비 이름: "날쌘 장화", 전설은 "전설의 장화"
 function gearName(g) {
-  const base = ITEMS[g.b], pre = g.r === 3 ? ['전설의', 'Legendary'] : g.p ? AFFIX_NAME[g.p] : null;
+  const base = baseDef(g.b), pre = g.r === 3 ? ['전설의', 'Legendary'] : g.p ? AFFIX_NAME[g.p] : null;
   return pre ? { ko: `${pre[0]} ${base.ko}`, en: `${pre[1]} ${base.en}` } : { ko: base.ko, en: base.en };
 }
 // 전리품 장비를 아이템처럼 (그림은 바탕 아이템 것)
 function gearDef(id) {
   const g = gearOf(id);
-  return g && ITEMS[g.b] ? { ...ITEMS[g.b], ...gearName(g), stats: g.s, rar: g.r, gear: g } : null;
+  return g && baseDef(g.b) ? { ...baseDef(g.b), ...gearName(g), stats: g.s, rar: g.r, gear: g } : null;
 }
 const itemDef = id => WEAPONS[id] || ITEMS[id] || gearDef(id);
 const gearScore = st => Object.values(st || {}).reduce((a, v) => a + v, 0);
+// 장비 값어치 (좋은지 비교): 능력치 합 + 무기는 힘 x10
+const gearValue = d => (d ? gearScore(d.stats) + (d.power || 0) * 10 : 0);
 const statText = stats => STATS.filter(x => stats && stats[x.key]).map(x => `${x.icon} ${tr(x.ko, x.en)} +${stats[x.key]}%`).join(' · ');
 // 입은 옷 id 목록 (그림 / 다른 사람에게 보내기)
 const wornList = equip => WEAR_SLOTS.map(w => isGear(equip[w.slot]) ? (gearOf(equip[w.slot]) || {}).b : equip[w.slot]).filter(id => ITEMS[id] && ['wear', 'gear'].includes(ITEMS[id].kind));
@@ -8715,7 +8719,8 @@ const Game = {
   stats() { return gearStats(this.equip); },
   seen: new Set(), // 한 번이라도 얻은 아이템 (제작대에서 모르는 재료는 ??? 로)
   buffs: { speed: 0, light: 0 }, // 물약 힘이 끝나는 시각 (performance.now)
-  weapons: new Set(),
+  // 가진 무기 종류 (무기 칸에 끼운 것)
+  get weapons() { const g = gearOf(this.equip.weapon); return new Set(g ? [g.b] : []); },
   picked: null, // 고른 것 (무기 또는 블록). 블록을 다 놓으면 lastWeapon 으로 돌아간다
   lastWeapon: null, // 마지막으로 고른 무기 (없으면 가진 무기 중 제일 센 것)
   dig: { i: -1, n: 0 }, // 캐는 중인 칸과 친 횟수
@@ -8926,30 +8931,40 @@ const Game = {
   applyBag(bag = {}) {
     if (bag.v !== BAG_V) bag = {}; // 아이템 체계가 바뀌었다: 새 가방으로
     this.inventory = {};
-    this.weapons = new Set();
     this.unlockShown = new Set();
     for (const [type, n] of Object.entries(bag.inventory || {})) if (ITEMS[type] && n > 0) this.inventory[type] = n;
-    for (const id of bag.weapons || []) if (WEAPONS[id]) this.weapons.add(id);
     this.seen = new Set((bag.seen || []).filter(id => ITEMS[id]));
     for (const id of Object.keys(this.inventory)) this.seen.add(id);
-    this.gear = (Array.isArray(bag.gear) ? bag.gear : []).filter(g => g && g.u && ITEMS[g.b] && RARITY[g.r] && g.s).slice(0, GEAR_MAX);
+    this.gear = (Array.isArray(bag.gear) ? bag.gear : []).filter(g => g && g.u && baseDef(g.b) && RARITY[g.r] && g.s);
     this.equip = {};
-    for (const [slot, id] of Object.entries(bag.equip || {})) { const d = itemDef(id); if (d && d.slot === slot && (d.gear || ITEMS[id])) this.equip[slot] = id; }
-    // 예전 가방 (입은 옷을 따로 적기 전): 가방의 옷을 빈 곳에 입힌다
-    if (!bag.equip) for (const id of Object.keys(this.inventory)) if (ITEMS[id].kind === 'wear' && !this.equip[ITEMS[id].slot]) this.wear(id, false);
-    // 예전 가방 (방패는 가방에 있기만 하면 막았다): 방패 칸이 비었으면 끼운다
-    if (!this.equip.arm && this.inventory.shield > 0) this.wear('shield', false);
+    for (const [slot, id] of Object.entries(bag.equip || {})) { const d = isGear(id) && itemDef(id); if (d && d.slot === slot) this.equip[slot] = id; }
+    // 예전 가방 (장비 통합 전, v139 까지): 가진 무기, 입은 옷, 가방의 옷/방패를 보통 등급 장비로 바꾼다
+    if (!bag.gv) {
+      const conv = b => { const g = makeGear(0, b); this.gear.push(g); return `g:${g.u}`; };
+      const ws = (bag.weapons || []).filter(id => WEAPONS[id] && id !== 'hand').sort((a, b) => WEAPONS[b].power - WEAPONS[a].power);
+      ws.forEach((id, i) => { const gid = conv(id); if (!i) this.equip.weapon = gid; });
+      for (const [slot, id] of Object.entries(bag.equip || {})) if (ITEMS[id] && ITEMS[id].slot === slot && !this.equip[slot]) this.equip[slot] = conv(id);
+      for (const id of Object.keys(this.inventory)) {
+        if (!ITEMS[id].slot) continue;
+        for (let i = 0; i < Math.min(3, this.inventory[id]); i++) { const gid = conv(id); if (!this.equip[ITEMS[id].slot]) this.equip[ITEMS[id].slot] = gid; }
+        delete this.inventory[id];
+      }
+    }
+    for (const id of Object.keys(this.inventory)) if (ITEMS[id].slot) delete this.inventory[id]; // 옷은 이제 가방에 쌓이지 않는다
+    if (this.gear.length > GEAR_MAX) {
+      const on = new Set(Object.values(this.equip));
+      this.gear = [...this.gear.filter(g => on.has(`g:${g.u}`)), ...this.gear.filter(g => !on.has(`g:${g.u}`))].slice(0, GEAR_MAX);
+    }
     this.picked = holdable(bag.picked) ? bag.picked : null;
     this.lastWeapon = WEAPONS[bag.lastWeapon] ? bag.lastWeapon : null;
     this.kills = bag.kills || 0;
-    this.shieldHits = bag.shieldHits || 0;
     for (const r of RECIPES) if (r.unlock > 0 && this.kills >= r.unlock) this.unlockShown.add(r.result);
     this.bagJson = JSON.stringify(this.bagItems());
     this.bagT = bag.t || 0;
   },
 
   bagItems() {
-    return { v: BAG_V, inventory: this.inventory, equip: this.equip, gear: this.gear || [], seen: [...this.seen], weapons: [...this.weapons], picked: this.picked, lastWeapon: this.lastWeapon, kills: this.kills, shieldHits: this.shieldHits || 0 };
+    return { v: BAG_V, gv: 2, inventory: this.inventory, equip: this.equip, gear: this.gear || [], seen: [...this.seen], picked: this.picked, lastWeapon: this.lastWeapon, kills: this.kills };
   },
 
   // 가방 + 누구 것인지(owner: 이름) + 마지막으로 바뀐 때(t). 바뀌었을 때만 t 를 새로
@@ -9375,7 +9390,7 @@ const Game = {
     if (this.dig.i !== i) this.dig = { i, n: 0 };
     this.dig.n++;
     const dig = DIG[tt], num = v => (typeof v === 'string' ? CONFIG[v] : v);
-    const need = dig.tools && dig.tools.includes(this.weapon) ? num(dig.tool) : num(dig.hand);
+    const need = dig.tools && this.weapon !== 'hand' ? num(dig.tool) : num(dig.hand);
     Sfx.hit();
     Floaters.add(tx * T + T / 2, ty * T + T / 4, this.dig.n < need ? '💥' : '✨', 16);
     Particles.chips(tx, ty, tt, this.dig.n >= need);
@@ -9692,23 +9707,6 @@ const Game = {
   // m: 몬스터 또는 다른 사람 캐릭터(isPlayer). 맞으면 빨갛게 번쩍이며 때린 쪽 반대로 밀린다
   hurt(m) {
     if (this.state !== 'play' || Player.invulnT > 0) return;
-    // 🛡️ 방패: 다 막아 주고, SHIELD_HITS 번 막으면 부서진다 (다시 만들 수 있다)
-    if (this.equip.arm === 'shield') {
-      Player.invulnT = CONFIG.INVULN_SEC;
-      const left = SHIELD_HITS - (this.shieldHits = (this.shieldHits || 0) + 1);
-      if (left <= 0) {
-        delete this.equip.arm;
-        this.shieldHits = 0;
-        if (this.inventory.shield > 0) this.wear('shield', false); // 가방에 하나 더 있으면 바로 끼운다
-        Sfx.hurt();
-        Floaters.add(Player.x, Player.y - 30, '💥', 20);
-        toast(`💥 ${iconHtml(ITEMS.shield)} ${tr('방패가 부서졌어요! 🔨 다시 만들어요', 'Your shield broke! Craft a new one')}`);
-      } else {
-        Sfx.click();
-        Floaters.add(Player.x, Player.y - 30, `🛡️${left}`, 18);
-      }
-      return;
-    }
     // 🛡️ 막기: 옷이 막아 주면 안 다친다 (잠깐 무적, 파란 "막음!")
     if (Math.random() * 100 < this.stats().block) {
       Player.invulnT = CONFIG.INVULN_SEC * 0.6;
@@ -10010,10 +10008,9 @@ const Game = {
 
   // 고른 무기. 블록을 골랐거나 아직 안 골랐으면 가진 무기 중 제일 센 것
   get weapon() {
-    if (this.picked === 'hand' || this.weapons.has(this.picked)) return this.picked;
-    let best = 'hand';
-    for (const id of this.weapons) if (WEAPONS[id].power > WEAPONS[best].power) best = id;
-    return best;
+    if (this.picked === 'hand') return 'hand';
+    const g = gearOf(this.equip.weapon);
+    return g ? g.b : 'hand';
   },
 
   // 손에 든 블록 (없으면 null)
@@ -10062,7 +10059,7 @@ const Game = {
 
   // 주머니 칸 하나의 것 (무기는 맨손 + 가진 무기, 나머지는 가방에 있는 것)
   pouchIds(key) {
-    if (key === 'weapon') return Object.keys(WEAPONS).filter(id => id === 'hand' || this.weapons.has(id));
+    if (key === 'weapon') return ['hand', ...this.weapons];
     return Object.keys(ITEMS).filter(id => pouchOf(id) === key && this.inventory[id] > 0);
   },
   pouchPick: {}, // 주머니 칸마다 마지막에 든 것
@@ -10093,22 +10090,15 @@ const Game = {
 
   // 다른 사람에게 줄 수 있는 것: 손 말고 가진 무기 전부, 가방 것 전부, 입고 있는 옷/방패
   giftIds() {
-    const ids = Object.keys(WEAPONS).filter(id => id !== 'hand' && this.weapons.has(id));
-    for (const id of Object.keys(ITEMS)) if (ITEMS[id].kind !== 'heart' && (this.inventory[id] > 0 || (ITEMS[id].slot && this.equip[ITEMS[id].slot] === id))) ids.push(id);
-    return ids;
+    // 장비(무기, 옷)는 각자 것이라 주지 않는다
+    return Object.keys(ITEMS).filter(id => ITEMS[id].kind !== 'heart' && !ITEMS[id].slot && this.inventory[id] > 0);
   },
   owns(id) { return this.giftIds().includes(id); },
   // 하나 빼기 (주려고). 가방에 없으면 입고 있던 것을 벗어서
   takeOne(id) {
-    if (WEAPONS[id]) {
-      if (!this.weapons.delete(id)) return false;
-      if (this.picked === id) this.picked = null;
-      if (this.lastWeapon === id) this.lastWeapon = null;
-    } else if (this.inventory[id] > 0) {
+    if (this.inventory[id] > 0) {
       if (!--this.inventory[id]) delete this.inventory[id];
       if (this.picked === id && !this.inventory[id]) this.picked = this.lastWeapon;
-    } else if (ITEMS[id] && ITEMS[id].slot && this.equip[ITEMS[id].slot] === id) {
-      delete this.equip[ITEMS[id].slot];
     } else return false;
     this.renderInventory();
     return true;
@@ -10117,26 +10107,22 @@ const Game = {
   // 옷 입기: 가방에서 꺼내 입는다 (그 곳에 입고 있던 것은 가방으로)
   wear(id, sound = true) {
     const def = itemDef(id);
-    if (!def || !def.slot || !['wear', 'gear'].includes(def.kind) || !(def.gear || this.inventory[id] > 0)) return;
+    if (!def || !def.slot || !def.gear) return;
     const old = this.equip[def.slot];
-    if (old && !isGear(old)) this.inventory[old] = (this.inventory[old] || 0) + 1;
-    if (!def.gear) {
-      this.inventory[id]--;
-      if (!this.inventory[id]) delete this.inventory[id];
-    }
     this.equip[def.slot] = id;
+    if (def.slot === 'weapon') { this.picked = this.lastWeapon = def.gear.b; this.renderInventory(); } // 무기는 바로 손에
     if (sound) { Sfx.success(); toast(`${iconHtml(def)} ${itemNames(def).main} 👕`); }
   },
 
   // 💎 입지 않은 전리품 장비 (좋은 등급 먼저)
   looseGear() {
     const on = new Set(Object.values(this.equip));
-    return (this.gear || []).filter(g => !on.has(`g:${g.u}`)).sort((a, b) => b.r - a.r || gearScore(b.s) - gearScore(a.s));
+    return (this.gear || []).filter(g => !on.has(`g:${g.u}`)).sort((a, b) => b.r - a.r || gearValue(gearDef(`g:${b.u}`)) - gearValue(gearDef(`g:${a.u}`)));
   },
   // 지금 그 곳에 입은 것보다 좋은지 (능력치 합)
   better(id) {
     const d = itemDef(id), w = d && this.equip[d.slot], wd = w && itemDef(w);
-    return !!d && w !== id && gearScore(d.stats) > gearScore(wd && wd.stats);
+    return !!d && w !== id && gearValue(d) > gearValue(wd);
   },
   // 💎 주운 장비를 가방에 (꽉 차면 false)
   addGear(g) {
@@ -10160,7 +10146,7 @@ const Game = {
     const id = this.equip[slot];
     if (!id) return false;
     delete this.equip[slot];
-    if (!isGear(id)) this.inventory[id] = (this.inventory[id] || 0) + 1;
+    if (slot === 'weapon') { this.picked = 'hand'; this.renderInventory(); }
     Sfx.pickup();
     toast(`${iconHtml(itemDef(id))} ${itemNames(itemDef(id)).main} → 🎒`);
     return true;
@@ -10203,9 +10189,8 @@ const Game = {
     const has = t => this.inventory[t] > 0, of = kind => Object.keys(ITEMS).filter(t => ITEMS[t].kind === kind && !ITEMS[t].tile && has(t));
     const groups = [
       // 무기: 자주 바꾸니까 따로, 누르면 바로 든다 (✋ 맨손 포함)
-      { icon: '✋', ko: '무기', en: 'Weapons', ids: Object.keys(WEAPONS).filter(id => id === 'hand' || this.weapons.has(id)) },
       // 장비: 입는 것 (옷, 방패). 누르고 👕 입기 → 왼쪽 입는 곳으로
-      { icon: '🛡️', ko: '장비', en: 'Gear', ids: [...this.looseGear().map(g => `g:${g.u}`), ...of('wear'), ...of('gear')] },
+      { icon: '🛡️', ko: `장비 ${this.gear.length}/${GEAR_MAX}`, en: `Gear ${this.gear.length}/${GEAR_MAX}`, ids: this.looseGear().map(g => `g:${g.u}`) },
       { icon: '🪵', ko: '재료', en: 'Materials', ids: of('material') },
       { icon: '🧱', ko: '블록', en: 'Blocks', ids: Object.keys(ITEMS).filter(t => ITEMS[t].tile && has(t)) },
       { icon: '🍎', ko: '음식', en: 'Food', ids: of('food') },
@@ -10269,11 +10254,11 @@ const Game = {
           const d = (def.stats[x.key] || 0) - ((wd && wd.stats && wd.stats[x.key]) || 0);
           if (d) cmp.push(`<span class="${d > 0 ? 'up' : 'down'}">${d > 0 ? '⬆' : '⬇'}${x.icon}${d > 0 ? '+' : ''}${d}</span>`);
         }
-        acts.push(['wear', '👕', '입기', 'Put on'], ['salvage', '🔨', '분해', 'Salvage']);
+        acts.push(def.slot === 'weapon' ? ['wear', '✋', '들기', 'Hold'] : ['wear', '👕', '입기', 'Put on'], ['salvage', '🔨', '분해', 'Salvage']);
       }
       const R = RARITY[def.rar];
       return `<span class="bag-info-icon rar${def.rar}">${iconHtml(def)}</span>
-      <div class="bag-info-text"><b class="rar-name rar${def.rar}">${main}</b> <small>${tr(R.ko, R.en)}</small><p>${statText(def.stats)}</p>${cmp.length ? `<p class="bag-cmp">${tr(wd ? '입은 것보다' : '지금보다', wd ? 'vs worn' : 'vs now')} ${cmp.join(' ')}</p>` : ''}</div>
+      <div class="bag-info-text"><b class="rar-name rar${def.rar}">${main}</b> <small>${tr(R.ko, R.en)}</small><p>${def.power ? `${tr('힘', 'Power')} ${'⭐'.repeat(def.power)} · ` : ''}${statText(def.stats)}</p>${cmp.length ? `<p class="bag-cmp">${tr(wd ? '입은 것보다' : '지금보다', wd ? 'vs worn' : 'vs now')} ${cmp.join(' ')}</p>` : ''}</div>
       <div class="bag-acts">${acts.map(([act, icon, ko, en]) => `<button class="big-btn bag-act" data-act="${act}">${icon} ${tr(ko, en)}</button>`).join('')}</div>`;
     }
     else if (def.slot) acts.push(['wear', def.kind === 'gear' ? '🛡️' : '👕', def.kind === 'gear' ? '끼우기' : '입기', 'Put on']);
@@ -10396,10 +10381,9 @@ const Game = {
 
   addItem(type) {
     Player.happyT = Math.max(Player.happyT, 1.1); // 주우면 기쁜 얼굴
-    if (WEAPONS[type]) {
-      // 선물 받은 무기: 무기 칸에 넣는다 (이미 있으면 그대로)
-      this.weapons.add(type);
-      this.showGain(WEAPONS[type], '+1');
+    if (baseDef(type) && baseDef(type).slot) {
+      // 받은 무기/옷 (예전 기기에서 온 선물): 보통 등급 장비로
+      if (this.addGear(makeGear(0, type))) this.showGain(baseDef(type), '+1');
       this.renderInventory();
       return;
     }
