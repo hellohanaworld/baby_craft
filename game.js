@@ -475,7 +475,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 137;
+const GAME_V = 138;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -2667,7 +2667,7 @@ const CRITTERS = {
   rabbit:   { plan: 'bun', c: '#f7f3ee', earIn: '#f6b8cc', sheet: 'sprites/rabbit.png', anim: 'hop', sh: 33, pad: 5 },
   bunny:    { plan: 'quad', c: '#cfa77d', belly: '#f3e3cf', ear: 'long', earIn: '#f8bbd0', snout: 'tinynose', tail: 'pom', tailColor: '#ffffff', hop: true, sheet: 'sprites/critters/bunny.png', anim: 'hopb', sh: 32 },
   hedgehog: { plan: 'quad', c: '#f2d6b3', ear: 'tiny', snout: 'tinynose', tail: 'none', spikes: '#7a5a44', low: true, sheet: 'sprites/critters/hedgehog.png', sh: 26 },
-  rat:      { plan: 'quad', c: '#a9a9b3', belly: '#e6e6ea', ear: 'big', earIn: '#f8bbd0', snout: 'tinynose', tail: 'long', tailColor: '#f4a7b9', low: true },
+  rat:      { plan: 'quad', c: '#a9a9b3', belly: '#e6e6ea', ear: 'big', earIn: '#f8bbd0', snout: 'tinynose', tail: 'long', tailColor: '#f4a7b9', low: true, sheet: 'sprites/critters/rat.png', sh: 27 },
   monkey:   { plan: 'quad', c: '#8d5a3b', face: '#f2d0a9', ear: 'side', snout: 'none', tail: 'curlLong' },
   leopard:  { plan: 'quad', c: '#f3c76f', belly: '#fff7e6', ear: 'pointy', snout: 'muzzle', tail: 'thin', spots: '#6d4c2f' },
   goat:     { plan: 'quad', c: '#f3ede3', ear: 'floppy', snout: 'tinynose', tail: 'pom', horns: 'goat', beard: true, slim: true },
@@ -2687,11 +2687,11 @@ const CRITTERS = {
   ant:      { plan: 'bug', c: '#a1453a', legs: 6, kind: 'ant', sheet: 'sprites/critters/ant.png', sh: 28 },
   crab:     { plan: 'bug', c: '#ef6a5a', legs: 6, kind: 'crab', sheet: 'sprites/critters/crab.png', sh: 26 },
   snake:    { plan: 'snake', c: '#86c25a', belly: '#e4f2d0', sheet: 'sprites/critters/snake.png', sh: 27 },
-  lizard:   { plan: 'snake', c: '#4fb8ac', belly: '#d6f2ee', legs: true },
+  lizard:   { plan: 'snake', c: '#4fb8ac', belly: '#d6f2ee', legs: true, sheet: 'sprites/critters/lizard.png', sh: 26 },
   snail:    { plan: 'snail', c: '#f2dfc4', shell: '#d79a5b', sheet: 'sprites/critters/snail.png', sh: 24 },
   turtle:   { plan: 'turtle', c: '#a9d67c', shell: '#5f9e3a' },
   octopus:  { plan: 'octo', c: '#f59bbd' },
-  ghost:    { plan: 'ghost', c: '#ffffff' },
+  ghost:    { plan: 'ghost', c: '#ffffff', sheet: 'sprites/critters/ghost.png', anim: 'fly', sh: 30 },
   jellippi: { plan: 'jelly', c: '#fdd835', sheet: 'sprites/critters/jellippi.png', anim: 'hopb', sh: 26 },
 };
 const CRITTER_BY_EMOJI = { '🐉': 'dragon' };
@@ -3854,7 +3854,7 @@ PixelSprite.init();
 const TileArt = {
   NAMES: ['tree0', 'tree1', 'tree2', 'sapling', 'gold_tree', 'lock_tree', 'rock0', 'rock1', 'rock2',
     'flower_red', 'flower_yellow', 'flower_pink', 'brick', 'gate', 'torch', 'thorn', 'chest',
-    'clover0', 'clover1', 'lucky0', 'lucky1', 'tent', 'forge', 'bridge', 'house', 'rockfill'],
+    'clover0', 'clover1', 'lucky0', 'lucky1', 'tent', 'forge', 'bridge', 'house', 'rockfill', 'clifftop'],
   img: {},
   started: false,
   start() {
@@ -5126,13 +5126,32 @@ const World = {
         const cracked = type === TILE.CRACK;
         const open = v => v != null && v !== TILE.CLIFF && v !== TILE.CRACK && v !== TILE.TREE;
         const U = open(nb(0, -1)), D = open(nb(0, 1)), L = open(nb(-1, 0)), R = open(nb(1, 0));
-        // 윗면 (바위 땅)
-        g.fillStyle = lin(0, T, cracked ? '#c1ab94' : '#b09a84', cracked ? '#a38c75' : '#937d68');
-        g.beginPath(); g.roundRect(X, Y, T, T, [U && L ? 5 : 0, U && R ? 5 : 0, D && R ? 5 : 0, D && L ? 5 : 0]); g.fill();
-        g.fillStyle = 'rgba(255,255,255,.18)';
-        for (let k = 0; k < 3; k++) { g.beginPath(); g.ellipse(X + 6 + r(41 + k) * 20, Y + 5 + r(44 + k) * 12, 2.5, 1.2, 0, 0, 7); g.fill(); }
-        // 길 쪽 아래: 깎아지른 절벽 면 (세로 줄)
-        if (D) {
+        // 윗면 (바위 땅). 3D 그림이 있으면 2 x 2 칸마다 되풀이되는 판판한 바위 무늬 (이어진다)
+        const top = TileArt.img.clifftop;
+        TileArt.start();
+        if (top) {
+          g.save(); g.beginPath(); g.roundRect(X, Y, T, T, [U && L ? 5 : 0, U && R ? 5 : 0, D && R ? 5 : 0, D && L ? 5 : 0]); g.clip();
+          g.drawImage(top, (x & 1) * top.width / 2, (y & 1) * top.height / 2, top.width / 2, top.height / 2, X, Y, T, T);
+          if (cracked) { g.fillStyle = 'rgba(255,240,220,.18)'; g.fillRect(X, Y, T, T); }
+          g.restore();
+        } else {
+          g.fillStyle = lin(0, T, cracked ? '#c1ab94' : '#b09a84', cracked ? '#a38c75' : '#937d68');
+          g.beginPath(); g.roundRect(X, Y, T, T, [U && L ? 5 : 0, U && R ? 5 : 0, D && R ? 5 : 0, D && L ? 5 : 0]); g.fill();
+          g.fillStyle = 'rgba(255,255,255,.18)';
+          for (let k = 0; k < 3; k++) { g.beginPath(); g.ellipse(X + 6 + r(41 + k) * 20, Y + 5 + r(44 + k) * 12, 2.5, 1.2, 0, 0, 7); g.fill(); }
+        }
+        // 길 쪽 아래: 깎아지른 절벽 면 (3D: 윗면 바위 무늬를 어둡게 + 세로 결, 옆 칸과 이어진다)
+        if (D && top) {
+          g.save(); g.beginPath(); g.roundRect(X - 0.3, Y + 18, T + 0.6, 14.3, [0, 0, R ? 4 : 0, L ? 4 : 0]); g.clip();
+          g.drawImage(top, (x & 1) * top.width / 2, top.height / 2, top.width / 2, top.height / 4, X, Y + 18, T, 14.3);
+          const sh = g.createLinearGradient(0, Y + 18, 0, Y + T);
+          sh.addColorStop(0, 'rgba(70,35,15,.45)'); sh.addColorStop(1, 'rgba(40,20,8,.72)');
+          g.fillStyle = sh; g.fillRect(X - 1, Y + 18, T + 2, 15);
+          g.strokeStyle = 'rgba(30,14,6,.35)'; g.lineWidth = 1.1;
+          for (let k = 0; k < 4; k++) { const lx = X + 4 + k * 8 + r(60 + k) * 3; g.beginPath(); g.moveTo(lx, Y + 21); g.lineTo(lx + 0.6, Y + 31); g.stroke(); }
+          g.fillStyle = 'rgba(255,230,200,.35)'; g.fillRect(X - 1, Y + 18, T + 2, 1.2); // 윗가장자리 밝게
+          g.restore();
+        } else if (D) {
           g.fillStyle = lin(19, T, '#7a5a43', '#4e3626');
           g.beginPath(); g.roundRect(X - 0.3, Y + 19, T + 0.6, 13.3, [0, 0, R ? 4 : 0, L ? 4 : 0]); g.fill();
           g.strokeStyle = 'rgba(40,24,14,.6)'; g.lineWidth = 0.68;
