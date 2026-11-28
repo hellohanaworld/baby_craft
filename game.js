@@ -475,7 +475,7 @@ function itemNames(def) {
 // net.js 는 한 주소로만 불러온다 (주소가 다르면 Firebase 가 두 번 시작되어 오류)
 const NET_URL = './net.js?v=28';
 // 게임 버전 (index.html 의 game.js?v= 와 같게). 서버가 방 정보에 적어 두면, 더 옛 버전 기기는 새로고침해서 새 버전으로
-const GAME_V = 126;
+const GAME_V = 127;
 
 // 지금은 모두 한 방에서 논다: ▶ 를 누르면 이 방으로 (열려 있으면 들어가고, 없으면 내가 연다).
 // 방 만들기 / 번호 넣기 버튼은 남겨 두되 누를 수 없게 해 둔다. null 로 바꾸면 예전처럼 방을 골라서 논다
@@ -6403,7 +6403,8 @@ const Hero = {
 const Toss = {
   list: [],
   MAX: 4.5,
-  throw(id, wx, wy) {
+  // drop: 가방에서 끌어다 놓기 (날아가지 않고 그 자리에 바로 놓인다)
+  throw(id, wx, wy, drop) {
     let dx = wx - Player.x, dy = wy - Player.y;
     const d = Math.hypot(dx, dy), max = this.MAX * T, min = 1.3 * T;
     if (d > max) { dx *= max / d; dy *= max / d; }
@@ -6415,23 +6416,27 @@ const Toss = {
     // 물/벽이면 나 쪽으로 당겨서 설 수 있는 곳에
     for (let i = 0; i < 12 && !World.canStand(x, y, 6); i++) { x -= dx / 12; y -= dy / 12; }
     if (!World.canStand(x, y, 6) || !Game.takeOne(id)) return false;
+    if (drop) { this.land(id, x, y); return true; }
     const dist = Math.hypot(x - Player.x, y - Player.y);
     this.list.push({ type: id, x0: Player.x, y0: Player.y - 10, x1: x, y1: y, t: 0, dur: 0.28 + dist / T * 0.06, h: 14 + dist * 0.25 });
-    Social.lastGive = { type: id, x, y, at: performance.now() }; // 내가 도로 줍지 않게
     if (x < Player.x - 4) Player.dir = 'left'; else if (x > Player.x + 4) Player.dir = 'right';
     Player.swingT = 0.25;
     Sfx.swing();
     return true;
+  },
+  // 땅에 놓기: 누구나 줍는 아이템 (손님은 방장에게 알린다)
+  land(type, x, y) {
+    Particles.dust(x, y);
+    if (Multi.isGuest) Multi.send('drop', 'H', type, Math.round(x), Math.round(y));
+    else Items.add(type, x, y, { dropped: true });
+    Sfx.pickup();
   },
   update(dt) {
     for (const f of [...this.list]) {
       f.t += dt;
       if (f.t < f.dur) continue;
       this.list.splice(this.list.indexOf(f), 1);
-      Particles.dust(f.x1, f.y1);
-      if (Multi.isGuest) Multi.send('drop', 'H', f.type, Math.round(f.x1), Math.round(f.y1));
-      else Items.add(f.type, f.x1, f.y1, { dropped: true });
-      Sfx.pickup();
+      this.land(f.type, f.x1, f.y1);
     }
   },
   pos(f) {
@@ -7732,7 +7737,7 @@ const Render = {
     if (!def) return;
     this.hd(c => {
       c.fillStyle = 'rgba(30,20,10,.22)';
-      c.beginPath(); c.ellipse(x, y + 9, 7 - up * 0.08, 2.4 - up * 0.03, 0, 0, Math.PI * 2); c.fill();
+      c.beginPath(); c.ellipse(x, y + 9, Math.max(3, 7 - up * 0.08), Math.max(1, 2.4 - up * 0.03), 0, 0, Math.PI * 2); c.fill();
       c.save();
       c.translate(x, y - 4 - up);
       c.rotate(p * Math.PI * 2 * (f.x1 < f.x0 ? -1 : 1));
@@ -9774,16 +9779,16 @@ const Game = {
       <div class="bag-acts">${acts.map(([act, icon, ko, en]) => `<button class="big-btn bag-act" data-act="${act}">${icon} ${tr(ko, en)}</button>`).join('')}</div>`;
   },
 
-  // 가방 칸을 눌렀다: 그대로 떼면 고르기, 끌면 그림이 손가락을 따라오고 (가방은 흐려진다)
-  // 가방 밖이나 멀리(90px) 가서 떼면 그 곳으로 던진다. 제자리 근처에서 떼면 그만둔다
+  // 가방 칸을 눌렀다: 그대로 떼면 고르기, 끌면 그림이 손가락 아래에 붙어 따라온다 (가방은 흐려진다)
+  // 가방 밖이나 멀리(90px) 가서 떼면 그 자리 땅에 놓는다. 제자리 근처에서 떼면 그만둔다
   bagPress(b, e) {
     const cell = b.dataset.cell, id = cell.startsWith('slot:') ? this.equip[cell.slice(5)] : cell;
     if (!id || id === 'hand' || this.state !== 'play') { this.bagSelect(cell); return; }
     const x0 = e.clientX, y0 = e.clientY, panel = $('#bag-panel');
     let ghost = null;
     try { b.setPointerCapture(e.pointerId); } catch { /* 미지원 */ }
-    const inPanel = ev => { const r = panel.getBoundingClientRect(); return ev.clientX >= r.left && ev.clientX <= r.right && ev.clientY >= r.top && ev.clientY <= r.bottom; };
-    const far = ev => Math.hypot(ev.clientX - x0, ev.clientY - y0) > 90;
+    const inPanel = (x, y) => { const r = panel.getBoundingClientRect(); return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom; };
+    const far = (x, y) => Math.hypot(x - x0, y - y0) > 90;
     const move = ev => {
       if (!ghost && Math.hypot(ev.clientX - x0, ev.clientY - y0) < 12) return;
       if (!ghost) {
@@ -9795,7 +9800,6 @@ const Game = {
       }
       ghost.style.left = `${ev.clientX}px`;
       ghost.style.top = `${ev.clientY}px`;
-      ghost.classList.toggle('go', !inPanel(ev) || far(ev));
     };
     const end = ev => {
       b.removeEventListener('pointermove', move);
@@ -9804,10 +9808,11 @@ const Game = {
       if (!ghost) { if (ev.type === 'pointerup') this.bagSelect(cell); return; }
       ghost.remove();
       panel.classList.remove('dragging');
-      if (ev.type !== 'pointerup' || (inPanel(ev) && !far(ev))) return;
+      if (ev.type !== 'pointerup' || (inPanel(ev.clientX, ev.clientY) && !far(ev.clientX, ev.clientY))) return;
+      // 손가락 아래 땅에 놓는다
       const rc = Render.canvas.getBoundingClientRect();
       const wx = Render.camX + (ev.clientX - rc.left) / Render.scale, wy = Render.camY + (ev.clientY - rc.top) / Render.scale;
-      if (Toss.throw(id, wx, wy)) {
+      if (Toss.throw(id, wx, wy, true)) {
         if (this.bagSel === cell) this.bagSel = null;
         this.renderBag();
       } else Sfx.soft();
